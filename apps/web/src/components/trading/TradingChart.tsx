@@ -280,12 +280,14 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
 
   useEffect(() => {
     let chart: any = null
-    let priceInterval: ReturnType<typeof setInterval>
+    let disposed = false
+    let priceInterval: ReturnType<typeof setInterval> | undefined
 
     async function initChart() {
-      if (!chartContainerRef.current) return
+      if (!chartContainerRef.current || disposed) return
 
       const { createChart, ColorType, CrosshairMode, LineStyle, CandlestickSeries, LineSeries, AreaSeries, BarSeries } = await import('lightweight-charts')
+      if (disposed || !chartContainerRef.current) return
 
       const tc = THEME_COLORS[theme]
       chart = createChart(chartContainerRef.current, {
@@ -323,6 +325,7 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       if (asset.source === 'BINANCE' && asset.marketSymbol) {
         try {
           const remoteCandles = await fetchBinanceCandles(asset.marketSymbol, BINANCE_INTERVAL_BY_TIMEFRAME[selectedTf.seconds] ?? '1m', 150)
+          if (disposed) return
           candles = remoteCandles.map((candle) => ({
             ...candle,
             time: candle.time + BRT_OFFSET,
@@ -425,6 +428,7 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       let lastSecsLeft = -1
 
       priceInterval = setInterval(() => {
+        if (disposed || !chartRef.current) return
         const now = nowSec()
         const liveDisplayPrice = displayPriceRef.current
         const decimals = liveDisplayPrice > 10 ? 3 : 5
@@ -486,19 +490,20 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
     initChart()
 
     const resizeObserver = new ResizeObserver(() => {
-      if (chartRef.current && chartContainerRef.current) {
-        chartRef.current.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-          height: chartContainerRef.current.clientHeight,
-        })
-      }
+      if (disposed || !chartRef.current || !chartContainerRef.current) return
+      chartRef.current.applyOptions({
+        width: chartContainerRef.current.clientWidth,
+        height: chartContainerRef.current.clientHeight,
+      })
     })
 
     if (chartContainerRef.current) resizeObserver.observe(chartContainerRef.current)
 
     return () => {
-      clearInterval(priceInterval)
+      disposed = true
+      if (priceInterval) clearInterval(priceInterval)
       resizeObserver.disconnect()
+      seriesRef.current = null
       if (chartRef.current) {
         chartRef.current.remove()
         chartRef.current = null
