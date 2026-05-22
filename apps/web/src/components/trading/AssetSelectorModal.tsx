@@ -1,0 +1,213 @@
+'use client'
+
+import { useState, useMemo } from 'react'
+import { X, Search, Star, ChevronUp, ChevronDown } from 'lucide-react'
+import { ASSETS, DEFAULT_FAVORITES, type Asset } from '@/lib/mockData'
+import { cn } from '@/lib/utils'
+import { FlagPair } from '@/components/ui/FlagPair'
+
+interface AssetSelectorModalProps {
+  selectedAsset: Asset
+  assets?: Asset[]
+  onSelect: (asset: Asset) => void
+  onClose: () => void
+}
+
+type Category = 'Moedas' | 'Cripto' | 'Matérias-Primas' | 'Ações'
+
+const CATEGORIES: Category[] = ['Moedas', 'Cripto', 'Matérias-Primas', 'Ações']
+
+export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, onClose }: AssetSelectorModalProps) {
+  const [activeCategory, setActiveCategory] = useState<Category>('Moedas')
+  const [search, setSearch] = useState('')
+  const [showFavOnly, setShowFavOnly] = useState(false)
+  const [favorites, setFavorites] = useState<Set<string>>(new Set(DEFAULT_FAVORITES))
+
+  const filtered = useMemo(() => {
+    const sourceOrder: Record<'BINANCE' | 'INTERNAL', number> = { BINANCE: 0, INTERNAL: 1 }
+    const typeOrder: Record<Asset['type'], number> = { Crypto: 0, OTC: 1, Forex: 2 }
+
+    return assets
+      .filter((a) => {
+        if (a.category !== activeCategory) return false
+        if (showFavOnly && !favorites.has(a.id)) return false
+        if (search) {
+          const query = search.toLowerCase()
+          const haystack = `${a.symbol} ${a.label} ${a.marketSymbol ?? ''}`.toLowerCase()
+          if (!haystack.includes(query)) return false
+        }
+        return true
+      })
+      .sort((a, b) => {
+        const sourceDelta = sourceOrder[a.source ?? 'INTERNAL'] - sourceOrder[b.source ?? 'INTERNAL']
+        if (sourceDelta !== 0) return sourceDelta
+        const typeDelta = typeOrder[a.type] - typeOrder[b.type]
+        if (typeDelta !== 0) return typeDelta
+        return b.payout - a.payout
+      })
+  }, [assets, activeCategory, search, showFavOnly, favorites])
+
+  function toggleFavorite(id: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    setFavorites((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  return (
+    <div className="absolute top-0 left-0 z-40 flex flex-col bg-[#151822] border-r border-[#2a2e3b] shadow-2xl"
+      style={{ width: 640, height: '100%' }}
+    >
+      {/* Active asset tab + close */}
+      <div className="flex items-center gap-2 px-3 pt-3 pb-2">
+        <div className="flex items-center gap-2 bg-[#1d2130] border border-blue-500/40 rounded-lg px-3 py-1.5">
+          <button onClick={onClose} className="w-5 h-5 flex items-center justify-center rounded bg-blue-600 text-white">
+            <X size={10} />
+          </button>
+          <span className="text-xs leading-none">{selectedAsset.flag1}{selectedAsset.flag2}</span>
+          <span className="text-xs font-semibold text-white">{selectedAsset.label}</span>
+          <span className="text-xs font-bold text-orange-400">{selectedAsset.payout}%</span>
+          <ChevronDown size={12} className="text-[#8b8f9a]" />
+        </div>
+      </div>
+
+      {/* Panel header */}
+      <div className="flex items-center justify-between px-4 pb-3">
+        <h2 className="text-sm font-bold text-white">Selecione o par de negociação</h2>
+        <button onClick={onClose} className="text-[#8b8f9a] hover:text-white transition-colors">
+          <X size={16} />
+        </button>
+      </div>
+
+      {/* Category tabs */}
+      <div className="flex items-center gap-1 px-4 pb-3">
+        {CATEGORIES.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setActiveCategory(cat)}
+            className={cn(
+              'px-3 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-colors',
+              activeCategory === cat
+                ? 'bg-blue-600 text-white'
+                : 'text-[#8b8f9a] hover:text-white hover:bg-white/5'
+            )}
+          >
+            {cat.toUpperCase()}
+          </button>
+        ))}
+      </div>
+
+      {/* Search + favorites */}
+      <div className="flex items-center gap-2 px-4 pb-3">
+        {/* Favorites toggle */}
+        <button
+          onClick={() => setShowFavOnly((v) => !v)}
+          className={cn(
+            'flex items-center gap-1.5 px-3 h-9 rounded-lg border text-xs font-bold flex-shrink-0 transition-colors',
+            showFavOnly
+              ? 'border-yellow-500/60 bg-yellow-500/10 text-yellow-400'
+              : 'border-[#2a2e3b] text-[#8b8f9a] hover:border-yellow-500/40 hover:text-yellow-400'
+          )}
+        >
+          <Star size={13} className={showFavOnly ? 'fill-yellow-400 text-yellow-400' : ''} />
+          <span>{favorites.size}</span>
+        </button>
+
+        {/* Search */}
+        <div className="flex-1 relative">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b8f9a]" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Procurar"
+            className="w-full h-9 bg-[#1d2130] border border-[#2a2e3b] rounded-lg pl-8 pr-3 text-sm text-white placeholder-[#8b8f9a] outline-none focus:border-blue-500/50 transition-colors"
+          />
+        </div>
+      </div>
+
+      {/* Table header */}
+      <div className="grid grid-cols-[1fr_100px_90px_80px] px-4 pb-1">
+        <div className="text-[11px] text-[#8b8f9a]">Nome</div>
+        <div className="text-[11px] text-[#8b8f9a]">Mudança 24h</div>
+        <div className="flex items-center gap-0.5 text-[11px] text-[#8b8f9a]">
+          Lucro 1+ min
+          <ChevronDown size={10} />
+        </div>
+        <div className="text-[11px] text-[#8b8f9a]">5+ min</div>
+      </div>
+
+      {/* Asset list */}
+      <div className="flex-1 overflow-y-auto">
+        {filtered.length === 0 ? (
+          <div className="flex items-center justify-center h-32 text-sm text-[#8b8f9a]">
+            Nenhum ativo encontrado
+          </div>
+        ) : (
+          filtered.map((asset, index) => {
+            const isActive = asset.id === selectedAsset.id
+            const isFav = favorites.has(asset.id)
+            const isUp = asset.change24h >= 0
+            const prevAsset = filtered[index - 1]
+            const showGroupDivider = index > 0 && asset.source !== prevAsset?.source
+            const groupLabel = asset.source === 'BINANCE' ? 'BINANCE' : asset.type === 'Crypto' ? 'CRIPTO' : asset.type
+
+            return (
+              <div key={asset.id}>
+                {showGroupDivider && (
+                  <div className="px-4 py-2 bg-[#1a1e2e] border-y border-[#2a2e3b]">
+                    <span className="text-[10px] font-bold text-[#8b8f9a] tracking-widest uppercase">
+                      {groupLabel}
+                    </span>
+                  </div>
+                )}
+                <div
+                  onClick={() => { onSelect(asset); onClose() }}
+                  className={cn(
+                    'grid grid-cols-[1fr_100px_90px_80px] items-center px-4 py-2.5 cursor-pointer transition-colors border-b border-[#1e2235]',
+                    isActive ? 'bg-[#252a3a]' : 'hover:bg-white/5'
+                  )}
+                >
+                {/* Name */}
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <button
+                    onClick={(e) => toggleFavorite(asset.id, e)}
+                    className="flex-shrink-0 transition-colors"
+                  >
+                    <Star
+                      size={14}
+                      className={isFav ? 'fill-yellow-400 text-yellow-400' : 'text-[#3a3f50] hover:text-yellow-400'}
+                    />
+                  </button>
+                  <FlagPair code1={asset.code1} code2={asset.code2} size={22} />
+                  <span className="text-sm font-semibold text-white truncate">{asset.symbol}</span>
+                  {asset.type === 'OTC' && (
+                    <span className="text-[9px] text-[#8b8f9a] border border-[#3a3f50] px-1 py-0.5 rounded flex-shrink-0">OTC</span>
+                  )}
+                  {asset.source === 'BINANCE' && (
+                    <span className="text-[9px] text-green-400 border border-green-400/30 px-1 py-0.5 rounded flex-shrink-0">BINANCE</span>
+                  )}
+                </div>
+
+                {/* 24h change */}
+                <div className={cn('flex items-center gap-1 text-xs font-semibold', isUp ? 'text-green-400' : 'text-red-400')}>
+                  {isUp ? <ChevronUp size={12} className="flex-shrink-0" /> : <ChevronDown size={12} className="flex-shrink-0" />}
+                  {isUp ? '+' : ''}{asset.change24h.toFixed(2)}%
+                </div>
+
+                {/* Payout 1min */}
+                <div className="text-sm font-bold text-orange-400">{asset.payout}%</div>
+
+                {/* Payout 5min */}
+                <div className="text-sm font-bold text-orange-400">{asset.payout5min}%</div>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}

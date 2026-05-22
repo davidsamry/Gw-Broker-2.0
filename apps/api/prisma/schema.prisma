@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum AccountType {
+  DEMO
+  REAL
+}
+
+enum Direction {
+  CALL
+  PUT
+}
+
+enum OperationStatus {
+  OPEN
+  WON
+  LOST
+  CANCELLED
+}
+
+enum TransactionType {
+  DEMO_CREDIT
+  DEPOSIT
+  WITHDRAWAL
+  TRADE_WIN
+  TRADE_LOSS
+  BONUS
+}
+
+enum KycStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  password     String
+  name         String
+  phone        String?
+  country      String?
+  kycStatus    KycStatus  @default(PENDING)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  accounts     Account[]
+
+  @@map("users")
+}
+
+model Account {
+  id        String      @id @default(cuid())
+  userId    String
+  type      AccountType
+  balance   Decimal     @default(0) @db.Decimal(18, 2)
+  currency  String      @default("BRL")
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  operations   Operation[]
+  transactions Transaction[]
+
+  @@unique([userId, type])
+  @@map("accounts")
+}
+
+model Operation {
+  id          String          @id @default(cuid())
+  accountId   String
+  assetId     String
+  assetSymbol String
+  direction   Direction
+  amount      Decimal         @db.Decimal(18, 2)
+  payout      Int
+  entryPrice  Decimal         @db.Decimal(18, 5)
+  exitPrice   Decimal?        @db.Decimal(18, 5)
+  profit      Decimal?        @db.Decimal(18, 2)
+  status      OperationStatus @default(OPEN)
+  expiresAt   DateTime
+  openedAt    DateTime        @default(now())
+  closedAt    DateTime?
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, status])
+  @@index([expiresAt, status])
+  @@map("operations")
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  accountId   String
+  type        TransactionType
+  amount      Decimal         @db.Decimal(18, 2)
+  description String?
+  createdAt   DateTime        @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@map("transactions")
+}
