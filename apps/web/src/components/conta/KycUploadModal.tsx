@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { X, Upload, CheckCircle2, AlertCircle } from 'lucide-react'
+import { X, Upload, CheckCircle2, AlertCircle, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/store/auth'
@@ -39,6 +39,7 @@ export function KycUploadModal({ onClose, onDone }: Props) {
   })
   const [error, setError]     = useState('')
   const [loading, setLoading] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
 
   const allReady = SLOTS.every((s) => files[s.key])
 
@@ -67,10 +68,24 @@ export function KycUploadModal({ onClose, onDone }: Props) {
         const u = useAuthStore.getState().user
         if (u) useAuthStore.setState({ user: { ...u, kycStatus: 'SUBMITTED' } })
       }
-      onDone()
+      setSubmitted(true)
+      // Auto-close after a moment so the parent re-renders with new status.
+      setTimeout(() => onDone(), 2500)
     } catch (err: any) {
-      const code = err?.response?.data?.error
-      setError(code === 'VALIDATION_ERROR' ? 'Algum arquivo é inválido (formato ou tamanho).' : 'Erro ao enviar. Tente novamente.')
+      const code   = err?.response?.data?.error
+      const status = err?.response?.status
+      // Map common failure modes to actionable messages.
+      if (code === 'VALIDATION_ERROR') {
+        setError('Algum arquivo é inválido: verifique formato (JPG/PNG/WEBP) e tamanho (até 3MB cada).')
+      } else if (status === 413) {
+        setError('Imagens muito grandes. Reduza a qualidade ou tamanho (até 3MB cada).')
+      } else if (status === 401) {
+        setError('Sessão expirou. Faça login novamente.')
+      } else if (!err?.response) {
+        setError('Sem conexão com o servidor. Verifique sua internet.')
+      } else {
+        setError(`Erro ao enviar (HTTP ${status ?? '???'}). Tente novamente em instantes.`)
+      }
     } finally {
       setLoading(false)
     }
@@ -87,45 +102,71 @@ export function KycUploadModal({ onClose, onDone }: Props) {
           <button onClick={onClose} className="text-[#8b8f9a] hover:text-white"><X size={18} /></button>
         </div>
 
-        <div className="overflow-y-auto px-4 sm:px-5 py-4 sm:py-5 flex flex-col gap-4">
-          <p className="text-xs text-[#ccc] leading-relaxed">
-            Envie 3 imagens claras e legíveis. Análise em até 48 horas.
-            JPG/PNG/WEBP, até 3MB por foto.
-          </p>
-
-          <div className="grid grid-cols-3 gap-2 sm:gap-3">
-            {SLOTS.map((slot) => (
-              <FilePicker
-                key={slot.key}
-                slot={slot}
-                dataUrl={files[slot.key]}
-                onPick={(f) => handleFile(slot.key, f)}
-                onClear={() => setFiles((prev) => ({ ...prev, [slot.key]: null }))}
-              />
-            ))}
-          </div>
-
-          {error && (
-            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30">
-              <AlertCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
-              <span className="text-xs text-red-400">{error}</span>
+        {submitted ? (
+          // ── Success view ─────────────────────────────────────────────────
+          <div className="px-5 py-8 flex flex-col items-center text-center gap-3">
+            <div className="w-14 h-14 rounded-full bg-green-500/15 border border-green-500/40 flex items-center justify-center">
+              <CheckCircle2 size={28} className="text-green-400" />
             </div>
-          )}
-        </div>
+            <h3 className="text-base font-bold text-white">Enviado com sucesso!</h3>
+            <p className="text-xs text-[#ccc] leading-relaxed max-w-xs">
+              Seus documentos estão na fila de análise. Você receberá uma resposta
+              em até <strong>48 horas</strong>.
+            </p>
+            <div className="flex items-center gap-1.5 text-[11px] text-blue-400 mt-1">
+              <Clock size={12} />
+              Status atual: <span className="font-bold">Em análise</span>
+            </div>
+            <button
+              onClick={onDone}
+              className="mt-3 px-5 h-9 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white transition-colors"
+            >
+              Fechar
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-y-auto px-4 sm:px-5 py-4 sm:py-5 flex flex-col gap-4">
+              <p className="text-xs text-[#ccc] leading-relaxed">
+                Envie 3 imagens claras e legíveis. Análise em até 48 horas.
+                JPG/PNG/WEBP, até 3MB por foto.
+              </p>
 
-        <div className="flex items-center gap-2 px-5 py-4 border-t border-[#2a2e3b] flex-shrink-0">
-          <button onClick={onClose} className="flex-1 h-10 rounded-lg border border-[#2a2e3b] text-xs font-semibold text-[#8b8f9a] hover:text-white">
-            Cancelar
-          </button>
-          <button
-            onClick={submit}
-            disabled={!allReady || loading}
-            className="flex-1 h-10 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            <Upload size={13} />
-            {loading ? 'Enviando…' : 'Enviar para análise'}
-          </button>
-        </div>
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                {SLOTS.map((slot) => (
+                  <FilePicker
+                    key={slot.key}
+                    slot={slot}
+                    dataUrl={files[slot.key]}
+                    onPick={(f) => handleFile(slot.key, f)}
+                    onClear={() => setFiles((prev) => ({ ...prev, [slot.key]: null }))}
+                  />
+                ))}
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30">
+                  <AlertCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
+                  <span className="text-xs text-red-400">{error}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 px-5 py-4 border-t border-[#2a2e3b] flex-shrink-0">
+              <button onClick={onClose} className="flex-1 h-10 rounded-lg border border-[#2a2e3b] text-xs font-semibold text-[#8b8f9a] hover:text-white">
+                Cancelar
+              </button>
+              <button
+                onClick={submit}
+                disabled={!allReady || loading}
+                className="flex-1 h-10 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Upload size={13} />
+                {loading ? 'Enviando…' : 'Enviar para análise'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
