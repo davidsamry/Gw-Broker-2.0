@@ -5,6 +5,7 @@ import { Bell, ChevronDown, Plus, X, GraduationCap, Gem } from 'lucide-react'
 import { type Asset } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { AccountDropdown } from './AccountDropdown'
+import { Logo } from './Logo'
 import { FlagPair } from '@/components/ui/FlagPair'
 
 interface HeaderProps {
@@ -61,15 +62,8 @@ export function Header({
       {/* Row 1 — Main bar */}
       <div className="h-12 flex items-center bg-[#1d2130] border-b border-[#2a2e3b] px-4 gap-4">
         {/* Logo */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <div className="w-7 h-7 bg-white rounded flex items-center justify-center">
-            <span className="text-[#1d2130] text-xs font-black">V</span>
-          </div>
-          <div>
-            <span className="text-white font-bold text-sm tracking-widest">VERTEX</span>
-            <div className="text-[9px] text-[#8b8f9a] tracking-widest font-medium -mt-0.5">WEB TRADING PLATFORM</div>
-          </div>
-        </div>
+        <Logo size="md" subtitle />
+
 
         <div className="flex-1" />
 

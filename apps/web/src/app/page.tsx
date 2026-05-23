@@ -6,6 +6,7 @@ import { useAuthStore, useCurrentAccount } from '@/store/auth'
 import { GraduationCap, Gem, Plus, Bell, ChevronDown } from 'lucide-react'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Header } from '@/components/layout/Header'
+import { Logo } from '@/components/layout/Logo'
 import { MobileNav } from '@/components/layout/MobileNav'
 import { TradingChart } from '@/components/trading/TradingChart'
 import { TradingPanel } from '@/components/trading/TradingPanel'
@@ -219,12 +220,8 @@ export default function TradingPage() {
         {/* Mobile header */}
         <header className="flex items-center justify-between px-4 h-12 bg-[#1d2130] border-b border-[#2a2e3b] flex-shrink-0">
           {/* Logo */}
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-white rounded flex items-center justify-center">
-              <span className="text-[#1d2130] text-xs font-black">V</span>
-            </div>
-            <span className="text-white font-bold text-sm tracking-widest">VERTEX</span>
-          </div>
+          <Logo size="sm" />
+
 
           {/* Right: balance + deposit */}
           <div className="flex items-center gap-2">
