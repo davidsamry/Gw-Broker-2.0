@@ -604,7 +604,7 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
   const fmt = (v: number) => v.toFixed(displayPrice > 10 ? 3 : 5)
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-[#151822] relative overflow-hidden" onClick={() => { setTfOpen(false); setChartTypeOpen(false) }} onKeyDown={() => {}}>
+    <div className="flex-1 flex flex-col min-h-0 bg-[#151822] relative overflow-hidden" onClick={() => { setTfOpen(false); setChartTypeOpen(false); setDrawingsOpen(false); setIndicadoresOpen(false) }} onKeyDown={() => {}}>
 
       {/* Top info bar */}
       <div className="absolute top-2 left-3 z-10 flex items-center gap-3 pointer-events-none">
@@ -647,17 +647,6 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         </div>
       )}
 
-      {/* Drawings panel overlay */}
-      {drawingsOpen && (
-        <DrawingsPanel
-          onClose={() => setDrawingsOpen(false)}
-          onSelectTool={selectDrawingTool}
-          onClearAll={clearAllDrawings}
-          activeTool={activeTool}
-          hasDrawings={drawings.length > 0}
-        />
-      )}
-
       {/* Drawing overlays (vertical line, trend line, fibonacci) — anchored
           to chart coords via timeToCoordinate / priceToCoordinate. */}
       {chartReady && drawings
@@ -690,15 +679,6 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         </div>
       )}
 
-      {/* Indicators panel overlay */}
-      {indicadoresOpen && (
-        <IndicadoresPanel
-          onClose={() => setIndicadoresOpen(false)}
-          activeIds={activeIndicators}
-          onToggle={toggleIndicator}
-          onClearAll={clearAllIndicators}
-        />
-      )}
 
       {/* One marker per active trade — each marker has its own state.
           stackIdx offsets the chip vertically when 2+ trades share the same candle. */}
@@ -754,15 +734,25 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       {/* Bottom left toolbar — vertical column, raised above the chart attribution */}
       <div className="absolute bottom-24 left-3 flex flex-col items-start gap-1.5 z-10">
         {/* Pencil / Drawings */}
-        <button
-          onClick={() => setDrawingsOpen(v => !v)}
-          className={cn(
-            'w-9 h-9 flex items-center justify-center rounded border transition-colors',
-            drawingsOpen ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#1d2130] border-[#2a2e3b] text-[#8b8f9a] hover:text-white'
+        <div className="relative">
+          <button
+            onClick={(e) => { e.stopPropagation(); setDrawingsOpen(v => !v); setIndicadoresOpen(false); setTfOpen(false); setChartTypeOpen(false) }}
+            className={cn(
+              'w-9 h-9 flex items-center justify-center rounded border transition-colors',
+              drawingsOpen ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#1d2130] border-[#2a2e3b] text-[#8b8f9a] hover:text-white'
+            )}
+          >
+            <Pencil size={16} />
+          </button>
+          {drawingsOpen && (
+            <DrawingsPanel
+              onSelectTool={(id) => { selectDrawingTool(id); setDrawingsOpen(false) }}
+              onClearAll={() => { clearAllDrawings(); setDrawingsOpen(false) }}
+              activeTool={activeTool}
+              hasDrawings={drawings.length > 0}
+            />
           )}
-        >
-          <Pencil size={16} />
-        </button>
+        </div>
 
         {/* Timeframe selector */}
         <div className="relative">
@@ -826,15 +816,24 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         </div>
 
         {/* Indicators toggle */}
-        <button
-          onClick={() => { setIndicadoresOpen(v => !v); setDrawingsOpen(false) }}
-          className={cn(
-            'w-9 h-9 flex items-center justify-center rounded border transition-colors',
-            indicadoresOpen ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#1d2130] border-[#2a2e3b] text-[#8b8f9a] hover:text-white'
+        <div className="relative">
+          <button
+            onClick={(e) => { e.stopPropagation(); setIndicadoresOpen(v => !v); setDrawingsOpen(false); setTfOpen(false); setChartTypeOpen(false) }}
+            className={cn(
+              'w-9 h-9 flex items-center justify-center rounded border transition-colors',
+              indicadoresOpen ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#1d2130] border-[#2a2e3b] text-[#8b8f9a] hover:text-white'
+            )}
+          >
+            <Activity size={16} />
+          </button>
+          {indicadoresOpen && (
+            <IndicadoresPanel
+              activeIds={activeIndicators}
+              onToggle={toggleIndicator}
+              onClearAll={() => { clearAllIndicators(); setIndicadoresOpen(false) }}
+            />
           )}
-        >
-          <Activity size={16} />
-        </button>
+        </div>
 
         {/* Crosshair */}
         <button className="w-9 h-9 flex items-center justify-center rounded bg-[#1d2130] border border-[#2a2e3b] text-[#8b8f9a] hover:text-white transition-colors">
