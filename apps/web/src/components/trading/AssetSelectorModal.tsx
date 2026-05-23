@@ -57,9 +57,20 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
   }
 
   return (
-    <div className="absolute top-0 left-0 z-40 flex flex-col bg-[#151822] border-r border-[#2a2e3b] shadow-2xl"
-      style={{ width: 640, height: '100%' }}
+    <div
+      className="fixed inset-0 z-[60] flex md:items-stretch md:justify-start items-end bg-black/50 backdrop-blur-sm animate-fadeIn"
+      onClick={onClose}
     >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={cn(
+          'flex flex-col bg-[#151822] border-blue-500/15 shadow-2xl shadow-blue-500/10',
+          'animate-scaleIn',
+          // desktop: tall left panel; mobile: bottom sheet
+          'md:w-[640px] md:h-full md:border-r md:rounded-none',
+          'w-full max-h-[88vh] rounded-t-2xl border-t border-[#2a2e3b]'
+        )}
+      >
       {/* Active asset tab + close */}
       <div className="flex items-center gap-2 px-3 pt-3 pb-2">
         <div className="flex items-center gap-2 bg-[#1d2130] border border-blue-500/40 rounded-lg px-3 py-1.5">
@@ -207,6 +218,7 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
             )
           })
         )}
+      </div>
       </div>
     </div>
   )

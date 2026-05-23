@@ -29,9 +29,9 @@ const FAQ_RETIRADA = [
 ]
 
 const MOCK_WITHDRAWALS = [
-  { id: '40741052802', date: '20.05.2026', time: '17:04:05', status: 'pending', method: 'USDT', amount: '-200.000,00 R$' },
-  { id: '40739150181', date: '04.03.2026', time: '03:10:17', status: 'cancelled', method: 'USDT', amount: '-100.000,00 R$' },
-  { id: '40739150061', date: '04.03.2026', time: '03:01:54', status: 'cancelled', method: 'USDT', amount: '-100.000,00 R$' },
+  { id: '40741052802', date: '20.05.2026', time: '17:04:05', status: 'pending', method: 'USDT', amount: '-R$ 200.000,00' },
+  { id: '40739150181', date: '04.03.2026', time: '03:10:17', status: 'cancelled', method: 'USDT', amount: '-R$ 100.000,00' },
+  { id: '40739150061', date: '04.03.2026', time: '03:01:54', status: 'cancelled', method: 'USDT', amount: '-R$ 100.000,00' },
 ]
 
 function FloatingInput({
@@ -391,12 +391,12 @@ function RetiradaTab() {
           <p className="text-sm font-semibold text-white mb-5">Conta:</p>
           <div className="mb-4">
             <div className="text-xs text-[#8b8f9a] mb-1">Na conta:</div>
-            <div className="text-2xl font-bold text-white">108.289,70 R$</div>
+            <div className="text-2xl font-bold text-white">R$ 108.289,70</div>
           </div>
           <div className="border-t border-dashed border-[#2a2e3b] my-4" />
           <div>
             <div className="text-xs text-[#8b8f9a] mb-1">Disponível para retirada:</div>
-            <div className="text-2xl font-bold text-white">108.289,70 R$</div>
+            <div className="text-2xl font-bold text-white">R$ 108.289,70</div>
           </div>
         </div>
 
@@ -571,11 +571,11 @@ export function ContaPage({ initialTab = 'minha-conta' }: { initialTab?: ContaTa
         )}
         <div className="text-right">
           <div className="text-xs text-[#8b8f9a]">Disponível para retirada</div>
-          <div className="text-sm font-bold text-white">108.289,70 R$</div>
+          <div className="text-sm font-bold text-white">R$ 108.289,70</div>
         </div>
         <div className="text-right">
           <div className="text-xs text-[#8b8f9a]">Na conta</div>
-          <div className="text-sm font-bold text-white">108.289,70 R$</div>
+          <div className="text-sm font-bold text-white">R$ 108.289,70</div>
         </div>
       </div>
 

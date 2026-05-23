@@ -1,0 +1,162 @@
+'use client'
+
+import { useState } from 'react'
+import { ChevronDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { type Asset, type OpenTrade, type ChartTradeEvent } from '@/lib/mockData'
+import { FlagPair } from '@/components/ui/FlagPair'
+import { TradingInputsCompact } from './TradingInputsCompact'
+import { api } from '@/lib/api'
+import { cn } from '@/lib/utils'
+
+const TIME_OPTIONS = [
+  { label: '01:00', value: 60   },
+  { label: '05:00', value: 300  },
+  { label: '15:00', value: 900  },
+]
+const MIN_INVESTMENT = 10
+const BRT_OFFSET     = -3 * 3600
+
+interface TradingCompactCardProps {
+  asset:           Asset
+  marketPrice?:    number
+  accountId?:      string
+  onOpenSelector?: () => void  // opens AssetSelectorModal
+  onTradePlaced?:  (trade: ChartTradeEvent | null) => void
+}
+
+export function TradingCompactCard({
+  asset, marketPrice, accountId, onOpenSelector, onTradePlaced,
+}: TradingCompactCardProps) {
+  const [investment, setInvestment] = useState(10)
+  const [timeSec, setTimeSec]       = useState(60)
+  const [placing, setPlacing]       = useState(false)
+  const [tradeError, setTradeError] = useState('')
+
+  const livePrice = marketPrice ?? asset.price
+  const payout    = asset.payout / 100
+  const profit    = (investment * payout).toFixed(2).replace('.', ',')
+
+  function adjustInvestment(delta: number) {
+    setInvestment((v) => Math.max(MIN_INVESTMENT, v + delta))
+  }
+
+  async function placeTrade(direction: 'CALL' | 'PUT') {
+    if (!accountId || placing) return
+    setTradeError('')
+    setPlacing(true)
+    try {
+      const entryTime  = Math.floor(Date.now() / 1000) + BRT_OFFSET
+      const expiryTime = entryTime + timeSec
+      const entryPrice = asset.source === 'BINANCE' ? livePrice : asset.price
+
+      const res = await api.post('/operations', {
+        accountId,
+        assetId:          asset.id,
+        assetSymbol:      asset.label,
+        marketSymbol:     asset.source === 'BINANCE' ? asset.marketSymbol : undefined,
+        direction,
+        amount:           investment,
+        payout:           asset.payout,
+        entryPrice,
+        expiresInSeconds: timeSec,
+      })
+
+      const operationId: string = res.data?.operation?.id ?? `local-${Date.now()}`
+
+      onTradePlaced?.({
+        id: operationId,
+        entryPrice, entryTime, expiryTime,
+        direction, amount: investment, payout: asset.payout,
+        status: 'OPEN',
+      })
+
+      // Poll for resolution after expiry, then signal the chart.
+      setTimeout(async () => {
+        try {
+          const { data } = await api.get(`/operations/${operationId}`)
+          const op    = data?.operation ?? data
+          const won   = op?.status === 'WON'
+          const prof  = won ? parseFloat(op?.profit ?? '0') : 0
+          onTradePlaced?.({
+            id: operationId,
+            entryPrice, entryTime, expiryTime,
+            direction, amount: investment, payout: asset.payout,
+            status: 'RESOLVED', won, profit: prof,
+          })
+          setTimeout(() => onTradePlaced?.(null), 4000)
+        } catch {
+          setTimeout(() => onTradePlaced?.(null), 4000)
+        }
+      }, timeSec * 1000)
+    } catch (err: any) {
+      const code = err.response?.data?.error
+      if (code === 'INSUFFICIENT_BALANCE') setTradeError('Saldo insuficiente.')
+      else setTradeError('Erro ao abrir operação.')
+    } finally {
+      setPlacing(false)
+    }
+  }
+
+  return (
+    <div className="flex-shrink-0 bg-[#1d2130] border-t border-[#2a2e3b] p-3 flex flex-col gap-3">
+      {/* Asset row — clicking opens AssetSelectorModal */}
+      <button
+        onClick={onOpenSelector}
+        className="flex items-center justify-between px-3 py-2.5 rounded-xl border border-[#2a2e3b] bg-[#252a3a]/40 hover:border-blue-500/40 hover:bg-[#252a3a]/70 transition-all active:scale-[0.99]"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <FlagPair code1={asset.code1} code2={asset.code2} size={20} />
+          <span className="text-sm font-bold text-white truncate">{asset.symbol}</span>
+          <span className="text-sm font-bold text-green-400 flex-shrink-0">{asset.payout}%</span>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-[10px] font-bold text-blue-400">+R$ {profit}</span>
+          <ChevronDown size={14} className="text-[#8b8f9a]" />
+        </div>
+      </button>
+
+      {/* Inputs row: cronômetro + investimento */}
+      <TradingInputsCompact
+        timeLabel={TIME_OPTIONS.find((t) => t.value === timeSec)?.label ?? '01:00'}
+        timeOptions={TIME_OPTIONS}
+        selectedTime={timeSec}
+        onSelectTime={setTimeSec}
+        investment={investment}
+        minInvestment={MIN_INVESTMENT}
+        onAdjustInvestment={adjustInvestment}
+        onSetInvestment={setInvestment}
+      />
+
+      {/* CALL / PUT buttons */}
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={() => placeTrade('CALL')}
+          disabled={placing || !accountId}
+          className="h-12 rounded-full bg-green-500 hover:bg-green-400 active:scale-[0.98] flex items-center justify-center gap-2 font-bold text-white text-sm transition-all shadow-lg shadow-green-900/30 disabled:opacity-50"
+        >
+          <span>Para cima</span>
+          <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center">
+            <ArrowUp size={13} strokeWidth={2.5} />
+          </div>
+        </button>
+        <button
+          onClick={() => placeTrade('PUT')}
+          disabled={placing || !accountId}
+          className="h-12 rounded-full bg-red-500 hover:bg-red-400 active:scale-[0.98] flex items-center justify-center gap-2 font-bold text-white text-sm transition-all shadow-lg shadow-red-900/30 disabled:opacity-50"
+        >
+          <span>Para baixo</span>
+          <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center">
+            <ArrowDown size={13} strokeWidth={2.5} />
+          </div>
+        </button>
+      </div>
+
+      {tradeError && (
+        <p className="text-red-400 text-xs text-center -mt-1">{tradeError}</p>
+      )}
+    </div>
+  )
+}
+
+// Re-export for places that previously imported OpenTrade from MobileTradingSheet (none currently, but safe).
+export type { OpenTrade }

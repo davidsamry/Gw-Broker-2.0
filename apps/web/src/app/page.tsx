@@ -10,7 +10,7 @@ import { Logo } from '@/components/layout/Logo'
 import { MobileNav } from '@/components/layout/MobileNav'
 import { TradingChart } from '@/components/trading/TradingChart'
 import { TradingPanel } from '@/components/trading/TradingPanel'
-import { MobileTradingSheet } from '@/components/trading/MobileTradingSheet'
+import { TradingCompactCard } from '@/components/trading/TradingCompactCard'
 import { AccountSwitchModal } from '@/components/layout/AccountSwitchModal'
 import { AssetInfoModal } from '@/components/trading/AssetInfoModal'
 import { AssetSelectorModal } from '@/components/trading/AssetSelectorModal'
@@ -183,9 +183,6 @@ export default function TradingPage() {
         {!isMobile && configOpen && (
           <ConfiguracoesPanel onClose={() => setConfigOpen(false)} theme={theme} onThemeChange={setTheme} settings={tradeSettings} onSettingsChange={setTradeSettings} />
         )}
-        {!isMobile && assetSelectorOpen && (
-          <AssetSelectorModal selectedAsset={selectedAsset} assets={assets} onSelect={handleSelectAsset} onClose={() => setAssetSelectorOpen(false)} />
-        )}
         <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
         {!isMobile && <TradingPanel asset={selectedAsset} marketPrice={displayPrice} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={handleTradePlaced} />}
       </div>
@@ -239,31 +236,25 @@ export default function TradingPage() {
 
           {/* Right: balance + deposit */}
           <div className="flex items-center gap-2">
-            {/* Notifications */}
-            <button className="relative w-8 h-8 flex items-center justify-center text-[#8b8f9a]">
-              <Bell size={16} />
-              <span className="absolute top-0.5 right-0.5 min-w-[13px] h-[13px] px-[2px] flex items-center justify-center bg-red-500 text-white text-[8px] font-bold rounded-full leading-none">7</span>
-            </button>
-
             {/* Balance chip */}
             <div className="relative">
               <button
                 onClick={() => setMobileAccountOpen(v => !v)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#252a3a] border border-[#2a2e3b]"
+                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#252a3a] border border-[#2a2e3b]"
               >
                 {isDemo
-                  ? <GraduationCap size={14} className="text-yellow-400 flex-shrink-0" />
-                  : <Gem size={14} className="text-purple-400 flex-shrink-0" />
+                  ? <GraduationCap size={18} className="text-yellow-400 flex-shrink-0" />
+                  : <Gem size={18} className="text-purple-400 flex-shrink-0" />
                 }
                 <div className="text-left">
-                  <div className={cn('text-[8px] font-bold leading-tight', isDemo ? 'text-yellow-400' : 'text-green-400')}>
+                  <div className={cn('text-[10px] font-bold leading-tight', isDemo ? 'text-yellow-400' : 'text-green-400')}>
                     {isDemo ? 'DEMO' : 'REAL'}
                   </div>
-                  <div className="text-xs font-bold text-white leading-tight">
+                  <div className="text-sm font-bold text-white leading-tight">
                     R${balance.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                   </div>
                 </div>
-                <ChevronDown size={10} className={cn('text-[#8b8f9a] transition-transform', mobileAccountOpen && 'rotate-180')} />
+                <ChevronDown size={12} className={cn('text-[#8b8f9a] transition-transform', mobileAccountOpen && 'rotate-180')} />
               </button>
 
               {mobileAccountOpen && (
@@ -292,9 +283,9 @@ export default function TradingPage() {
             {/* Deposit */}
             <button
               onClick={() => setDepositoOpen(true)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-500 hover:bg-green-400 text-xs font-bold text-white transition-colors"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-green-500 hover:bg-green-400 text-sm font-bold text-white transition-colors"
             >
-              <Plus size={12} />
+              <Plus size={14} strokeWidth={2.5} />
               Depósito
             </button>
           </div>
@@ -305,13 +296,13 @@ export default function TradingPage() {
           {renderMainContent(true)}
         </div>
 
-        {/* Mobile trading sheet (only on TRADE tab) */}
+        {/* Mobile compact trading card (always visible on TRADE tab) */}
         {sidebarTab === 'TRADE' && (
-          <MobileTradingSheet
+          <TradingCompactCard
             asset={selectedAsset}
             marketPrice={displayPrice}
-            shortLabels={tradeSettings.shortLabels}
             accountId={currentAccount?.id}
+            onOpenSelector={() => setAssetSelectorOpen(true)}
             onTradePlaced={handleTradePlaced}
           />
         )}
@@ -321,6 +312,9 @@ export default function TradingPage() {
       </div>
 
       {/* ── Global modals (shared desktop + mobile) ──────────────────────── */}
+      {assetSelectorOpen && (
+        <AssetSelectorModal selectedAsset={selectedAsset} assets={assets} onSelect={handleSelectAsset} onClose={() => setAssetSelectorOpen(false)} />
+      )}
       {assetInfoOpen && (
         <AssetInfoModal asset={selectedAsset} marketPrice={displayPrice} onClose={() => setAssetInfoOpen(false)} onTrade={() => setAssetInfoOpen(false)} />
       )}

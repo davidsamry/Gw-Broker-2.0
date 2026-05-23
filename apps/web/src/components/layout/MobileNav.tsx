@@ -33,7 +33,7 @@ export function MobileNav({ activeTab, onTabChange }: MobileNavProps) {
               'flex-1 flex flex-col items-center justify-center py-2 gap-0.5 relative transition-colors',
               isActive
                 ? 'text-blue-400'
-                : highlight ? 'text-yellow-400' : 'text-[#8b8f9a]'
+                : highlight ? 'text-green-400' : 'text-[#8b8f9a]'
             )}
           >
             {isActive && (
@@ -47,7 +47,7 @@ export function MobileNav({ activeTab, onTabChange }: MobileNavProps) {
                 </span>
               )}
               {highlight && !isActive && (
-                <span className="absolute -top-0.5 -right-1 w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse ring-2 ring-[#1d2130]" />
+                <span className="absolute -top-0.5 -right-1 w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse ring-2 ring-[#1d2130]" />
               )}
             </div>
             <span className="text-[9px] font-semibold leading-none">{label}</span>

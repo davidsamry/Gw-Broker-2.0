@@ -90,10 +90,15 @@ export function AccountDropdown({
   return (
     <div
       ref={ref}
-      className="absolute top-full right-0 mt-1 z-50 flex shadow-2xl rounded-xl overflow-hidden border border-[#2a2e3b]"
-      style={{ minWidth: 480 }}
+      className={cn(
+        'absolute top-full right-0 mt-1 z-50 shadow-2xl rounded-xl overflow-hidden border border-[#2a2e3b]',
+        // Layout: desktop = 2 columns side-by-side; mobile = stacked, never wider than viewport
+        'flex flex-col md:flex-row',
+        'w-[min(480px,calc(100vw-16px))]',
+        'max-h-[calc(100vh-80px)] overflow-y-auto'
+      )}
     >
-      <div className="bg-[#1a1e2e] w-[272px] flex-shrink-0 p-4 flex flex-col gap-3">
+      <div className="bg-[#1a1e2e] w-full md:w-[272px] md:flex-shrink-0 p-4 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Gem size={16} className="text-purple-400" />
@@ -198,7 +203,7 @@ export function AccountDropdown({
         </div>
       </div>
 
-      <div className="bg-[#141720] w-[180px] flex-shrink-0 flex flex-col py-2">
+      <div className="bg-[#141720] w-full md:w-[180px] md:flex-shrink-0 flex flex-col py-2 border-t md:border-t-0 md:border-l border-[#2a2e3b]">
         {items.map((item) => (
           <button
             key={item.label}

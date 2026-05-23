@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { X, ChevronDown, ArrowUp, ArrowDown, Package } from 'lucide-react'
 import { api } from '@/lib/api'
+import { ASSETS } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
 
@@ -47,14 +48,17 @@ function toItem(op: ApiOperation): Item {
   const dt = new Date(op.closedAt ?? op.expiresAt ?? op.openedAt)
   const time = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   const date = `${dt.getDate().toString().padStart(2, '0')} ${MONTHS_PT[dt.getMonth()]}`
+  // Look up asset in catalog to use the short symbol (e.g. "BTC/USDT") and
+  // accurate flag codes — same name shown in the header asset tabs.
+  const asset = ASSETS.find((a) => a.id === op.assetId)
   const parts = op.assetId.split('-')
   return {
     id:        op.id,
     date,
     time,
-    symbol:    op.assetSymbol,
-    code1:     parts[0] ?? '',
-    code2:     parts[1] ?? '',
+    symbol:    asset?.symbol ?? op.assetSymbol,
+    code1:     asset?.code1 ?? parts[0] ?? '',
+    code2:     asset?.code2 ?? parts[1] ?? '',
     direction: op.direction,
     amount:    Number(op.amount),
     status:    op.status,
@@ -171,7 +175,8 @@ function HistoricoItem({ item }: { item: Item }) {
   const sign = net > 0 ? '+' : net < 0 ? '' : ''
   const netColor = won ? 'text-green-400' : lost ? 'text-red-400' : 'text-[#8b8f9a]'
 
-  const hasFlags = Boolean(item.code1 && item.code2 && item.code1.length === 2 && item.code2.length === 2)
+  // FlagPair handles both ISO country codes ('us') and crypto codes ('crypto:btc')
+  const hasFlags = Boolean(item.code1 && item.code2)
 
   return (
     <div className="px-3 mb-px">
@@ -194,12 +199,12 @@ function HistoricoItem({ item }: { item: Item }) {
           </div>
 
           {/* Symbol */}
-          <span className="flex-1 text-[12px] font-semibold text-white truncate">
-            {item.symbol.length > 9 ? item.symbol.slice(0, 9) + '…' : item.symbol}
+          <span className="flex-1 text-[12px] font-semibold text-white whitespace-nowrap">
+            {item.symbol}
           </span>
 
           {/* Right block: direction + profit */}
-          <div className="flex flex-col items-end">
+          <div className="flex flex-col items-end flex-shrink-0">
             <div className="flex items-center gap-1">
               {item.direction === 'CALL'
                 ? <ArrowUp size={10} strokeWidth={3} className="text-green-400" />
@@ -210,8 +215,6 @@ function HistoricoItem({ item }: { item: Item }) {
               {sign}R$ {Math.abs(net).toFixed(2).replace('.', ',')} ({pct})
             </span>
           </div>
-
-          <ChevronDown size={11} className="text-[#8b8f9a] flex-shrink-0" />
         </div>
       </div>
     </div>

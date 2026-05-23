@@ -51,7 +51,7 @@ export function Sidebar({ activeTab, onTabChange, onSettings }: SidebarProps) {
                 isActive
                   ? 'text-white'
                   : item.highlight
-                    ? 'text-yellow-400 hover:text-yellow-300'
+                    ? 'text-green-400 hover:text-green-300'
                     : 'text-[#8b8f9a] hover:text-white'
               )}
             >
@@ -63,7 +63,7 @@ export function Sidebar({ activeTab, onTabChange, onSettings }: SidebarProps) {
                 isActive
                   ? 'bg-blue-600 text-white'
                   : item.highlight
-                    ? 'bg-yellow-400/10 ring-1 ring-yellow-400/40'
+                    ? 'bg-green-400/10 ring-1 ring-green-400/40'
                     : ''
               )}>
                 {item.icon}
@@ -73,7 +73,7 @@ export function Sidebar({ activeTab, onTabChange, onSettings }: SidebarProps) {
                   </span>
                 )}
                 {item.highlight && !isActive && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-yellow-400 animate-pulse ring-2 ring-[#1d2130]" />
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-400 animate-pulse ring-2 ring-[#1d2130]" />
                 )}
               </span>
               <span className="text-[9px] font-semibold tracking-wide leading-none">

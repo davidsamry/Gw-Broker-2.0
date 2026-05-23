@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Minus, Plus, ArrowUp, ArrowDown, ChevronDown, ChevronUp, Package, X } from 'lucide-react'
-import { type Asset, type OpenTrade, type ClosedTrade, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
+import { ASSETS, type Asset, type OpenTrade, type ClosedTrade, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
 import { api } from '@/lib/api'
@@ -11,6 +11,7 @@ interface TradingPanelProps {
   asset: Asset
   shortLabels?: boolean
   mobile?: boolean
+  compact?: boolean  // hides the asset header + open/closed trades list
   accountId?: string
   marketPrice?: number
   onTradePlaced?: (trade: ChartTradeEvent | null) => void
@@ -106,9 +107,9 @@ function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: bool
               ? <ArrowUp size={9} strokeWidth={3} />
               : <ArrowDown size={9} strokeWidth={3} />}
           </span>
-          <span className="text-[11px] text-[#8b8f9a] flex-1">{fmtMoney(trade.amount)} R$</span>
+          <span className="text-[11px] text-[#8b8f9a] flex-1">R$ {fmtMoney(trade.amount)}</span>
           <span className="text-[11px] font-bold text-[#8b8f9a]">
-            0.00 R$
+            R$ 0,00
           </span>
         </div>
       </div>
@@ -119,7 +120,7 @@ function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: bool
             x2
           </button>
           <button className="flex-1 h-7 rounded-lg bg-blue-600 hover:bg-blue-500 text-[11px] font-bold text-white transition-colors px-2">
-            Vender agora &nbsp;{fmtMoney(earlyExitValue)} R$
+            Vender agora &nbsp;R$ {fmtMoney(earlyExitValue)}
           </button>
         </div>
       )}
@@ -152,12 +153,12 @@ function ClosedTradeItem({ trade }: { trade: ClosedTrade }) {
               ? <ArrowUp size={9} strokeWidth={3} />
               : <ArrowDown size={9} strokeWidth={3} />}
           </span>
-          <span className="text-[11px] text-[#8b8f9a] flex-1">{fmtMoney(trade.amount)} R$</span>
+          <span className="text-[11px] text-[#8b8f9a] flex-1">R$ {fmtMoney(trade.amount)}</span>
           <span className={cn(
             'text-[11px] font-bold',
             won ? 'text-green-400' : 'text-red-400'
           )}>
-            {sign}{net.toFixed(2).replace('.', ',')} R$
+            {sign}R$ {net.toFixed(2).replace('.', ',')}
           </span>
         </div>
       </div>
@@ -165,7 +166,7 @@ function ClosedTradeItem({ trade }: { trade: ClosedTrade }) {
   )
 }
 
-export function TradingPanel({ asset, shortLabels = true, mobile = false, accountId, marketPrice, onTradePlaced }: TradingPanelProps) {
+export function TradingPanel({ asset, shortLabels = true, mobile = false, compact = false, accountId, marketPrice, onTradePlaced }: TradingPanelProps) {
   const [investment, setInvestment] = useState(10)
   const [investmentRaw, setInvestmentRaw] = useState('')
   const [editingInvestment, setEditingInvestment] = useState(false)
@@ -188,18 +189,23 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
       const closed: ClosedTrade[] = ops
         .filter((o: any) => o.status === 'WON' || o.status === 'LOST' || o.status === 'CANCELLED')
         .slice(0, 30)
-        .map((o: any) => ({
-          id:          o.id,
-          assetSymbol: o.assetSymbol,
-          // Best-effort flag lookup: o.assetId is like "btc-usdt-binance" or "eur-jpy"
-          code1:       (o.assetId.split('-')[0] ?? ''),
-          code2:       (o.assetId.split('-')[1] ?? ''),
-          direction:   o.direction,
-          amount:      Number(o.amount),
-          profit:      Number(o.profit ?? 0),
-          status:      o.status,
-          closedAt:    o.closedAt ?? o.expiresAt,
-        }))
+        .map((o: any) => {
+          // Look up the asset in the catalog to get the proper short symbol +
+          // flag codes (same icons the header asset tabs use).
+          const asset = ASSETS.find((a) => a.id === o.assetId)
+          const parts = o.assetId.split('-')
+          return {
+            id:          o.id,
+            assetSymbol: asset?.symbol ?? o.assetSymbol,
+            code1:       asset?.code1 ?? parts[0] ?? '',
+            code2:       asset?.code2 ?? parts[1] ?? '',
+            direction:   o.direction,
+            amount:      Number(o.amount),
+            profit:      Number(o.profit ?? 0),
+            status:      o.status,
+            closedAt:    o.closedAt ?? o.expiresAt,
+          }
+        })
       setClosedTrades(closed)
     }).catch(() => { /* silent fail — empty list */ })
     return () => { cancelled = true }
@@ -292,7 +298,7 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
           setClosedTrades(prev => [
             {
               id:          operationId,
-              assetSymbol: asset.label,
+              assetSymbol: asset.symbol,  // short form (e.g. "BTC/USDT") to match asset tabs
               code1:       asset.code1,
               code2:       asset.code2,
               direction,
@@ -337,14 +343,16 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
 
       {/* Result is rendered pinned to the chart's expiry dot — see TradeResultMarker in TradingChart. */}
 
-      {/* Asset header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a2e3b]">
-        <div className="flex items-center gap-2 min-w-0">
-          <FlagPair code1={asset.code1} code2={asset.code2} size={20} />
-          <span className="text-sm font-bold text-white truncate">{asset.label}</span>
+      {/* Asset header — hidden in compact mode (mobile sheet shows its own header) */}
+      {!compact && (
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a2e3b]">
+          <div className="flex items-center gap-2 min-w-0">
+            <FlagPair code1={asset.code1} code2={asset.code2} size={20} />
+            <span className="text-sm font-bold text-white truncate">{asset.label}</span>
+          </div>
+          <span className="text-base font-bold text-green-400 flex-shrink-0 ml-2">{asset.payout}%</span>
         </div>
-        <span className="text-base font-bold text-green-400 flex-shrink-0 ml-2">{asset.payout}%</span>
-      </div>
+      )}
 
       {/* Tempo */}
       <FloatingBox label="Tempo" link="TEMPO DE EXPIRAÇÃO">
@@ -430,7 +438,7 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
                 className="text-base font-bold text-white hover:text-blue-300 transition-colors w-full"
                 title="Clique para editar"
               >
-                {fmtMoney(investment)} R$
+                R$ {fmtMoney(investment)}
               </button>
             )}
           </div>
@@ -483,52 +491,55 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
         {tradeError && <p className="text-red-400 text-xs text-center">{tradeError}</p>}
       </div>
 
-      {/* Divider */}
-      <div className="h-px bg-[#2a2e3b]" />
+      {/* Divider + operations list — hidden in compact (mobile) mode */}
+      {!compact && (
+        <>
+          <div className="h-px bg-[#2a2e3b]" />
 
-      {/* Operações */}
-      <div className="flex-1 overflow-y-auto flex flex-col">
-        {openTrades.length === 0 && closedTrades.length === 0 ? (
-          <EmptyState message="Não há operações abertas." />
-        ) : (
-          <>
-            {openTrades.length > 0 && (
+          <div className="flex-1 overflow-y-auto flex flex-col">
+            {openTrades.length === 0 && closedTrades.length === 0 ? (
+              <EmptyState message="Não há operações abertas." />
+            ) : (
               <>
-                <div className="flex items-center gap-2 px-4 py-1.5 mt-1">
-                  <span className="text-[10px] font-bold text-[#8b8f9a] tracking-wide">PENDENTES</span>
-                  <div className="w-5 h-5 rounded-full bg-blue-600/30 border border-blue-500/50 flex items-center justify-center">
-                    <span className="text-[9px] font-bold text-white">{openTrades.length}</span>
-                  </div>
-                </div>
-                {openTrades.map((trade) => (
-                  <TradeItem key={trade.id} trade={trade} shortLabels={shortLabels} />
-                ))}
+                {openTrades.length > 0 && (
+                  <>
+                    <div className="flex items-center gap-2 px-4 py-1.5 mt-1">
+                      <span className="text-[10px] font-bold text-[#8b8f9a] tracking-wide">PENDENTES</span>
+                      <div className="w-5 h-5 rounded-full bg-blue-600/30 border border-blue-500/50 flex items-center justify-center">
+                        <span className="text-[9px] font-bold text-white">{openTrades.length}</span>
+                      </div>
+                    </div>
+                    {openTrades.map((trade) => (
+                      <TradeItem key={trade.id} trade={trade} shortLabels={shortLabels} />
+                    ))}
+                  </>
+                )}
+
+                {closedTrades.length > 0 && (
+                  <>
+                    <div className="flex items-center gap-2 px-4 py-1.5 mt-2 border-t border-[#2a2e3b]/60 pt-2">
+                      <span className="text-[10px] font-bold text-[#8b8f9a] tracking-wide">FECHADAS</span>
+                      <div className="w-5 h-5 rounded-full bg-[#252a3a] flex items-center justify-center">
+                        <span className="text-[9px] font-bold text-white">{closedTrades.length}</span>
+                      </div>
+                    </div>
+                    {closedTrades.map((trade) => (
+                      <ClosedTradeItem key={trade.id} trade={trade} />
+                    ))}
+                  </>
+                )}
               </>
             )}
+          </div>
 
-            {closedTrades.length > 0 && (
-              <>
-                <div className="flex items-center gap-2 px-4 py-1.5 mt-2 border-t border-[#2a2e3b]/60 pt-2">
-                  <span className="text-[10px] font-bold text-[#8b8f9a] tracking-wide">FECHADAS</span>
-                  <div className="w-5 h-5 rounded-full bg-[#252a3a] flex items-center justify-center">
-                    <span className="text-[9px] font-bold text-white">{closedTrades.length}</span>
-                  </div>
-                </div>
-                {closedTrades.map((trade) => (
-                  <ClosedTradeItem key={trade.id} trade={trade} />
-                ))}
-              </>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Bottom chevron */}
-      <div className="flex justify-center py-1.5 border-t border-[#2a2e3b] flex-shrink-0">
-        <button className="text-[#3a3f50] hover:text-[#8b8f9a] transition-colors">
-          <ChevronUp size={14} />
-        </button>
-      </div>
+          {/* Bottom chevron */}
+          <div className="flex justify-center py-1.5 border-t border-[#2a2e3b] flex-shrink-0">
+            <button className="text-[#3a3f50] hover:text-[#8b8f9a] transition-colors">
+              <ChevronUp size={14} />
+            </button>
+          </div>
+        </>
+      )}
     </aside>
   )
 }

@@ -834,7 +834,7 @@ function TradeMarker({ trade, chartRef, seriesRef, containerRef, tfSec, stackIdx
           <span className="flex items-center justify-center w-4 h-4 rounded-full bg-white/25 text-[9px] leading-none">
             {trade.direction === 'CALL' ? '▲' : '▼'}
           </span>
-          <span>{trade.amount} R$</span>
+          <span>R$ {trade.amount}</span>
           <span className="font-mono opacity-90">
             {String(Math.floor(countdown / 60)).padStart(2, '0')}:{String(countdown % 60).padStart(2, '0')}
           </span>
@@ -923,7 +923,7 @@ function TradeResultMarker({ event, chartRef, seriesRef, tfSec }: TradeResultMar
               Resultado (lucro / perda)
             </span>
             <span className="text-[18px] font-bold leading-tight mt-1 font-mono text-white">
-              {sign}{profit.toFixed(2)} R$
+              {sign}R$ {profit.toFixed(2)}
             </span>
           </div>
           <button
