@@ -426,12 +426,14 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       seriesRef.current = mainSeries
       setChartReady(true)
 
-      // Dashed price line at current close — estilo Quotex
+      // Dashed price line at current close + live price label on the right
+      // axis (Quotex-style). Background color follows the last bar (green up
+      // / red down); built-in arrow pointer aligns the label with the line.
       mainSeries.applyOptions({
-        priceLineVisible: true,
-        priceLineStyle: LineStyle.Dashed,
-        priceLineColor: 'rgba(255,255,255,0.25)',
-        lastValueVisible: false,
+        priceLineVisible:  true,
+        priceLineStyle:    LineStyle.Dashed,
+        priceLineColor:    'rgba(255,255,255,0.25)',
+        lastValueVisible:  true,
       })
 
       // ── Indicators ─────────────────────────────────────────────────────────
