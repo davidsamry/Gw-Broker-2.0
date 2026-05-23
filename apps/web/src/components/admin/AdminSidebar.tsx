@@ -6,7 +6,7 @@ import {
   LayoutGrid, Brain, Users, Wallet, Activity, ShieldCheck,
   ArrowDownToLine, ArrowUpFromLine, MessageSquare, Network,
   Copy, Layers, Gift, Zap, TrendingUp, Clock, FileSpreadsheet,
-  Trophy, Image as ImageIcon, FileText, Mail, CreditCard, Receipt,
+  Trophy, Image as ImageIcon, FileText, Mail, CreditCard,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -56,16 +56,6 @@ export function AdminSidebar() {
           <div className="text-sm font-bold text-white leading-tight">Admin Panel</div>
           <div className="text-[10px] text-[#8b8f9a] leading-tight">Gerenciamento</div>
         </div>
-      </div>
-
-      {/* "Fatura" placeholder card — static for now, will hook to real billing later */}
-      <div className="m-3 p-3 rounded-lg bg-gradient-to-br from-orange-500/10 to-orange-500/5 border border-orange-500/30">
-        <div className="flex items-center gap-1.5 mb-1">
-          <Receipt size={11} className="text-orange-400" />
-          <span className="text-[10px] font-bold text-orange-400 tracking-wide">FATURA</span>
-        </div>
-        <div className="text-sm font-bold text-white">R$ 387,50</div>
-        <div className="text-[10px] text-[#8b8f9a] mt-0.5">25/05/2026 · 2d restantes</div>
       </div>
 
       {/* Nav list */}
