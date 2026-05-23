@@ -138,7 +138,6 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
   const [chartType, setChartType] = useState<ChartType>('velas')
   const [chartTypeOpen, setChartTypeOpen] = useState(false)
   const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set())
-  const [crosshairOn, setCrosshairOn] = useState(true)
 
   // Stable string for use in effect dep arrays (Set identity changes every render).
   const activeIndicatorKey = Array.from(activeIndicators).sort().join(',')
@@ -303,15 +302,16 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
     }
   }, [autoScroll])
 
-  // Crosshair toggle — uses lightweight-charts numeric mode values:
-  //   0 = Normal (visible, follows pointer)
-  //   2 = Hidden (no crosshair drawn)
-  useEffect(() => {
-    if (!chartRef.current) return
-    chartRef.current.applyOptions({
-      crosshair: { mode: crosshairOn ? 0 : 2 },
-    })
-  }, [crosshairOn, chartReady])
+  // Reset the chart view to its defaults: fit the visible time range to
+  // recent candles, re-enable autoScale on the price axis (undoes manual
+  // vertical pan), and snap back to the live edge.
+  function resetChartView() {
+    const chart = chartRef.current
+    if (!chart) return
+    chart.timeScale().fitContent()
+    chart.timeScale().scrollToRealTime()
+    chart.priceScale('right').applyOptions({ autoScale: true })
+  }
 
   useEffect(() => {
     let chart: any = null
@@ -846,16 +846,11 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
           )}
         </div>
 
-        {/* Crosshair — toggles the chart's hover crosshair on/off */}
+        {/* Reset view — fit content + autoScale + scroll to live edge */}
         <button
-          onClick={() => setCrosshairOn(v => !v)}
-          title={crosshairOn ? 'Ocultar mira' : 'Mostrar mira'}
-          className={cn(
-            'w-9 h-9 flex items-center justify-center rounded border transition-colors',
-            crosshairOn
-              ? 'bg-blue-600 border-blue-500 text-white'
-              : 'bg-[#1d2130] border-[#2a2e3b] text-[#8b8f9a] hover:text-white'
-          )}
+          onClick={resetChartView}
+          title="Centralizar gráfico (zoom padrão)"
+          className="w-9 h-9 flex items-center justify-center rounded border bg-[#1d2130] border-[#2a2e3b] text-[#8b8f9a] hover:text-white hover:border-blue-500/50 transition-colors active:scale-95"
         >
           <Crosshair size={16} />
         </button>
