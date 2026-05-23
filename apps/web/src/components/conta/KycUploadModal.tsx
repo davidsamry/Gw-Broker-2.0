@@ -12,15 +12,16 @@ interface Props {
 }
 
 interface FileSlot {
-  key:   'documentFrontUrl' | 'documentBackUrl' | 'selfieUrl'
-  label: string
-  hint:  string
+  key:        'documentFrontUrl' | 'documentBackUrl' | 'selfieUrl'
+  label:      string
+  shortLabel: string  // used on mobile / inside the small picker
+  hint:       string
 }
 
 const SLOTS: FileSlot[] = [
-  { key: 'documentFrontUrl', label: 'Documento (Frente)',   hint: 'RG, CNH ou Passaporte' },
-  { key: 'documentBackUrl',  label: 'Documento (Verso)',    hint: 'Mesmo documento' },
-  { key: 'selfieUrl',        label: 'Selfie com Documento', hint: 'Você segurando o doc' },
+  { key: 'documentFrontUrl', label: 'Documento (Frente)',   shortLabel: 'Frente', hint: 'RG / CNH / Passaporte' },
+  { key: 'documentBackUrl',  label: 'Documento (Verso)',    shortLabel: 'Verso',  hint: 'Mesmo documento' },
+  { key: 'selfieUrl',        label: 'Selfie com Documento', shortLabel: 'Selfie', hint: 'Segurando o doc' },
 ]
 
 const MAX_BYTES = 3 * 1024 * 1024  // 3MB per file
@@ -86,21 +87,23 @@ export function KycUploadModal({ onClose, onDone }: Props) {
           <button onClick={onClose} className="text-[#8b8f9a] hover:text-white"><X size={18} /></button>
         </div>
 
-        <div className="overflow-y-auto px-5 py-5 flex flex-col gap-4">
+        <div className="overflow-y-auto px-4 sm:px-5 py-4 sm:py-5 flex flex-col gap-4">
           <p className="text-xs text-[#ccc] leading-relaxed">
-            Envie 3 imagens claras e legíveis. Sua conta será analisada pela equipe em
-            até 48 horas. Formatos aceitos: JPG, PNG, WEBP. Tamanho máximo: 3MB por foto.
+            Envie 3 imagens claras e legíveis. Análise em até 48 horas.
+            JPG/PNG/WEBP, até 3MB por foto.
           </p>
 
-          {SLOTS.map((slot) => (
-            <FilePicker
-              key={slot.key}
-              slot={slot}
-              dataUrl={files[slot.key]}
-              onPick={(f) => handleFile(slot.key, f)}
-              onClear={() => setFiles((prev) => ({ ...prev, [slot.key]: null }))}
-            />
-          ))}
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            {SLOTS.map((slot) => (
+              <FilePicker
+                key={slot.key}
+                slot={slot}
+                dataUrl={files[slot.key]}
+                onPick={(f) => handleFile(slot.key, f)}
+                onClear={() => setFiles((prev) => ({ ...prev, [slot.key]: null }))}
+              />
+            ))}
+          </div>
 
           {error && (
             <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30">
@@ -140,13 +143,17 @@ function FilePicker({
   const has      = !!dataUrl
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <div>
-          <div className="text-xs font-bold text-white">{slot.label}</div>
-          <div className="text-[10px] text-[#8b8f9a]">{slot.hint}</div>
+    <div className="flex flex-col min-w-0">
+      <div className="flex items-center gap-1 mb-1.5 min-h-[28px]">
+        <div className="min-w-0 flex-1">
+          {/* Long label on sm+; short label on mobile to keep the column tight */}
+          <div className="text-[11px] sm:text-xs font-bold text-white truncate">
+            <span className="hidden sm:inline">{slot.label}</span>
+            <span className="sm:hidden">{slot.shortLabel}</span>
+          </div>
+          <div className="text-[9px] sm:text-[10px] text-[#8b8f9a] truncate">{slot.hint}</div>
         </div>
-        {has && <CheckCircle2 size={14} className="text-green-400" />}
+        {has && <CheckCircle2 size={13} className="text-green-400 flex-shrink-0" />}
       </div>
 
       <input
@@ -167,20 +174,21 @@ function FilePicker({
           <img
             src={dataUrl!}
             alt={slot.label}
-            className="w-full aspect-[4/3] object-cover rounded-lg border border-[#2a2e3b]"
+            className="w-full aspect-square object-cover rounded-lg border border-[#2a2e3b]"
           />
-          <div className="absolute top-2 right-2 flex gap-1">
+          {/* Overlay actions — visible on hover desktop, always on mobile */}
+          <div className="absolute inset-x-1 bottom-1 flex gap-1">
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              className="px-2 py-1 rounded bg-black/70 text-[10px] font-semibold text-white border border-white/20 hover:bg-black/85"
+              className="flex-1 py-1 rounded bg-black/75 text-[9px] sm:text-[10px] font-semibold text-white border border-white/20 hover:bg-black/90"
             >
               Trocar
             </button>
             <button
               type="button"
               onClick={onClear}
-              className="px-2 py-1 rounded bg-red-500/90 text-[10px] font-semibold text-white hover:bg-red-500"
+              className="flex-1 py-1 rounded bg-red-500/90 text-[9px] sm:text-[10px] font-semibold text-white hover:bg-red-500"
             >
               Remover
             </button>
@@ -191,14 +199,15 @@ function FilePicker({
           type="button"
           onClick={() => inputRef.current?.click()}
           className={cn(
-            'w-full aspect-[4/3] rounded-lg border-2 border-dashed border-[#2a2e3b]',
-            'flex flex-col items-center justify-center gap-1.5',
+            'w-full aspect-square rounded-lg border-2 border-dashed border-[#2a2e3b]',
+            'flex flex-col items-center justify-center gap-1 px-1',
             'text-[#8b8f9a] hover:border-blue-500/60 hover:text-white transition-colors'
           )}
         >
-          <Upload size={20} />
-          <span className="text-xs font-semibold">Selecionar arquivo</span>
-          <span className="text-[10px]">JPG, PNG ou WEBP — até 3MB</span>
+          <Upload size={18} className="sm:hidden" />
+          <Upload size={22} className="hidden sm:block" />
+          <span className="text-[10px] sm:text-xs font-semibold">Selecionar</span>
+          <span className="hidden sm:block text-[10px] text-center leading-tight">JPG/PNG/WEBP<br/>até 3MB</span>
         </button>
       )}
     </div>
