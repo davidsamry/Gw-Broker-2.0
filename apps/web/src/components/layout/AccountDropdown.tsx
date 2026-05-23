@@ -91,11 +91,15 @@ export function AccountDropdown({
     <div
       ref={ref}
       className={cn(
-        'absolute top-full right-0 mt-1 z-50 shadow-2xl rounded-xl overflow-hidden border border-[#2a2e3b]',
-        // Layout: desktop = 2 columns side-by-side; mobile = stacked, never wider than viewport
+        'z-50 shadow-2xl rounded-xl overflow-hidden border border-[#2a2e3b]',
+        // Layout: desktop = 2 columns side-by-side; mobile = stacked
         'flex flex-col md:flex-row',
-        'w-[min(480px,calc(100vw-16px))]',
-        'max-h-[calc(100vh-80px)] overflow-y-auto'
+        // Mobile: fixed-position card below the header, edge-to-edge with
+        // 8px gutter — avoids the off-screen-left bug caused by anchoring
+        // `right-0` to a button that's NOT at the viewport's right edge.
+        'fixed top-14 left-2 right-2 max-h-[calc(100vh-72px)] overflow-y-auto',
+        // Desktop: anchored to the button (top-full right-0), 480px wide
+        'md:absolute md:top-full md:right-0 md:left-auto md:mt-1 md:w-[480px] md:max-h-[calc(100vh-80px)]'
       )}
     >
       <div className="bg-[#1a1e2e] w-full md:w-[272px] md:flex-shrink-0 p-4 flex flex-col gap-3">
