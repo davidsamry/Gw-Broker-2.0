@@ -69,8 +69,8 @@ export function KycUploadModal({ onClose, onDone }: Props) {
         if (u) useAuthStore.setState({ user: { ...u, kycStatus: 'SUBMITTED' } })
       }
       setSubmitted(true)
-      // Auto-close after a moment so the parent re-renders with new status.
-      setTimeout(() => onDone(), 2500)
+      // Stays open until the user closes (X / Cancelar / Fechar) so the
+      // success message doesn't disappear before they can read it.
     } catch (err: any) {
       const code   = err?.response?.data?.error
       const status = err?.response?.status
