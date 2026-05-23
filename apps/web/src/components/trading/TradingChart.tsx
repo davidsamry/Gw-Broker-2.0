@@ -589,23 +589,23 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       )}
 
       {/* Bottom left toolbar — vertical column, raised above the chart attribution */}
-      <div className="absolute bottom-24 left-3 flex flex-col items-start gap-1 z-10">
+      <div className="absolute bottom-24 left-3 flex flex-col items-start gap-1.5 z-10">
         {/* Pencil / Drawings */}
         <button
           onClick={() => setDrawingsOpen(v => !v)}
           className={cn(
-            'w-7 h-7 flex items-center justify-center rounded border transition-colors',
+            'w-9 h-9 flex items-center justify-center rounded border transition-colors',
             drawingsOpen ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#1d2130] border-[#2a2e3b] text-[#8b8f9a] hover:text-white'
           )}
         >
-          <Pencil size={12} />
+          <Pencil size={16} />
         </button>
 
         {/* Timeframe selector */}
         <div className="relative">
           <button
             onClick={(e) => { e.stopPropagation(); setTfOpen(v => !v); setChartTypeOpen(false) }}
-            className="w-7 h-7 flex items-center justify-center rounded bg-[#1d2130] border border-[#2a2e3b] text-white text-[10px] font-bold hover:border-blue-500/50 transition-colors"
+            className="w-9 h-9 flex items-center justify-center rounded bg-[#1d2130] border border-[#2a2e3b] text-white text-xs font-bold hover:border-blue-500/50 transition-colors"
           >
             {selectedTf.label}
           </button>
@@ -634,7 +634,7 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
           <button
             onClick={(e) => { e.stopPropagation(); setChartTypeOpen(v => !v); setTfOpen(false) }}
             className={cn(
-              'w-7 h-7 flex items-center justify-center rounded border transition-colors',
+              'w-9 h-9 flex items-center justify-center rounded border transition-colors',
               chartTypeOpen ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#1d2130] border-[#2a2e3b] text-[#8b8f9a] hover:text-white'
             )}
           >
@@ -666,16 +666,16 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         <button
           onClick={() => { setIndicadoresOpen(v => !v); setDrawingsOpen(false) }}
           className={cn(
-            'w-7 h-7 flex items-center justify-center rounded border transition-colors',
+            'w-9 h-9 flex items-center justify-center rounded border transition-colors',
             indicadoresOpen ? 'bg-blue-600 border-blue-500 text-white' : 'bg-[#1d2130] border-[#2a2e3b] text-[#8b8f9a] hover:text-white'
           )}
         >
-          <Activity size={12} />
+          <Activity size={16} />
         </button>
 
         {/* Crosshair */}
-        <button className="w-7 h-7 flex items-center justify-center rounded bg-[#1d2130] border border-[#2a2e3b] text-[#8b8f9a] hover:text-white transition-colors">
-          <Crosshair size={12} />
+        <button className="w-9 h-9 flex items-center justify-center rounded bg-[#1d2130] border border-[#2a2e3b] text-[#8b8f9a] hover:text-white transition-colors">
+          <Crosshair size={16} />
         </button>
 
         </div>
