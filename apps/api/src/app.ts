@@ -28,6 +28,14 @@ export async function buildApp() {
 
   await app.register(jwt, {
     secret: process.env.JWT_SECRET ?? 'dev-secret-change-me',
+    sign: { expiresIn: '15m' },
+  })
+
+  await app.register(jwt, {
+    secret: process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret-change-me',
+    namespace: 'refresh',
+    sign: { expiresIn: '7d' },
+    cookie: { cookieName: 'refresh_token', signed: false },
   })
 
   // ── Auth decorator ─────────────────────────────────────────────────────────

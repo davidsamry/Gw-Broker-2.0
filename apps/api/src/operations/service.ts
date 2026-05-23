@@ -1,103 +1,57 @@
+import { randomUUID } from 'node:crypto'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 import type { CreateOperationInput } from './schema.js'
 
 export async function createOperation(userId: string, input: CreateOperationInput) {
-  const account = await prisma.account.findUnique({ where: { id: input.accountId } })
+  const operationId   = randomUUID()
+  const transactionId = randomUUID()
+  const expiresAt     = new Date(Date.now() + input.expiresInSeconds * 1000)
+  const description   = `Operação aberta: ${input.assetSymbol} ${input.direction}`
 
-  if (!account || account.userId !== userId) throw new Error('ACCOUNT_NOT_FOUND')
+  const rows = await prisma.$queryRaw<Array<Record<string, unknown>>>`
+    WITH
+      valid AS (
+        SELECT id FROM accounts
+        WHERE id = ${input.accountId}
+          AND "userId" = ${userId}
+          AND balance >= ${new Prisma.Decimal(input.amount)}
+      ),
+      ins_op AS (
+        INSERT INTO operations
+          (id, "accountId", "assetId", "assetSymbol", "marketSymbol", direction, amount, payout, "entryPrice", "expiresAt", status, "openedAt")
+        SELECT
+          ${operationId}, id, ${input.assetId}, ${input.assetSymbol}, ${input.marketSymbol ?? null},
+          ${input.direction}::"Direction", ${new Prisma.Decimal(input.amount)},
+          ${input.payout}, ${new Prisma.Decimal(input.entryPrice)},
+          ${expiresAt}, 'OPEN'::"OperationStatus", NOW()
+        FROM valid
+        RETURNING *
+      ),
+      upd_bal AS (
+        UPDATE accounts
+        SET balance = balance - ${new Prisma.Decimal(input.amount)}
+        WHERE id IN (SELECT id FROM valid)
+        RETURNING id
+      ),
+      ins_tx AS (
+        INSERT INTO transactions (id, "accountId", type, amount, description, "createdAt")
+        SELECT ${transactionId}, id, 'TRADE_LOSS'::"TransactionType", ${new Prisma.Decimal(-input.amount)}, ${description}, NOW()
+        FROM valid
+        RETURNING id
+      )
+    SELECT * FROM ins_op
+  `
 
-  const balance = Number(account.balance)
-  if (balance < input.amount) throw new Error('INSUFFICIENT_BALANCE')
+  if (rows.length === 0) {
+    const account = await prisma.account.findUnique({ where: { id: input.accountId } })
+    if (!account || account.userId !== userId) throw new Error('ACCOUNT_NOT_FOUND')
+    throw new Error('INSUFFICIENT_BALANCE')
+  }
 
-  const expiresAt = new Date(Date.now() + input.expiresInSeconds * 1000)
-
-  const [operation] = await prisma.$transaction([
-    prisma.operation.create({
-      data: {
-        accountId:   input.accountId,
-        assetId:     input.assetId,
-        assetSymbol: input.assetSymbol,
-        direction:   input.direction,
-        amount:      input.amount,
-        payout:      input.payout,
-        entryPrice:  input.entryPrice,
-        expiresAt,
-      },
-    }),
-    prisma.account.update({
-      where: { id: input.accountId },
-      data: { balance: { decrement: input.amount } },
-    }),
-    prisma.transaction.create({
-      data: {
-        accountId:   input.accountId,
-        type:        'TRADE_LOSS',
-        amount:      -input.amount,
-        description: `Operação aberta: ${input.assetSymbol} ${input.direction}`,
-      },
-    }),
-  ])
-
-  scheduleExpiry(operation.id, input.accountId, input.amount, input.payout, input.entryPrice, input.direction, input.expiresInSeconds)
-
-  return operation
-}
-
-function scheduleExpiry(
-  operationId: string,
-  accountId: string,
-  amount: number,
-  payout: number,
-  entryPrice: number,
-  direction: string,
-  expiresInSeconds: number,
-) {
-  setTimeout(async () => {
-    try {
-      const op = await prisma.operation.findUnique({ where: { id: operationId } })
-      if (!op || op.status !== 'OPEN') return
-
-      // Simulate exit price: random ±0.5% movement
-      const change = (Math.random() * 0.01) - 0.005
-      const exitPrice = parseFloat((entryPrice * (1 + change)).toFixed(5))
-
-      const won =
-        (direction === 'CALL' && exitPrice > entryPrice) ||
-        (direction === 'PUT'  && exitPrice < entryPrice)
-
-      const profit = won ? parseFloat((amount * (payout / 100)).toFixed(2)) : 0
-
-      await prisma.$transaction([
-        prisma.operation.update({
-          where: { id: operationId },
-          data: {
-            status:    won ? 'WON' : 'LOST',
-            exitPrice,
-            profit,
-            closedAt:  new Date(),
-          },
-        }),
-        ...(won
-          ? [
-              prisma.account.update({
-                where: { id: accountId },
-                data: { balance: { increment: amount + profit } },
-              }),
-              prisma.transaction.create({
-                data: {
-                  accountId,
-                  type:        'TRADE_WIN',
-                  amount:      amount + profit,
-                  description: `Operação encerrada: ganho de R$${profit.toFixed(2)}`,
-                },
-              }),
-            ]
-          : []),
-      ])
-    } catch (err) {
-      console.error('[expiry] erro ao resolver operação:', operationId, err)
-    }
-  }, expiresInSeconds * 1000)
+  // Resolution is handled by the expiration worker (polls DB every second) —
+  // no in-memory setTimeout, so operations survive API restarts.
+  return rows[0]
 }
 
 export async function listOperations(userId: string, accountId?: string) {

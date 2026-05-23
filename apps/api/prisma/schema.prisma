@@ -79,20 +79,21 @@ model Account {
 }
 
 model Operation {
-  id          String          @id @default(cuid())
-  accountId   String
-  assetId     String
-  assetSymbol String
-  direction   Direction
-  amount      Decimal         @db.Decimal(18, 2)
-  payout      Int
-  entryPrice  Decimal         @db.Decimal(18, 5)
-  exitPrice   Decimal?        @db.Decimal(18, 5)
-  profit      Decimal?        @db.Decimal(18, 2)
-  status      OperationStatus @default(OPEN)
-  expiresAt   DateTime
-  openedAt    DateTime        @default(now())
-  closedAt    DateTime?
+  id           String          @id @default(cuid())
+  accountId    String
+  assetId      String
+  assetSymbol  String
+  marketSymbol String?         // Binance ticker (e.g. "BTCUSDT") — used by worker to fetch real exit price
+  direction    Direction
+  amount       Decimal         @db.Decimal(18, 2)
+  payout       Int
+  entryPrice   Decimal         @db.Decimal(18, 5)
+  exitPrice    Decimal?        @db.Decimal(18, 5)
+  profit       Decimal?        @db.Decimal(18, 2)
+  status       OperationStatus @default(OPEN)
+  expiresAt    DateTime
+  openedAt     DateTime        @default(now())
+  closedAt     DateTime?
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 

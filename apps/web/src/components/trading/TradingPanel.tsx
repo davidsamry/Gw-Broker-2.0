@@ -119,7 +119,7 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
   const [investment, setInvestment] = useState(10)
   const [investmentRaw, setInvestmentRaw] = useState('')
   const [editingInvestment, setEditingInvestment] = useState(false)
-  const [timeIndex, setTimeIndex] = useState(1) // 300s = 5 min
+  const [timeIndex, setTimeIndex] = useState(0) // 60s = 1 min (padrão)
   const [timerPickerOpen, setTimerPickerOpen] = useState(false)
   const [openTrades, setOpenTrades] = useState<OpenTrade[]>([])
   const [placing, setPlacing] = useState(false)
@@ -151,6 +151,8 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
         accountId,
         assetId:          asset.id,
         assetSymbol:      asset.label,
+        // Backend needs this to fetch the real exit price from Binance at expiry.
+        marketSymbol:     asset.source === 'BINANCE' ? asset.marketSymbol : undefined,
         direction,
         amount:           investment,
         payout:           asset.payout,
@@ -238,32 +240,7 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
   return (
     <aside className={cn(mobile ? 'w-full' : 'w-[280px] flex-shrink-0 border-l border-[#2a2e3b]', 'flex flex-col bg-[#1d2130] overflow-hidden')}>
 
-      {/* Trade result popup */}
-      {tradeResult && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center pointer-events-none">
-          <div className={cn(
-            'pointer-events-auto px-7 py-5 rounded-xl shadow-2xl border relative min-w-[250px] text-center',
-            tradeResult.won
-              ? 'bg-green-600 border-green-400/60'
-              : 'bg-orange-600 border-orange-400/60'
-          )}>
-            <button
-              onClick={() => setTradeResult(null)}
-              className="absolute top-2 right-2 text-white/60 hover:text-white transition-colors"
-            >
-              <X size={14} />
-            </button>
-            <p className="text-[10px] font-bold text-white/70 tracking-widest mb-2">
-              RESULTADO (LUCRO / PERDA)
-            </p>
-            <p className="text-2xl font-bold text-white">
-              {tradeResult.won
-                ? `+${fmtMoney(tradeResult.profit)}.00 R$`
-                : '0.00 R$'}
-            </p>
-          </div>
-        </div>
-      )}
+      {/* Result is rendered pinned to the chart's expiry dot — see TradeResultMarker in TradingChart. */}
 
       {/* Asset header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a2e3b]">

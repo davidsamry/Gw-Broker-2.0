@@ -81,8 +81,8 @@ interface TradingChartProps {
   theme?: ChartTheme
   autoScroll?: boolean
   performanceMode?: boolean
-  activeTrade?: ActiveTrade | null
-  chartTradeEvent?: ChartTradeEvent | null
+  activeTrades?: ActiveTrade[]
+  chartTradeEvents?: ChartTradeEvent[]
 }
 
 const BINANCE_INTERVAL_BY_TIMEFRAME: Record<number, string> = {
@@ -135,20 +135,17 @@ function toHeikenAshi(candles: Candle[]): Candle[] {
   return ha
 }
 
-export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite', autoScroll = true, performanceMode = true, activeTrade, chartTradeEvent }: TradingChartProps) {
+export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite', autoScroll = true, performanceMode = true, activeTrades = [], chartTradeEvents = [] }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<any>(null)
   const seriesRef = useRef<any>(null)
   const autoScrollRef = useRef(autoScroll)
   const displayPriceRef = useRef(marketPrice ?? asset.price)
-  const tradeIntervalsRef = useRef<ReturnType<typeof setInterval>[]>([])
 
   const [timestamp, setTimestamp] = useState('')
   const [tfIndex, setTfIndex] = useState(3)
   const [tfOpen, setTfOpen] = useState(false)
-  const [tradeLinePositions, setTradeLinePositions] = useState<{ entryX: number; expiryX: number; entryY: number } | null>(null)
-  const [tradeResultPosition, setTradeResultPosition] = useState<number | null>(null)
-  const [tradeCountdown, setTradeCountdown] = useState(0)
+  const [chartReady, setChartReady] = useState(false)
   const [candleSecsLeft, setCandleSecsLeft] = useState(0)
   const [candleTimerY, setCandleTimerY] = useState<number | null>(null)
   const [candleTimerX, setCandleTimerX] = useState<number | null>(null)
@@ -216,7 +213,10 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
     if (!chartRef.current) return
     chartRef.current.applyOptions({
       kineticScroll: { touch: !performanceMode, mouse: !performanceMode },
-      handleScale: { axisPressedMouseMove: !performanceMode },
+      // Always lock price axis (Quotex-style). performanceMode only gates time-axis dragging.
+      handleScale: {
+        axisPressedMouseMove: { time: !performanceMode, price: false },
+      },
     })
   }, [performanceMode])
 
@@ -226,57 +226,6 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       chartRef.current.timeScale().scrollToRealTime()
     }
   }, [autoScroll])
-
-  // ── Active trade: price line + vertical lines + countdown ────────────────
-  useEffect(() => {
-    // Clear previous
-    tradeIntervalsRef.current.forEach(clearInterval)
-    tradeIntervalsRef.current = []
-    setTradeLinePositions(null)
-    setTradeCountdown(0)
-    setTradeResultPosition(null)
-
-    if (!activeTrade) return
-
-    const updateTradeLinePositions = () => {
-      if (!chartRef.current) return
-      const ts = chartRef.current.timeScale()
-      const rawEntryX = ts.timeToCoordinate(activeTrade.entryTime)
-      const rawExpiryX = ts.timeToCoordinate(activeTrade.expiryTime)
-      const fallbackWidth = chartContainerRef.current?.clientWidth ?? 0
-      const fallbackEntryX = fallbackWidth > 0 ? fallbackWidth * 0.78 : 120
-      const entryX = rawEntryX ?? fallbackEntryX
-      const expiryX = rawExpiryX ?? entryX + 120
-      const fallbackY = ((chartContainerRef.current?.clientHeight ?? 0) * 0.55) || 120
-      const entryY = seriesRef.current?.priceToCoordinate(activeTrade.entryPrice) ?? fallbackY
-      setTradeLinePositions({ entryX, expiryX, entryY })
-    }
-
-    updateTradeLinePositions()
-    const posId = setInterval(updateTradeLinePositions, 200)
-    tradeIntervalsRef.current.push(posId)
-
-    // Countdown
-    const tick = () => {
-      const remaining = activeTrade.expiryTime - Math.floor(Date.now() / 1000)
-      setTradeCountdown(Math.max(0, remaining))
-    }
-    tick()
-    const countId = setInterval(tick, 1000)
-    tradeIntervalsRef.current.push(countId)
-
-    return () => {
-      tradeIntervalsRef.current.forEach(clearInterval)
-      tradeIntervalsRef.current = []
-    }
-  }, [activeTrade])
-
-  useEffect(() => {
-    if (!chartTradeEvent || !chartRef.current) return
-    const ts = chartRef.current.timeScale()
-    const resultX = ts.timeToCoordinate(chartTradeEvent.expiryTime)
-    if (resultX != null) setTradeResultPosition(resultX)
-  }, [chartTradeEvent])
 
   useEffect(() => {
     let chart: any = null
@@ -305,7 +254,7 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
           vertLine: { color: tc.crosshair, labelBackgroundColor: tc.labelBg },
           horzLine: { color: tc.crosshair, labelBackgroundColor: tc.labelBg },
         },
-        rightPriceScale: { borderColor: tc.border, textColor: tc.text },
+        rightPriceScale: { borderColor: tc.border, textColor: tc.text, autoScale: true },
         timeScale: {
           borderColor: tc.border,
           timeVisible: true,
@@ -314,6 +263,19 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
           rightOffset: 10,
           barSpacing: 8,
           lockVisibleTimeRangeOnResize: true,
+        },
+        // Quotex-style: only horizontal pan + zoom. No vertical drag.
+        handleScroll: {
+          mouseWheel: true,
+          pressedMouseMove: true,   // horizontal drag with mouse
+          horzTouchDrag: true,
+          vertTouchDrag: false,      // disable vertical touch pan
+        },
+        handleScale: {
+          mouseWheel: true,
+          pinch: true,
+          axisPressedMouseMove: { time: true, price: false }, // can't drag price axis
+          axisDoubleClickReset: true,
         },
         width: chartContainerRef.current.clientWidth,
         height: chartContainerRef.current.clientHeight,
@@ -374,6 +336,7 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       }
 
       seriesRef.current = mainSeries
+      setChartReady(true)
 
       // Dashed price line at current close — estilo Quotex
       mainSeries.applyOptions({
@@ -504,6 +467,7 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       if (priceInterval) clearInterval(priceInterval)
       resizeObserver.disconnect()
       seriesRef.current = null
+      setChartReady(false)
       if (chartRef.current) {
         chartRef.current.remove()
         chartRef.current = null
@@ -560,55 +524,6 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         </div>
       )}
 
-      {/* Abertura / Fechamento labels — só aparecem com operação ativa */}
-      {activeTrade && tradeLinePositions && (
-        <div className="absolute top-14 left-0 right-0 z-10 pointer-events-none">
-          <span
-            className="absolute text-[10px] text-[#8b8f9a] opacity-70 -translate-x-1/2"
-            style={{ left: tradeLinePositions.entryX }}
-          >
-            Abertura da negociação
-          </span>
-          <span
-            className="absolute text-[10px] text-[#8b8f9a] opacity-70 -translate-x-1/2"
-            style={{ left: tradeLinePositions.expiryX }}
-          >
-            Fechamento da negociação
-          </span>
-        </div>
-      )}
-
-      {chartTradeEvent && tradeResultPosition != null && (
-        <div
-          className="absolute z-[6] pointer-events-none"
-          style={{
-            left: tradeResultPosition - 18,
-            top: tradeLinePositions?.entryY != null ? tradeLinePositions.entryY - 20 : 118,
-          }}
-        >
-          <div className={cn(
-            'px-2 py-1 rounded-md text-[10px] font-bold text-white shadow-lg whitespace-nowrap',
-            chartTradeEvent.status === 'RESOLVED'
-              ? chartTradeEvent.won
-                ? 'bg-green-500/90'
-                : 'bg-red-500/90'
-              : chartTradeEvent.direction === 'CALL'
-                ? 'bg-[#26a69a]/90'
-                : 'bg-[#ef5350]/90'
-          )}>
-            {chartTradeEvent.status === 'RESOLVED'
-              ? chartTradeEvent.won ? 'EXECUTADA' : 'EXPIRADA'
-              : chartTradeEvent.direction === 'CALL' ? 'COMPRA' : 'VENDA'}
-          </div>
-          <div className={cn(
-            'absolute left-1/2 -translate-x-1/2 mt-1 w-2.5 h-2.5 rounded-full ring-2 ring-[#151822]',
-            chartTradeEvent.status === 'RESOLVED'
-              ? chartTradeEvent.won ? 'bg-green-400' : 'bg-red-400'
-              : chartTradeEvent.direction === 'CALL' ? 'bg-[#26a69a]' : 'bg-[#ef5350]'
-          )} />
-        </div>
-      )}
-
       {/* Drawings panel overlay */}
       {drawingsOpen && <DrawingsPanel onClose={() => setDrawingsOpen(false)} />}
 
@@ -622,55 +537,36 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         />
       )}
 
-      {/* Vertical trade lines */}
-      {activeTrade && tradeLinePositions && (
-        <>
-          <div
-            className="absolute pointer-events-none z-[5]"
-            style={{
-              left: tradeLinePositions.entryX,
-              top: tradeLinePositions.entryY,
-              width: Math.max(0, tradeLinePositions.expiryX - tradeLinePositions.entryX),
-              borderTop: `2px solid ${activeTrade.direction === 'CALL' ? 'rgba(38, 166, 154, 0.9)' : 'rgba(239, 83, 80, 0.9)'}`,
-            }}
+      {/* One marker per active trade — each marker has its own state.
+          stackIdx offsets the chip vertically when 2+ trades share the same candle. */}
+      {chartReady && activeTrades.map((trade) => {
+        const tfSec = selectedTf.seconds
+        const myAligned = Math.floor(trade.entryTime / tfSec) * tfSec
+        const sameCandle = activeTrades.filter(t => Math.floor(t.entryTime / tfSec) * tfSec === myAligned)
+        const stackIdx = sameCandle.findIndex(t => t.id === trade.id)
+        return (
+          <TradeMarker
+            key={trade.id}
+            trade={trade}
+            chartRef={chartRef}
+            seriesRef={seriesRef}
+            containerRef={chartContainerRef}
+            tfSec={tfSec}
+            stackIdx={stackIdx}
           />
-          <div
-            className="absolute pointer-events-none z-[4]"
-            style={{
-              left: tradeLinePositions.entryX,
-              top: tradeLinePositions.entryY + 1,
-              width: Math.max(0, tradeLinePositions.expiryX - tradeLinePositions.entryX),
-              borderTop: '1px dashed rgba(255,255,255,0.18)',
-            }}
-          />
-          <div
-            className="absolute z-[6] pointer-events-none"
-            style={{ left: tradeLinePositions.entryX - 4, top: tradeLinePositions.entryY - 4 }}
-          >
-            <div className={cn(
-              'w-2.5 h-2.5 rounded-full ring-2 ring-[#151822]',
-              activeTrade.direction === 'CALL' ? 'bg-[#26a69a]' : 'bg-[#ef5350]'
-            )} />
-          </div>
-          <div
-            className="absolute z-[6] pointer-events-none"
-            style={{ left: tradeLinePositions.expiryX - 4, top: tradeLinePositions.entryY - 4 }}
-          >
-            <div className="w-2.5 h-2.5 rounded-full bg-white ring-2 ring-[#151822]" />
-          </div>
-          <div
-            className="absolute z-[6] pointer-events-none"
-            style={{ left: tradeLinePositions.entryX + 6, top: tradeLinePositions.entryY - 24 }}
-          >
-            <div className={cn(
-              'px-2 py-1 rounded-md text-[10px] font-bold text-white shadow-lg whitespace-nowrap',
-              activeTrade.direction === 'CALL' ? 'bg-[#26a69a]/90' : 'bg-[#ef5350]/90'
-            )}>
-              {activeTrade.direction === 'CALL' ? 'COMPRA' : 'VENDA'}
-            </div>
-          </div>
-        </>
-      )}
+        )
+      })}
+
+      {/* One result chip per resolved event (auto-cleared by parent after 4s) */}
+      {chartReady && chartTradeEvents.map(event => (
+        <TradeResultMarker
+          key={event.id}
+          event={event}
+          chartRef={chartRef}
+          seriesRef={seriesRef}
+          tfSec={selectedTf.seconds}
+        />
+      ))}
 
       {/* Chart */}
       <div ref={chartContainerRef} className="flex-1 w-full" />
@@ -798,5 +694,258 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         </button>
       </div>
     </div>
+  )
+}
+
+// ── TradeMarker ─────────────────────────────────────────────────────────────
+// Renders the entry chip + dotted line + entry/expiry dots for ONE open trade.
+// Each instance owns its own position state and countdown so multiple markers
+// can coexist without overwriting each other.
+interface TradeMarkerProps {
+  trade:         ActiveTrade
+  chartRef:      React.MutableRefObject<any>
+  seriesRef:     React.MutableRefObject<any>
+  containerRef:  React.RefObject<HTMLDivElement | null>
+  tfSec:         number
+  stackIdx:      number
+}
+
+function TradeMarker({ trade, chartRef, seriesRef, containerRef, tfSec, stackIdx }: TradeMarkerProps) {
+  const [pos, setPos]             = useState<{ entryX: number; expiryX: number; entryY: number } | null>(null)
+  const [countdown, setCountdown] = useState(0)
+
+  useEffect(() => {
+    const update = () => {
+      const chart = chartRef.current
+      const series = seriesRef.current
+      if (!chart || !series) return
+      const ts = chart.timeScale()
+
+      const entryAligned  = Math.floor(trade.entryTime  / tfSec) * tfSec
+      const expiryAligned = Math.floor(trade.expiryTime / tfSec) * tfSec
+
+      let entryX  = ts.timeToCoordinate(entryAligned)  ?? null
+      let expiryX = ts.timeToCoordinate(expiryAligned) ?? null
+
+      // Extrapolate when expiry is beyond the chart's rightOffset window.
+      if (entryX != null && expiryX == null) {
+        const range = ts.getVisibleLogicalRange?.()
+        const w = containerRef.current?.clientWidth ?? 0
+        if (range && w > 0) {
+          const bars = Math.max(1, range.to - range.from)
+          const barW = w / bars
+          expiryX = entryX + ((expiryAligned - entryAligned) / tfSec) * barW
+        }
+      }
+      if (expiryX != null && entryX == null) {
+        const range = ts.getVisibleLogicalRange?.()
+        const w = containerRef.current?.clientWidth ?? 0
+        if (range && w > 0) {
+          const bars = Math.max(1, range.to - range.from)
+          const barW = w / bars
+          entryX = expiryX - ((expiryAligned - entryAligned) / tfSec) * barW
+        }
+      }
+
+      const entryY = series.priceToCoordinate(trade.entryPrice)
+      if (entryX == null || expiryX == null || entryY == null) return
+      setPos({ entryX, expiryX, entryY })
+    }
+
+    update()
+
+    // Subscribe to pan/zoom for instant updates; poll every 500ms as a fallback
+    // for late chart init and price-axis auto-scale (Y reposition).
+    let subscribedTs: any = null
+    const trySubscribe = () => {
+      if (subscribedTs || !chartRef.current) return
+      subscribedTs = chartRef.current.timeScale()
+      subscribedTs.subscribeVisibleLogicalRangeChange(update)
+    }
+    trySubscribe()
+    const tickPos = setInterval(() => { trySubscribe(); update() }, 500)
+
+    const tickCountdown = () => {
+      const nowBrt = Math.floor(Date.now() / 1000) + BRT_OFFSET
+      setCountdown(Math.max(0, trade.expiryTime - nowBrt))
+    }
+    tickCountdown()
+    const countId = setInterval(tickCountdown, 1000)
+
+    return () => {
+      clearInterval(tickPos)
+      clearInterval(countId)
+      if (subscribedTs) {
+        try { subscribedTs.unsubscribeVisibleLogicalRangeChange(update) } catch {}
+      }
+    }
+  }, [trade, tfSec, chartRef, seriesRef, containerRef])
+
+  if (!pos) return null
+
+  return (
+    <>
+      <div
+        className="absolute pointer-events-none z-[5]"
+        style={{
+          left:       pos.entryX,
+          top:        pos.entryY,
+          width:      Math.max(0, pos.expiryX - pos.entryX),
+          borderTop:  `2px solid ${trade.direction === 'CALL' ? 'rgba(38, 166, 154, 0.9)' : 'rgba(239, 83, 80, 0.9)'}`,
+        }}
+      />
+      <div
+        className="absolute pointer-events-none z-[4]"
+        style={{
+          left:       pos.entryX,
+          top:        pos.entryY + 1,
+          width:      Math.max(0, pos.expiryX - pos.entryX),
+          borderTop:  '1px dashed rgba(255,255,255,0.18)',
+        }}
+      />
+      <div
+        className="absolute z-[6] pointer-events-none"
+        style={{ left: pos.entryX - 4, top: pos.entryY - 4 }}
+      >
+        <div className={cn(
+          'w-2.5 h-2.5 rounded-full ring-2 ring-[#151822]',
+          trade.direction === 'CALL' ? 'bg-[#26a69a]' : 'bg-[#ef5350]'
+        )} />
+      </div>
+      <div
+        className="absolute z-[6] pointer-events-none"
+        style={{ left: pos.expiryX - 4, top: pos.entryY - 4 }}
+      >
+        <div className="w-2.5 h-2.5 rounded-full bg-white ring-2 ring-[#151822]" />
+      </div>
+      <div
+        className="absolute z-[6] pointer-events-none"
+        style={{
+          // Stack chips for trades opened in the same candle so neither hides behind the other.
+          left:      pos.entryX - 4,
+          top:       pos.entryY - stackIdx * 24,
+          transform: 'translate(-100%, -50%)',
+        }}
+      >
+        <div className={cn(
+          'flex items-center gap-1.5 pl-1 pr-2 py-[3px] rounded-full text-[10px] font-bold text-white shadow-lg whitespace-nowrap',
+          trade.direction === 'CALL' ? 'bg-[#26a69a]' : 'bg-[#ef5350]'
+        )}>
+          <span className="flex items-center justify-center w-4 h-4 rounded-full bg-white/25 text-[9px] leading-none">
+            {trade.direction === 'CALL' ? '▲' : '▼'}
+          </span>
+          <span>{trade.amount} R$</span>
+          <span className="font-mono opacity-90">
+            {String(Math.floor(countdown / 60)).padStart(2, '0')}:{String(countdown % 60).padStart(2, '0')}
+          </span>
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ── TradeResultMarker ───────────────────────────────────────────────────────
+// Brief EXECUTADA/EXPIRADA chip shown at the expiry of a just-resolved trade.
+interface TradeResultMarkerProps {
+  event:     ChartTradeEvent
+  chartRef:  React.MutableRefObject<any>
+  seriesRef: React.MutableRefObject<any>
+  tfSec:     number
+}
+
+function TradeResultMarker({ event, chartRef, seriesRef, tfSec }: TradeResultMarkerProps) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const [dismissed, setDismissed] = useState(false)
+
+  useEffect(() => {
+    const update = () => {
+      const chart = chartRef.current
+      const series = seriesRef.current
+      if (!chart || !series) return
+      const ts = chart.timeScale()
+      // Snap expiry to candle boundary — same trick as TradeMarker.
+      const expiryAligned = Math.floor(event.expiryTime / tfSec) * tfSec
+      let x = ts.timeToCoordinate(expiryAligned)
+      // Fall back: extrapolate from entry candle when expiry is beyond rightOffset.
+      if (x == null) {
+        const entryAligned = Math.floor(event.entryTime / tfSec) * tfSec
+        const entryX = ts.timeToCoordinate(entryAligned)
+        const range  = ts.getVisibleLogicalRange?.()
+        const w      = chart.timeScale().width?.() ?? chart.chartElement?.()?.clientWidth ?? 0
+        if (entryX != null && range && w > 0) {
+          const bars = Math.max(1, range.to - range.from)
+          const barW = w / bars
+          x = entryX + ((expiryAligned - entryAligned) / tfSec) * barW
+        }
+      }
+      const y = series.priceToCoordinate(event.entryPrice)
+      if (x != null && y != null) setPos({ x, y })
+    }
+    update()
+    let subscribedTs: any = null
+    const trySubscribe = () => {
+      if (subscribedTs || !chartRef.current) return
+      subscribedTs = chartRef.current.timeScale()
+      subscribedTs.subscribeVisibleLogicalRangeChange(update)
+    }
+    trySubscribe()
+    const tickId = setInterval(() => { trySubscribe(); update() }, 500)
+    return () => {
+      clearInterval(tickId)
+      if (subscribedTs) {
+        try { subscribedTs.unsubscribeVisibleLogicalRangeChange(update) } catch {}
+      }
+    }
+  }, [event, chartRef, seriesRef])
+
+  if (!pos || dismissed) return null
+
+  const profit = event.won ? (event.profit ?? 0) : 0
+  const sign   = profit > 0 ? '+' : ''
+
+  return (
+    <>
+      {/* Card to the LEFT of the expiry dot — Quotex-style compact result */}
+      <div
+        className="absolute z-[7]"
+        style={{
+          left:      pos.x - 10,
+          top:       pos.y,
+          transform: 'translate(-100%, -50%)',
+        }}
+      >
+        <div className={cn(
+          'flex items-stretch rounded-lg shadow-xl overflow-hidden pointer-events-auto',
+          event.won ? 'bg-[#2e9c5f]' : 'bg-[#d65555]'
+        )}>
+          <div className="flex flex-col px-4 py-2 min-w-[180px]">
+            <span className="text-[10px] text-white/85 tracking-wider font-semibold uppercase leading-tight">
+              Resultado (lucro / perda)
+            </span>
+            <span className="text-[18px] font-bold leading-tight mt-1 font-mono text-white">
+              {sign}{profit.toFixed(2)} R$
+            </span>
+          </div>
+          <button
+            onClick={() => setDismissed(true)}
+            className="px-2 text-white/70 hover:text-white hover:bg-black/15 transition-colors flex items-center"
+            aria-label="Fechar"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+
+      {/* Dot at the chart position where the trade ended */}
+      <div
+        className="absolute z-[6] pointer-events-none"
+        style={{ left: pos.x - 5, top: pos.y - 5 }}
+      >
+        <div className={cn(
+          'w-3 h-3 rounded-full ring-2 ring-[#151822]',
+          event.won ? 'bg-[#26a69a]' : 'bg-[#ef5350]'
+        )} />
+      </div>
+    </>
   )
 }

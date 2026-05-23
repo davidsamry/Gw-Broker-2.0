@@ -3,6 +3,7 @@ import { type Asset, type Candle } from './marketTypes'
 export type { Asset, Candle } from './marketTypes'
 
 export interface ActiveTrade {
+  id: string
   entryPrice: number
   entryTime: number
   expiryTime: number

@@ -80,26 +80,37 @@ export default function TradingPage() {
   })
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('TRADE')
   const [mobileAccountOpen, setMobileAccountOpen] = useState(false)
-  const [activeTrade, setActiveTrade] = useState<ActiveTrade | null>(null)
-  const [chartTradeEvent, setChartTradeEvent] = useState<ChartTradeEvent | null>(null)
+  const [activeTrades, setActiveTrades] = useState<ActiveTrade[]>([])
+  const [chartTradeEvents, setChartTradeEvents] = useState<ChartTradeEvent[]>([])
   const binanceTicker = useBinanceTicker(selectedAsset.source === 'BINANCE' ? selectedAsset.marketSymbol : undefined)
   const displayPrice = binanceTicker?.price ?? selectedAsset.price
 
   function handleTradePlaced(trade: ChartTradeEvent | null) {
-    if (!trade) {
-      setActiveTrade(null)
-      return
+    // Legacy null call from TradingPanel's cleanup timeout is now redundant:
+    // we handle per-trade cleanup ourselves via setTimeout below.
+    if (!trade) return
+
+    if (trade.status === 'OPEN') {
+      setActiveTrades(prev => [
+        ...prev.filter(t => t.id !== trade.id),
+        {
+          id:         trade.id,
+          entryPrice: trade.entryPrice,
+          entryTime:  trade.entryTime,
+          expiryTime: trade.expiryTime,
+          direction:  trade.direction,
+          amount:     trade.amount,
+          payout:     trade.payout,
+        },
+      ])
+    } else { // RESOLVED
+      setActiveTrades(prev => prev.filter(t => t.id !== trade.id))
+      setChartTradeEvents(prev => [...prev.filter(t => t.id !== trade.id), trade])
+      setTimeout(() => {
+        setChartTradeEvents(prev => prev.filter(t => t.id !== trade.id))
+      }, 4000)
     }
 
-    setChartTradeEvent(trade)
-    setActiveTrade(trade.status === 'OPEN' ? {
-      entryPrice: trade.entryPrice,
-      entryTime: trade.entryTime,
-      expiryTime: trade.expiryTime,
-      direction: trade.direction,
-      amount: trade.amount,
-      payout: trade.payout,
-    } : null)
     authStore.refreshAccounts()
   }
 
@@ -147,7 +158,7 @@ export default function TradingPage() {
     if (sidebarTab === 'MAIS')     return (
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {!isMobile && <MaisPanel onClose={() => setSidebarTab('TRADE')} onSelectAsset={(asset) => { handleSelectAsset(asset); setSidebarTab('TRADE') }} />}
-        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrade={activeTrade} chartTradeEvent={chartTradeEvent} />
+        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
         {!isMobile && <TradingPanel asset={selectedAsset} marketPrice={displayPrice} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={handleTradePlaced} />}
       </div>
     )
@@ -160,7 +171,7 @@ export default function TradingPage() {
         {!isMobile && assetSelectorOpen && (
           <AssetSelectorModal selectedAsset={selectedAsset} assets={assets} onSelect={handleSelectAsset} onClose={() => setAssetSelectorOpen(false)} />
         )}
-        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrade={activeTrade} chartTradeEvent={chartTradeEvent} />
+        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
         {!isMobile && <TradingPanel asset={selectedAsset} marketPrice={displayPrice} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={handleTradePlaced} />}
       </div>
     )
