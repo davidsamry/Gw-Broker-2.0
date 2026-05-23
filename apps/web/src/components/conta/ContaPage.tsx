@@ -70,19 +70,23 @@ function FloatingInput({
   type?: 'text' | 'date'
 }) {
   return (
-    <div className="relative border border-[#2a2e3b] rounded-lg px-3 pt-4 pb-2 bg-[#1a1e2e] focus-within:border-blue-500/50 transition-colors">
-      <span className="absolute top-1.5 left-3 text-[10px] text-[#8b8f9a] font-medium">{label}</span>
-      <div className="flex items-center justify-between">
+    <div>
+      {/* Label above the field — separate row so it never overlaps the
+          input text/placeholder. */}
+      <label className="block text-[11px] font-medium text-[#8b8f9a] mb-1.5 px-1">
+        {label}
+      </label>
+      <div className="flex items-center justify-between border border-[#2a2e3b] rounded-lg px-3 py-2.5 bg-[#1a1e2e] focus-within:border-blue-500/50 transition-colors">
         <input
           type={type}
           value={value}
           onChange={(e) => onChange?.(e.target.value)}
           readOnly={readOnly}
           placeholder={placeholder}
-          className="flex-1 bg-transparent text-sm text-white outline-none placeholder-[#8b8f9a]"
+          className="flex-1 bg-transparent text-sm text-white outline-none placeholder-[#3a3f50] min-w-0"
         />
         {rightLabel && (
-          <span className={cn('text-xs font-semibold ml-2', rightLabelColor)}>{rightLabel}</span>
+          <span className={cn('text-xs font-semibold ml-2 flex-shrink-0', rightLabelColor)}>{rightLabel}</span>
         )}
       </div>
     </div>
