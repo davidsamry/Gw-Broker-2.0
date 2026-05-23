@@ -861,8 +861,9 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
 
       {/* Bottom-center chart controls: zoom in / zoom out / reset view.
           Mirrors the Quotex layout — three small pill buttons centered
-          above the date label & TradingView attribution. */}
-      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10">
+          above the date label & TradingView attribution. Offset bottom
+          enough to clear the time-axis labels (~28px tall). */}
+      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10">
         <button
           onClick={() => zoomChart(1.25)}
           title="Aproximar"
