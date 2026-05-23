@@ -179,5 +179,18 @@ export interface OpenTrade {
   profit: number
   timeLeft: number
   entryPrice: number
+  expiryTime: number  // BRT-shifted epoch seconds — used for regressive countdown
+}
+
+export interface ClosedTrade {
+  id:          string
+  assetSymbol: string
+  code1:       string
+  code2:       string
+  direction:   'CALL' | 'PUT'
+  amount:      number
+  profit:      number
+  status:      'WON' | 'LOST' | 'CANCELLED'
+  closedAt:    string
 }
 

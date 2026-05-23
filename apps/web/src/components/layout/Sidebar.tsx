@@ -1,9 +1,9 @@
 'use client'
 
-import { BarChart2, Headphones, User, Trophy, TrendingUp, MoreHorizontal, Settings, Volume2, Grid2x2, ArrowLeftRight, Menu } from 'lucide-react'
+import { BarChart2, Headphones, User, Trophy, History, Users, Gift, Menu } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-type SidebarTab = 'TRADE' | 'SUPORTE' | 'CONTA' | 'TORNEIOS' | 'MERCADO' | 'MAIS'
+type SidebarTab = 'TRADE' | 'HISTORICO' | 'RANKING' | 'SUPORTE' | 'CONTA' | 'COPY' | 'BONUS'
 
 interface SidebarProps {
   activeTab: SidebarTab
@@ -12,25 +12,28 @@ interface SidebarProps {
 }
 
 interface NavItem {
-  icon: React.ReactNode
-  label: SidebarTab
-  badge?: number
+  icon:       React.ReactNode
+  label:      SidebarTab
+  text:       string
+  badge?:     number
+  highlight?: boolean
 }
 
 const navItems: NavItem[] = [
-  { icon: <BarChart2 size={18} />, label: 'TRADE' },
-  { icon: <Headphones size={18} />, label: 'SUPORTE' },
-  { icon: <User size={18} />, label: 'CONTA' },
-  { icon: <Trophy size={18} />, label: 'TORNEIOS', badge: 4 },
-  { icon: <TrendingUp size={18} />, label: 'MERCADO', badge: 4 },
-  { icon: <MoreHorizontal size={18} />, label: 'MAIS' },
+  { icon: <BarChart2 size={18} />,  label: 'TRADE',     text: 'TRADE' },
+  { icon: <History size={18} />,    label: 'HISTORICO', text: 'HISTÓRICO' },
+  { icon: <Trophy size={18} />,     label: 'RANKING',   text: 'RANKING' },
+  { icon: <Gift size={18} />,       label: 'BONUS',     text: 'BÔNUS', highlight: true },
+  { icon: <Headphones size={18} />, label: 'SUPORTE',   text: 'SUPORTE' },
+  { icon: <User size={18} />,       label: 'CONTA',     text: 'CONTA' },
+  { icon: <Users size={18} />,      label: 'COPY',      text: 'COPY' },
 ]
 
 export function Sidebar({ activeTab, onTabChange, onSettings }: SidebarProps) {
   return (
     <aside className="w-[62px] flex flex-col items-center bg-[#1d2130] border-r border-[#2a2e3b] flex-shrink-0 select-none z-10">
-      {/* Hamburger */}
-      <button className="w-full h-12 flex items-center justify-center text-[#8b8f9a] hover:text-white transition-colors border-b border-[#2a2e3b]">
+      {/* Hamburger — matches the page header height so TRADE icon aligns with chart top */}
+      <button className="w-full h-14 flex items-center justify-center text-[#8b8f9a] hover:text-white transition-colors border-b border-[#2a2e3b]">
         <Menu size={20} />
       </button>
 
@@ -45,7 +48,11 @@ export function Sidebar({ activeTab, onTabChange, onSettings }: SidebarProps) {
               onClick={() => onTabChange(item.label)}
               className={cn(
                 'relative w-full flex flex-col items-center justify-center gap-0.5 py-2 px-1 transition-colors',
-                isActive ? 'text-white' : 'text-[#8b8f9a] hover:text-white'
+                isActive
+                  ? 'text-white'
+                  : item.highlight
+                    ? 'text-yellow-400 hover:text-yellow-300'
+                    : 'text-[#8b8f9a] hover:text-white'
               )}
             >
               {isActive && (
@@ -53,7 +60,11 @@ export function Sidebar({ activeTab, onTabChange, onSettings }: SidebarProps) {
               )}
               <span className={cn(
                 'w-8 h-8 flex items-center justify-center rounded-md relative',
-                isActive ? 'bg-blue-600 text-white' : ''
+                isActive
+                  ? 'bg-blue-600 text-white'
+                  : item.highlight
+                    ? 'bg-yellow-400/10 ring-1 ring-yellow-400/40'
+                    : ''
               )}>
                 {item.icon}
                 {item.badge != null && (
@@ -61,52 +72,18 @@ export function Sidebar({ activeTab, onTabChange, onSettings }: SidebarProps) {
                     {item.badge}
                   </span>
                 )}
+                {item.highlight && !isActive && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-yellow-400 animate-pulse ring-2 ring-[#1d2130]" />
+                )}
               </span>
               <span className="text-[9px] font-semibold tracking-wide leading-none">
-                {item.label}
+                {item.text}
               </span>
             </button>
           )
         })}
       </div>
 
-      {/* Bottom section */}
-      <div className="flex flex-col items-center gap-1 pb-2 w-full border-t border-[#2a2e3b] pt-2">
-        {/* 2x2 icon grid */}
-        <div className="grid grid-cols-2 w-full px-1 gap-0.5">
-          <button title="Expandir" className="flex items-center justify-center py-1.5 text-[#8b8f9a] hover:text-white transition-colors rounded">
-            <Grid2x2 size={15} />
-          </button>
-          <button title="Transferir" className="flex items-center justify-center py-1.5 text-[#8b8f9a] hover:text-white transition-colors rounded">
-            <ArrowLeftRight size={15} />
-          </button>
-          <button title="Configurações" onClick={onSettings} className="flex items-center justify-center py-1.5 text-[#8b8f9a] hover:text-white transition-colors rounded">
-            <Settings size={15} />
-          </button>
-          <button title="Som" className="flex items-center justify-center py-1.5 text-[#8b8f9a] hover:text-white transition-colors rounded">
-            <Volume2 size={15} />
-          </button>
-        </div>
-
-        {/* Junte-se a nós */}
-        <button
-          title="Junte-se a nós"
-          className="mx-2 w-[46px] flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 transition-colors"
-        >
-          <span className="text-[7px] font-bold text-white text-center leading-tight">JUNTE-SE A NÓS</span>
-        </button>
-
-        {/* Ajuda */}
-        <button
-          title="Ajuda"
-          className="mx-2 w-[46px] flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 transition-colors"
-        >
-          <div className="w-4 h-4 rounded-full bg-white/20 flex items-center justify-center">
-            <span className="text-white text-[8px]">●</span>
-          </div>
-          <span className="text-[8px] font-bold text-white leading-none">Ajuda</span>
-        </button>
-      </div>
     </aside>
   )
 }

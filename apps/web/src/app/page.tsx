@@ -15,11 +15,10 @@ import { AccountSwitchModal } from '@/components/layout/AccountSwitchModal'
 import { AssetInfoModal } from '@/components/trading/AssetInfoModal'
 import { AssetSelectorModal } from '@/components/trading/AssetSelectorModal'
 import { SupportPanel } from '@/components/layout/SupportPanel'
-import { SupportPage } from '@/components/support/SupportPage'
 import { ContaPage } from '@/components/conta/ContaPage'
-import { TorneiosPage } from '@/components/torneios/TorneiosPage'
-import { MercadoPage } from '@/components/mercado/MercadoPage'
-import { MaisPanel } from '@/components/layout/MaisPanel'
+import { HistoricoPanel } from '@/components/layout/HistoricoPanel'
+import { RankingPanel } from '@/components/layout/RankingPanel'
+import { BonusPanel } from '@/components/layout/BonusPanel'
 import { ConfiguracoesPanel, type TradeSettings } from '@/components/layout/ConfiguracoesPanel'
 import { DepositoModal } from '@/components/deposito/DepositoModal'
 import { AccountDropdown } from '@/components/layout/AccountDropdown'
@@ -28,7 +27,7 @@ import { useBinanceTicker } from '@/lib/binanceMarket'
 import { fetchMarketAssets } from '@/lib/marketApi'
 import { cn } from '@/lib/utils'
 
-type SidebarTab = 'TRADE' | 'SUPORTE' | 'CONTA' | 'TORNEIOS' | 'MERCADO' | 'MAIS'
+type SidebarTab = 'TRADE' | 'HISTORICO' | 'RANKING' | 'SUPORTE' | 'CONTA' | 'COPY' | 'BONUS'
 
 export default function TradingPage() {
   const router        = useRouter()
@@ -150,19 +149,34 @@ export default function TradingPage() {
     if (sidebarTab === 'SUPORTE') return (
       <div className={cn('flex flex-1 min-h-0 overflow-hidden', isMobile && 'flex-col')}>
         {!isMobile && <SupportPanel onClose={() => setSidebarTab('TRADE')} />}
-        <SupportPage />
+        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
+        {isMobile && <SupportPanel onClose={() => setSidebarTab('TRADE')} />}
       </div>
     )
-    if (sidebarTab === 'CONTA')    return <ContaPage key={contaInitialTab} initialTab={contaInitialTab} />
-    if (sidebarTab === 'TORNEIOS') return <TorneiosPage />
-    if (sidebarTab === 'MERCADO')  return <MercadoPage />
-    if (sidebarTab === 'MAIS')     return (
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {!isMobile && <MaisPanel onClose={() => setSidebarTab('TRADE')} onSelectAsset={(asset) => { handleSelectAsset(asset); setSidebarTab('TRADE') }} />}
-        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        {!isMobile && <TradingPanel asset={selectedAsset} marketPrice={displayPrice} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={handleTradePlaced} />}
+    if (sidebarTab === 'CONTA')     return <ContaPage key={contaInitialTab} initialTab={contaInitialTab} />
+    if (sidebarTab === 'HISTORICO') return (
+      <div className={cn('flex flex-1 min-h-0 overflow-hidden', isMobile && 'flex-col')}>
+        {!isMobile && <HistoricoPanel onClose={() => setSidebarTab('TRADE')} isDemo={authStore.isDemo} />}
+        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
+        {isMobile && <HistoricoPanel onClose={() => setSidebarTab('TRADE')} isDemo={authStore.isDemo} />}
       </div>
     )
+    if (sidebarTab === 'RANKING')   return (
+      <div className={cn('flex flex-1 min-h-0 overflow-hidden', isMobile && 'flex-col')}>
+        {!isMobile && <RankingPanel onClose={() => setSidebarTab('TRADE')} userName={authStore.user?.name} userCode="br" />}
+        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
+        {isMobile && <RankingPanel onClose={() => setSidebarTab('TRADE')} userName={authStore.user?.name} userCode="br" />}
+      </div>
+    )
+    if (sidebarTab === 'BONUS') return (
+      <div className={cn('flex flex-1 min-h-0 overflow-hidden', isMobile && 'flex-col')}>
+        {!isMobile && <BonusPanel onClose={() => setSidebarTab('TRADE')} />}
+        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
+        {isMobile && <BonusPanel onClose={() => setSidebarTab('TRADE')} />}
+      </div>
+    )
+    if (sidebarTab === 'COPY')      return <ComingSoon title="Copy Trading" message="Em breve você poderá copiar automaticamente as melhores operações de traders profissionais." />
+
     // TRADE (default)
     return (
       <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -316,6 +330,21 @@ export default function TradingPage() {
       {switchModal && (
         <AccountSwitchModal switchedTo={switchModal} demoBalance={demoBalance} realBalance={realBalance} onClose={() => setSwitchModal(null)} />
       )}
+    </div>
+  )
+}
+
+function ComingSoon({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 text-center bg-[#151822]">
+      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-cyan-400/20 border border-blue-500/30 flex items-center justify-center mb-5">
+        <span className="text-2xl">🚀</span>
+      </div>
+      <h2 className="text-white text-xl font-bold mb-2">{title}</h2>
+      <p className="text-[#8b8f9a] text-sm max-w-md leading-relaxed">{message}</p>
+      <span className="mt-6 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-400 text-[10px] font-bold tracking-widest uppercase">
+        Em breve
+      </span>
     </div>
   )
 }

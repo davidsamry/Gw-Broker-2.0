@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Minus, Plus, ArrowUp, ArrowDown, ChevronDown, ChevronUp, Package, X } from 'lucide-react'
-import { type Asset, type OpenTrade, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
+import { type Asset, type OpenTrade, type ClosedTrade, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
 import { api } from '@/lib/api'
@@ -57,17 +57,23 @@ function FloatingBox({ label, link, children }: {
 }
 
 function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: boolean }) {
-  const [elapsed, setElapsed] = useState(trade.timeLeft)
+  // Regressive countdown synchronized with the chart marker:
+  // both use `expiryTime - (Date.now()/1000 + BRT_OFFSET)`.
+  const [remaining, setRemaining] = useState(() => Math.max(0, trade.expiryTime - (Math.floor(Date.now() / 1000) + BRT_OFFSET)))
   const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
-    const t = setInterval(() => setElapsed(v => v + 1), 1000)
+    const tick = () => {
+      const nowBrt = Math.floor(Date.now() / 1000) + BRT_OFFSET
+      setRemaining(Math.max(0, trade.expiryTime - nowBrt))
+    }
+    tick()
+    const t = setInterval(tick, 1000)
     return () => clearInterval(t)
-  }, [])
+  }, [trade.expiryTime])
 
-  const h = Math.floor(elapsed / 3600).toString().padStart(2, '0')
-  const m = Math.floor((elapsed % 3600) / 60).toString().padStart(2, '0')
-  const s = (elapsed % 60).toString().padStart(2, '0')
+  const m = Math.floor(remaining / 60).toString().padStart(2, '0')
+  const s = (remaining % 60).toString().padStart(2, '0')
 
   const name = trade.asset.label.length > 13 ? trade.asset.label.slice(0, 13) + '...' : trade.asset.label
   const earlyExitValue = Math.round(trade.amount * 0.2)
@@ -84,19 +90,25 @@ function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: bool
           <span className="flex-1 text-[12px] font-semibold text-white truncate">
             {shortLabels ? name : trade.asset.label}
           </span>
-          <span className="text-[11px] font-mono text-[#8b8f9a] flex-shrink-0">{h}:{m}:{s}</span>
+          <span className={cn(
+            'text-[11px] font-mono font-bold flex-shrink-0',
+            remaining <= 10 ? 'text-red-400' : remaining <= 30 ? 'text-yellow-400' : 'text-[#8b8f9a]'
+          )}>
+            {m}:{s}
+          </span>
         </div>
         <div className="flex items-center gap-1.5 mt-0.5 pl-5">
           <span className={cn(
-            'w-3 h-3 rounded-full flex-shrink-0',
-            trade.direction === 'CALL' ? 'bg-green-500' : 'bg-red-500'
-          )} />
-          <span className="text-[11px] text-[#8b8f9a] flex-1">{fmtMoney(trade.amount)} R$</span>
-          <span className={cn(
-            'text-[11px] font-bold',
-            trade.profit > 0 ? 'text-green-400' : 'text-[#8b8f9a]'
+            'w-3.5 h-3.5 rounded-full flex items-center justify-center flex-shrink-0',
+            trade.direction === 'CALL' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
           )}>
-            {trade.profit > 0 ? `+${trade.profit.toFixed(2)}` : '0.00'} R$
+            {trade.direction === 'CALL'
+              ? <ArrowUp size={9} strokeWidth={3} />
+              : <ArrowDown size={9} strokeWidth={3} />}
+          </span>
+          <span className="text-[11px] text-[#8b8f9a] flex-1">{fmtMoney(trade.amount)} R$</span>
+          <span className="text-[11px] font-bold text-[#8b8f9a]">
+            0.00 R$
           </span>
         </div>
       </div>
@@ -115,6 +127,44 @@ function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: bool
   )
 }
 
+function ClosedTradeItem({ trade }: { trade: ClosedTrade }) {
+  const time = new Date(trade.closedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const won  = trade.status === 'WON'
+  const net  = won ? trade.profit : -trade.amount
+  const sign = net > 0 ? '+' : ''
+
+  return (
+    <div className="px-2 mb-px">
+      <div className="px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors">
+        <div className="flex items-center gap-1.5">
+          <FlagPair code1={trade.code1} code2={trade.code2} size={15} />
+          <span className="flex-1 text-[12px] font-semibold text-white truncate">
+            {trade.assetSymbol}
+          </span>
+          <span className="text-[10px] font-mono text-[#8b8f9a] flex-shrink-0">{time}</span>
+        </div>
+        <div className="flex items-center gap-1.5 mt-0.5 pl-5">
+          <span className={cn(
+            'w-3.5 h-3.5 rounded-full flex items-center justify-center flex-shrink-0',
+            trade.direction === 'CALL' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+          )}>
+            {trade.direction === 'CALL'
+              ? <ArrowUp size={9} strokeWidth={3} />
+              : <ArrowDown size={9} strokeWidth={3} />}
+          </span>
+          <span className="text-[11px] text-[#8b8f9a] flex-1">{fmtMoney(trade.amount)} R$</span>
+          <span className={cn(
+            'text-[11px] font-bold',
+            won ? 'text-green-400' : 'text-red-400'
+          )}>
+            {sign}{net.toFixed(2).replace('.', ',')} R$
+          </span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function TradingPanel({ asset, shortLabels = true, mobile = false, accountId, marketPrice, onTradePlaced }: TradingPanelProps) {
   const [investment, setInvestment] = useState(10)
   const [investmentRaw, setInvestmentRaw] = useState('')
@@ -122,9 +172,38 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
   const [timeIndex, setTimeIndex] = useState(0) // 60s = 1 min (padrão)
   const [timerPickerOpen, setTimerPickerOpen] = useState(false)
   const [openTrades, setOpenTrades] = useState<OpenTrade[]>([])
+  const [closedTrades, setClosedTrades] = useState<ClosedTrade[]>([])
   const [placing, setPlacing] = useState(false)
   const [tradeError, setTradeError] = useState('')
   const [tradeResult, setTradeResult] = useState<{ direction: 'CALL' | 'PUT'; amount: number; profit: number; won: boolean } | null>(null)
+
+  // Load recent operations history on mount + when accountId changes.
+  // Server returns up to 50 most-recent ops for the user.
+  useEffect(() => {
+    let cancelled = false
+    if (!accountId) return
+    api.get('/operations').then(({ data }) => {
+      if (cancelled) return
+      const ops = data?.operations ?? []
+      const closed: ClosedTrade[] = ops
+        .filter((o: any) => o.status === 'WON' || o.status === 'LOST' || o.status === 'CANCELLED')
+        .slice(0, 30)
+        .map((o: any) => ({
+          id:          o.id,
+          assetSymbol: o.assetSymbol,
+          // Best-effort flag lookup: o.assetId is like "btc-usdt-binance" or "eur-jpy"
+          code1:       (o.assetId.split('-')[0] ?? ''),
+          code2:       (o.assetId.split('-')[1] ?? ''),
+          direction:   o.direction,
+          amount:      Number(o.amount),
+          profit:      Number(o.profit ?? 0),
+          status:      o.status,
+          closedAt:    o.closedAt ?? o.expiresAt,
+        }))
+      setClosedTrades(closed)
+    }).catch(() => { /* silent fail — empty list */ })
+    return () => { cancelled = true }
+  }, [accountId])
 
   const livePrice = marketPrice ?? asset.price
   const payout  = asset.payout / 100
@@ -162,7 +241,7 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
 
       const operationId: string = res.data?.operation?.id ?? res.data?.id ?? `local-${Date.now()}`
 
-      // Add to open trades list
+      // Add to open trades list — expiryTime drives the regressive countdown in TradeItem
       const newTrade: OpenTrade = {
         id: operationId,
         asset,
@@ -171,6 +250,7 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
         profit: 0,
         timeLeft: 0,
         entryPrice,
+        expiryTime,
       }
       setOpenTrades(prev => [newTrade, ...prev])
 
@@ -208,6 +288,21 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
           }
 
           setOpenTrades(prev => prev.filter(t => t.id !== operationId))
+          // Prepend to the closed-trades list so it appears at the top of "FECHADAS"
+          setClosedTrades(prev => [
+            {
+              id:          operationId,
+              assetSymbol: asset.label,
+              code1:       asset.code1,
+              code2:       asset.code2,
+              direction,
+              amount:      investment,
+              profit,
+              status:      won ? 'WON' : 'LOST',
+              closedAt:    operation?.closedAt ?? new Date().toISOString(),
+            },
+            ...prev.filter(t => t.id !== operationId),
+          ])
           onTradePlaced?.(resolvedTrade)
           setTradeResult({ direction, amount: investment, profit, won })
           setTimeout(() => onTradePlaced?.(null), 4000)
@@ -348,14 +443,23 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
         </div>
       </FloatingBox>
 
-      {/* Pagamento */}
-      <div className="flex items-center justify-between px-4 py-2 mt-1">
-        <span className="text-sm text-[#8b8f9a]">Pagamento</span>
-        <span className="text-sm font-bold text-white">{fmtMoney(payment)} R$</span>
+      {/* Lucro card */}
+      <div className="px-3 pt-3 pb-2">
+        <div className="border border-[#2a2e3b] rounded-lg px-3 py-2.5 text-center bg-[#171b27]/40">
+          <div className="text-[10px] text-[#8b8f9a] font-semibold tracking-widest mb-1">
+            RENTABILIDADE
+          </div>
+          <div className="text-[22px] font-extrabold text-green-400 leading-none">
+            +{asset.payout}%
+          </div>
+          <div className="text-xs font-bold text-green-400 mt-1">
+            +R$ {(investment * payout).toFixed(2).replace('.', ',')}
+          </div>
+        </div>
       </div>
 
       {/* CALL / PUT buttons */}
-      <div className="px-3 pb-3 flex flex-col gap-2">
+      <div className="px-3 pt-3 pb-3 flex flex-col gap-2">
         <button
           onClick={() => placeTrade('CALL')}
           disabled={placing}
@@ -384,19 +488,37 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, accoun
 
       {/* Operações */}
       <div className="flex-1 overflow-y-auto flex flex-col">
-        {openTrades.length === 0 ? (
+        {openTrades.length === 0 && closedTrades.length === 0 ? (
           <EmptyState message="Não há operações abertas." />
         ) : (
           <>
-            <div className="flex items-center gap-2 px-4 py-1.5 mt-1">
-              <span className="text-[10px] font-bold text-[#8b8f9a] tracking-wide">20 MAIO</span>
-              <div className="w-5 h-5 rounded-full bg-[#252a3a] flex items-center justify-center">
-                <span className="text-[9px] font-bold text-white">{openTrades.length}</span>
-              </div>
-            </div>
-            {openTrades.map((trade) => (
-              <TradeItem key={trade.id} trade={trade} shortLabels={shortLabels} />
-            ))}
+            {openTrades.length > 0 && (
+              <>
+                <div className="flex items-center gap-2 px-4 py-1.5 mt-1">
+                  <span className="text-[10px] font-bold text-[#8b8f9a] tracking-wide">PENDENTES</span>
+                  <div className="w-5 h-5 rounded-full bg-blue-600/30 border border-blue-500/50 flex items-center justify-center">
+                    <span className="text-[9px] font-bold text-white">{openTrades.length}</span>
+                  </div>
+                </div>
+                {openTrades.map((trade) => (
+                  <TradeItem key={trade.id} trade={trade} shortLabels={shortLabels} />
+                ))}
+              </>
+            )}
+
+            {closedTrades.length > 0 && (
+              <>
+                <div className="flex items-center gap-2 px-4 py-1.5 mt-2 border-t border-[#2a2e3b]/60 pt-2">
+                  <span className="text-[10px] font-bold text-[#8b8f9a] tracking-wide">FECHADAS</span>
+                  <div className="w-5 h-5 rounded-full bg-[#252a3a] flex items-center justify-center">
+                    <span className="text-[9px] font-bold text-white">{closedTrades.length}</span>
+                  </div>
+                </div>
+                {closedTrades.map((trade) => (
+                  <ClosedTradeItem key={trade.id} trade={trade} />
+                ))}
+              </>
+            )}
           </>
         )}
       </div>

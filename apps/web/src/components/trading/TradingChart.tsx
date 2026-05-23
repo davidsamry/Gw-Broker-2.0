@@ -586,8 +586,8 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         </div>
       )}
 
-      {/* Bottom left toolbar — vertical column */}
-      <div className="absolute bottom-3 left-3 flex flex-col items-start gap-1 z-10">
+      {/* Bottom left toolbar — vertical column, raised above the chart attribution */}
+      <div className="absolute bottom-24 left-3 flex flex-col items-start gap-1 z-10">
         {/* Pencil / Drawings */}
         <button
           onClick={() => setDrawingsOpen(v => !v)}
