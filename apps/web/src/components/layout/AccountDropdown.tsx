@@ -145,10 +145,6 @@ export function AccountDropdown({
               <div className="text-sm font-bold text-white mt-0.5">
                 R${realBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </div>
-              <div className="text-[11px] text-[#8b8f9a] mt-1">O limite diário não está definido</div>
-              <span className="text-[10px] font-bold text-blue-400 mt-0.5 hover:text-blue-300 transition-colors tracking-wide inline-block">
-                DEFINIR O LIMITE
-              </span>
             </div>
           </div>
         </div>
