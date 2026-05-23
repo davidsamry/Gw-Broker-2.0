@@ -19,6 +19,17 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
   const loading   = authStore.loading
   const [verified, setVerified] = useState(false)
 
+  // Kick off auth init when this guard mounts. The root TradingPage at "/"
+  // also calls init, but a user landing directly on /admin (deep-link or
+  // refresh) would otherwise sit forever on loading: true.
+  useEffect(() => {
+    if (loading) {
+      void authStore.init()
+    }
+    // Intentionally run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     // Wait for auth init to finish.
     if (loading) return
