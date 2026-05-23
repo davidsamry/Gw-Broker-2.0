@@ -1,12 +1,19 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Pencil, ZoomIn, ZoomOut, Crosshair, ChevronDown, Eye, Pen, X, Activity } from 'lucide-react'
+import { Pencil, ZoomIn, ZoomOut, Crosshair, ChevronDown, Eye, X, Activity } from 'lucide-react'
 import { generateMockCandles, type Asset, type Candle, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { fetchBinanceCandles } from '@/lib/marketApi'
 import { cn } from '@/lib/utils'
 import { DrawingsPanel } from './DrawingsPanel'
 import { IndicadoresPanel } from './IndicadoresPanel'
+import {
+  INDICATORS,
+  calculateSMA,
+  calculateEMA,
+  calculateBollingerBands,
+  calculateRSI,
+} from '@/lib/indicators'
 
 type ChartTheme = 'diurno' | 'crepusculo' | 'noite'
 type ChartType = 'velas' | 'area' | 'barras' | 'heiken-ashi'
@@ -98,30 +105,6 @@ const BINANCE_INTERVAL_BY_TIMEFRAME: Record<number, string> = {
   86400: '1d',
 }
 
-function calculateSMA(candles: Candle[], period: number): { time: number; value: number }[] {
-  return candles
-    .map((c, i) => {
-      if (i < period - 1) return null
-      const avg = candles.slice(i - period + 1, i + 1).reduce((s, x) => s + x.close, 0) / period
-      return { time: c.time as number, value: parseFloat(avg.toFixed(5)) }
-    })
-    .filter(Boolean) as { time: number; value: number }[]
-}
-
-function calculateZigZag(candles: Candle[], depth = 5): { time: number; value: number }[] {
-  const points: { time: number; value: number }[] = []
-  let lastDir = 0
-  for (let i = depth; i < candles.length - depth; i++) {
-    const c = candles[i]
-    const win = candles.slice(i - depth, i + depth + 1)
-    const isHigh = c.high >= Math.max(...win.map(x => x.high))
-    const isLow  = c.low  <= Math.min(...win.map(x => x.low))
-    if (isHigh && lastDir !== 1)  { points.push({ time: c.time as number, value: c.high }); lastDir = 1 }
-    else if (isLow && lastDir !== -1) { points.push({ time: c.time as number, value: c.low });  lastDir = -1 }
-  }
-  return points
-}
-
 function toHeikenAshi(candles: Candle[]): Candle[] {
   const ha: Candle[] = []
   for (let i = 0; i < candles.length; i++) {
@@ -154,10 +137,12 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
   const [indicadoresOpen, setIndicadoresOpen] = useState(false)
   const [chartType, setChartType] = useState<ChartType>('velas')
   const [chartTypeOpen, setChartTypeOpen] = useState(false)
-  const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set(['moving-average', 'zig-zag']))
+  const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set())
 
-  const showSMA     = activeIndicators.has('moving-average')
-  const showZigzag  = activeIndicators.has('zig-zag')
+  // Stable string for use in effect dep arrays (Set identity changes every render).
+  const activeIndicatorKey = Array.from(activeIndicators).sort().join(',')
+  const activeIndicatorDefs = INDICATORS.filter((i) => activeIndicators.has(i.id))
+  const rsiActive = activeIndicators.has('rsi-14')
 
   function toggleIndicator(id: string) {
     setActiveIndicators(prev => {
@@ -348,31 +333,46 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         lastValueVisible: false,
       })
 
-      // SMA overlay
-      if (showSMA) {
-        const smaData = calculateSMA(candles, 20)
-        const smaSeries = chart.addSeries(LineSeries, {
-          color: '#eab308',
-          lineWidth: 2,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        })
-        smaSeries.setData(smaData)
+      // ── Indicators ─────────────────────────────────────────────────────────
+      // RSI lives on its own price scale at the bottom 25% of the chart.
+      // When RSI is active the main price series is compressed to top 75%.
+      if (rsiActive) {
+        chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.28 } })
       }
-
-      // ZigZag overlay
-      if (showZigzag) {
-        const zzData = calculateZigZag(candles, 5)
-        if (zzData.length > 1) {
-          const zzSeries = chart.addSeries(LineSeries, {
-            color: '#ef4444',
-            lineWidth: 1.5,
-            priceLineVisible: false,
-            lastValueVisible: false,
-            crosshairMarkerVisible: false,
+      for (const def of activeIndicatorDefs) {
+        if (def.type === 'sma') {
+          const data = calculateSMA(candles, def.period)
+          chart.addSeries(LineSeries, {
+            color: def.color, lineWidth: 2,
+            priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+          }).setData(data)
+        } else if (def.type === 'ema') {
+          const data = calculateEMA(candles, def.period)
+          chart.addSeries(LineSeries, {
+            color: def.color, lineWidth: 2,
+            priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+          }).setData(data)
+        } else if (def.type === 'bb') {
+          const bb = calculateBollingerBands(candles, def.period, def.stdDev ?? 2)
+          const baseOpts = { lineWidth: 1 as 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }
+          chart.addSeries(LineSeries, { ...baseOpts, color: def.color }).setData(bb.upper)
+          chart.addSeries(LineSeries, { ...baseOpts, color: def.color + 'aa', lineStyle: LineStyle.Dashed }).setData(bb.middle)
+          chart.addSeries(LineSeries, { ...baseOpts, color: def.color }).setData(bb.lower)
+        } else if (def.type === 'rsi') {
+          const data = calculateRSI(candles, def.period)
+          const rsiSeries = chart.addSeries(LineSeries, {
+            color: def.color, lineWidth: 2,
+            priceScaleId: 'rsi',
+            priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
           })
-          zzSeries.setData(zzData)
+          rsiSeries.setData(data)
+          chart.priceScale('rsi').applyOptions({
+            scaleMargins: { top: 0.78, bottom: 0 },
+            borderColor:  tc.border,
+          })
+          // 70 / 30 dashed reference lines for overbought/oversold.
+          rsiSeries.createPriceLine({ price: 70, color: '#ef4444', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: '' })
+          rsiSeries.createPriceLine({ price: 30, color: '#22c55e', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: '' })
         }
       }
 
@@ -475,7 +475,7 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         chartRef.current = null
       }
     }
-  }, [asset.id, asset.marketSymbol, asset.source, tfIndex, chartType, showSMA, showZigzag])
+  }, [asset.id, asset.marketSymbol, asset.source, tfIndex, chartType, activeIndicatorKey])
 
   const fmt = (v: number) => v.toFixed(displayPrice > 10 ? 3 : 5)
 
@@ -494,35 +494,32 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         </button>
       </div>
 
-      {/* Active indicators bar */}
-      {(showSMA || showZigzag) && (
-        <div className="absolute top-8 left-3 z-10 flex items-center gap-2 pointer-events-none">
+      {/* Active indicators chip bar — one chip per active indicator */}
+      {activeIndicatorDefs.length > 0 && (
+        <div className="absolute top-8 left-3 z-10 flex items-center gap-2 pointer-events-none flex-wrap max-w-[calc(100%-24px)]">
           <button className="pointer-events-auto w-5 h-5 flex items-center justify-center text-[#8b8f9a] hover:text-white transition-colors">
             <Eye size={12} />
           </button>
 
-          {showSMA && (
-            <div className="pointer-events-auto flex items-center gap-1 bg-[#1d2130]/80 border border-[#2a2e3b] rounded px-2 py-0.5 text-[10px]">
-              <span className="font-bold text-[#8b8f9a] tracking-widest">MOVING AVERAGE</span>
-              <span className="w-2.5 h-2.5 rounded-sm bg-yellow-400 flex-shrink-0 ml-0.5" />
-              <span className="text-[#8b8f9a] ml-0.5">SMA</span>
-              <span className="text-white font-bold">20</span>
-              <button className="text-[#8b8f9a] hover:text-white ml-1 transition-colors"><Pen size={9} /></button>
-              <button onClick={() => toggleIndicator('moving-average')} className="text-[#8b8f9a] hover:text-red-400 ml-0.5 transition-colors"><X size={9} /></button>
+          {activeIndicatorDefs.map((def) => (
+            <div
+              key={def.id}
+              className="pointer-events-auto flex items-center gap-1.5 bg-[#1d2130]/80 border border-[#2a2e3b] rounded px-2 py-0.5 text-[10px]"
+            >
+              <span
+                className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                style={{ backgroundColor: def.color }}
+              />
+              <span className="text-white font-bold tracking-wide">{def.label}</span>
+              <button
+                onClick={() => toggleIndicator(def.id)}
+                className="text-[#8b8f9a] hover:text-red-400 ml-0.5 transition-colors"
+                title={`Remover ${def.label}`}
+              >
+                <X size={9} />
+              </button>
             </div>
-          )}
-
-          {showZigzag && (
-            <div className="pointer-events-auto flex items-center gap-1 bg-[#1d2130]/80 border border-[#2a2e3b] rounded px-2 py-0.5 text-[10px]">
-              <span className="font-bold text-[#8b8f9a] tracking-widest">ZIG ZAG</span>
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500 flex-shrink-0 ml-0.5" />
-              <span className="text-white font-bold">5</span>
-              <span className="text-white font-bold">12</span>
-              <span className="text-white font-bold">3</span>
-              <button className="text-[#8b8f9a] hover:text-white ml-1 transition-colors"><Pen size={9} /></button>
-              <button onClick={() => toggleIndicator('zig-zag')} className="text-[#8b8f9a] hover:text-red-400 ml-0.5 transition-colors"><X size={9} /></button>
-            </div>
-          )}
+          ))}
         </div>
       )}
 
