@@ -14,21 +14,22 @@ export interface Account {
 export type UserRole = 'USER' | 'ADMIN'
 
 export interface User {
-  id:         string
-  name:       string
-  email:      string
-  kycStatus:  string
-  role:       UserRole
-  accounts:   Account[]
+  id:                string
+  name:              string
+  email:             string
+  kycStatus:         string
+  role:              UserRole
+  twoFactorEnabled:  boolean
+  accounts:          Account[]
   // Optional profile fields populated by the Minha Conta form.
-  nickname?:  string | null
-  lastName?:  string | null
-  birthDate?: string | null  // ISO date "YYYY-MM-DD"
-  cpf?:       string | null
-  phone?:     string | null
-  country?:   string | null
-  address?:   string | null
-  updatedAt?: string         // used to re-sync MinhaContaTab local state
+  nickname?:         string | null
+  lastName?:         string | null
+  birthDate?:        string | null  // ISO date "YYYY-MM-DD"
+  cpf?:              string | null
+  phone?:            string | null
+  country?:          string | null
+  address?:          string | null
+  updatedAt?:        string         // used to re-sync MinhaContaTab local state
 }
 
 interface AuthState {
@@ -37,7 +38,10 @@ interface AuthState {
   isDemo:             boolean
   loading:            boolean
 
-  login:              (email: string, password: string) => Promise<void>
+  // 2FA: pass `code` for users with twoFactorEnabled. If omitted and the
+  // account has 2FA on, the API throws REQUIRES_2FA — callers can catch
+  // and re-prompt.
+  login:              (email: string, password: string, code?: string) => Promise<void>
   register:           (name: string, email: string, password: string) => Promise<void>
   logout:             () => Promise<void>
   init:               () => Promise<void>
@@ -54,8 +58,8 @@ interface AuthState {
 
 // Bump the cache key whenever the User shape changes so existing clients
 // don't read a stale cached object missing new fields. Current schema
-// version: v2 (added role).
-const USER_CACHE_KEY = 'vx_user_cache_v2'
+// version: v3 (added twoFactorEnabled).
+const USER_CACHE_KEY = 'vx_user_cache_v3'
 const USER_CACHE_TTL = 5 * 60 * 1000 // 5 min — short enough that stale balance corrects quickly
 
 interface UserCache { user: User; savedAt: number }
@@ -89,8 +93,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setIsDemo: (v) => set({ isDemo: v }),
 
-  login: async (email, password) => {
-    const { data } = await api.post('/auth/login', { email, password })
+  login: async (email, password, code) => {
+    const payload: { email: string; password: string; code?: string } = { email, password }
+    if (code) payload.code = code
+    const { data } = await api.post('/auth/login', payload)
     localStorage.setItem('token', data.token)
     saveUserCache(data.user)
     set({ user: data.user, token: data.token })

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { api } from '@/lib/api'
 
@@ -10,14 +10,24 @@ import { api } from '@/lib/api'
 //   2. Server: GET /admin/ping returns 200 (authoritative, in case the cached
 //      role drifted from the DB or the token was revoked)
 //
-// Non-admins are redirected to /. While checking, renders a minimal loader.
+// Non-admins are redirected to the admin login. While checking, renders a
+// minimal loader. The /admin/login page itself bypasses the guard since the
+// user isn't expected to be authenticated there yet.
+
+// Paths that should NOT be guarded:
+//   /admin/login    — pre-auth entry
+//   /admin/setup-2fa— authed but pre-2FA (the guard sends ADMINs here itself)
+const SKIP_GUARD_PATHS = ['/admin/login', '/admin/setup-2fa']
 
 export function AdminGuard({ children }: { children: React.ReactNode }) {
   const router    = useRouter()
+  const pathname  = usePathname() ?? ''
   const authStore = useAuthStore()
   const user      = authStore.user
   const loading   = authStore.loading
   const [verified, setVerified] = useState(false)
+
+  const isPublic = SKIP_GUARD_PATHS.includes(pathname)
 
   // Kick off auth init when this guard mounts. The root TradingPage at "/"
   // also calls init, but a user landing directly on /admin (deep-link or
@@ -31,12 +41,18 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
   }, [])
 
   useEffect(() => {
+    // Public admin paths (e.g. /admin/login) skip the check entirely.
+    if (isPublic) {
+      setVerified(true)
+      return
+    }
+
     // Wait for auth init to finish.
     if (loading) return
 
-    // No user → redirect to login.
+    // No user → redirect to admin login.
     if (!user) {
-      router.replace('/login')
+      router.replace('/admin/login')
       return
     }
 
@@ -46,14 +62,20 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
       return
     }
 
+    // Mandatory 2FA for ADMIN — funnel to setup if not enabled yet.
+    if (!user.twoFactorEnabled) {
+      router.replace('/admin/setup-2fa')
+      return
+    }
+
     // Authoritative server-side check.
     let cancelled = false
     api.get('/admin/ping')
       .then(() => { if (!cancelled) setVerified(true) })
-      .catch(() => { if (!cancelled) router.replace('/') })
+      .catch(() => { if (!cancelled) router.replace('/admin/login') })
 
     return () => { cancelled = true }
-  }, [loading, user, router])
+  }, [loading, user, router, isPublic])
 
   if (!verified) {
     return (

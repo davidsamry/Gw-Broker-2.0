@@ -13,6 +13,7 @@ import { useTransactionsStore, type TransactionType } from '@/store/transactions
 import { useOperationsStore, type ApiOperation } from '@/store/operations'
 import { ASSETS } from '@/lib/mockData'
 import { api } from '@/lib/api'
+import { TwoFactorSetup } from '@/components/admin/TwoFactorSetup'
 
 type ContaTab = 'retirada' | 'transacoes' | 'operacoes' | 'minha-conta' | 'mercado' | 'torneios' | 'analise'
 
@@ -798,6 +799,49 @@ function MinhaContaTab() {
   const [savedAt,   setSavedAt]   = useState<number | null>(null)
   const [error,     setError]     = useState('')
 
+  // 2FA UI state
+  const [twoFAOpen,     setTwoFAOpen]     = useState<'setup' | 'disable' | null>(null)
+  const [disableCode,   setDisableCode]   = useState('')
+  const [disableLoading, setDisableLoading] = useState(false)
+  const [disableError,  setDisableError]  = useState('')
+
+  async function refreshUser() {
+    try {
+      const { data } = await api.get('/auth/me')
+      if (data?.user) useAuthStore.setState({ user: data.user })
+    } catch { /* ignore */ }
+  }
+
+  async function handle2FAToggle() {
+    if (!user) return
+    setDisableError('')
+    if (user.twoFactorEnabled) {
+      setDisableCode('')
+      setTwoFAOpen('disable')
+    } else {
+      setTwoFAOpen('setup')
+    }
+  }
+
+  async function confirmDisable() {
+    if (disableLoading || disableCode.length !== 6) return
+    setDisableLoading(true)
+    setDisableError('')
+    try {
+      await api.post('/auth/2fa/disable', { code: disableCode })
+      await refreshUser()
+      setTwoFAOpen(null)
+    } catch (err: any) {
+      const code = err?.response?.data?.error
+      if      (code === 'INVALID_2FA_CODE')    setDisableError('Código inválido.')
+      else if (code === 'ADMIN_2FA_REQUIRED')  setDisableError('Administradores não podem desativar 2FA.')
+      else                                      setDisableError('Erro ao desativar.')
+      setDisableCode('')
+    } finally {
+      setDisableLoading(false)
+    }
+  }
+
   // Re-sync local state if the user object changes (e.g. background revalidate).
   useEffect(() => {
     if (!user) return
@@ -849,6 +893,57 @@ function MinhaContaTab() {
 
   return (
     <div className="flex-1 overflow-y-auto">
+      {/* 2FA setup modal */}
+      {twoFAOpen === 'setup' && (
+        <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setTwoFAOpen(null)}>
+          <div className="w-full max-w-[440px] bg-[#13161f] border border-[#1f232e] rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#1f232e]">
+              <h2 className="text-sm font-bold text-white">Ativar verificação em duas etapas</h2>
+              <button onClick={() => setTwoFAOpen(null)} className="text-[#8b8f9a] hover:text-white"><X size={16} /></button>
+            </div>
+            <div className="px-5 py-4">
+              <TwoFactorSetup
+                onEnabled={async () => { await refreshUser(); setTwoFAOpen(null) }}
+                onCancel={() => setTwoFAOpen(null)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2FA disable modal */}
+      {twoFAOpen === 'disable' && (
+        <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setTwoFAOpen(null)}>
+          <div className="w-full max-w-[400px] bg-[#13161f] border border-[#1f232e] rounded-2xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#1f232e]">
+              <h2 className="text-sm font-bold text-white">Desativar 2FA</h2>
+              <button onClick={() => setTwoFAOpen(null)} className="text-[#8b8f9a] hover:text-white"><X size={16} /></button>
+            </div>
+            <div className="px-5 py-5 flex flex-col gap-4">
+              <p className="text-xs text-[#ccc] leading-relaxed">
+                Digite o código atual do seu app autenticador para confirmar.
+              </p>
+              <input
+                autoFocus
+                inputMode="numeric"
+                value={disableCode}
+                onChange={(e) => setDisableCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="000000"
+                className="w-full bg-[#1a1e2a] border border-[#1f232e] rounded-lg px-3 py-3 text-center text-xl font-mono text-white outline-none focus:border-blue-500/60 tracking-[0.5em]"
+              />
+              {disableError && <p className="text-xs text-red-400 text-center">{disableError}</p>}
+              <button
+                onClick={confirmDisable}
+                disabled={disableLoading || disableCode.length !== 6}
+                className="w-full h-10 rounded-lg bg-red-500 hover:bg-red-400 text-sm font-bold text-white transition-colors disabled:opacity-50"
+              >
+                {disableLoading ? 'Desativando…' : 'Desativar 2FA'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row gap-0 min-h-full">
 
         {/* Left — Dados pessoais */}
@@ -917,20 +1012,31 @@ function MinhaContaTab() {
 
           <div className="mb-5">
             <div className="flex items-center gap-2 mb-1">
-              <CheckCircle2 size={16} className="text-green-400 flex-shrink-0" />
+              {user.twoFactorEnabled
+                ? <CheckCircle2 size={16} className="text-green-400 flex-shrink-0" />
+                : <CheckCircle2 size={16} className="text-[#3a3f50] flex-shrink-0" />}
               <span className="text-sm font-semibold text-white">Verificação em duas etapas</span>
             </div>
-            <div className="flex items-center gap-2 ml-6">
-              <span className="text-xs text-[#8b8f9a]">Recebimento de códigos por email</span>
-              <button className="text-[#8b8f9a] hover:text-white transition-colors">
-                <Pencil size={11} />
-              </button>
+            <div className="ml-6">
+              <span className="text-xs text-[#8b8f9a]">
+                {user.twoFactorEnabled
+                  ? 'Aplicativo autenticador configurado.'
+                  : 'Não configurada. Ative para proteger sua conta.'}
+              </span>
             </div>
           </div>
 
           <div className="flex flex-col gap-4 mb-6">
-            <Toggle label="Para entrar na plataforma" defaultOn={true} />
-            <Toggle label="Para retirar fundos" defaultOn={true} />
+            <button
+              onClick={handle2FAToggle}
+              className="flex items-center gap-3 text-left"
+            >
+              <div className={cn('relative w-10 h-5 rounded-full transition-colors flex-shrink-0', user.twoFactorEnabled ? 'bg-blue-500' : 'bg-[#3a3f50]')}>
+                <div className={cn('absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform', user.twoFactorEnabled ? 'translate-x-5' : 'translate-x-0.5')} />
+              </div>
+              <span className="text-sm text-white">App autenticador (TOTP)</span>
+            </button>
+            <Toggle label="Para retirar fundos (em breve)" defaultOn={false} />
           </div>
 
           <div className="border-t border-[#2a2e3b] pt-5">
