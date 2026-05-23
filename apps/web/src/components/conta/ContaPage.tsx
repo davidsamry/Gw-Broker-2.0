@@ -1014,15 +1014,6 @@ export function ContaPage({ initialTab = 'minha-conta' }: { initialTab?: ContaTa
         ))}
       </div>
 
-      {/* Currency selector — only shown on Minha Conta (other tabs no
-          longer need a top info bar; balance lives in the page body). */}
-      {activeTab === 'minha-conta' && (
-        <div className="flex items-center gap-2 px-3 md:px-6 py-2 md:py-3 border-b border-[#2a2e3b] bg-[#1a1e2e] flex-shrink-0">
-          <span className="text-xs text-[#8b8f9a]">Minha moeda atual</span>
-          <span className="text-sm font-bold text-white">R$ BRL</span>
-          <button className="text-[10px] font-bold bg-blue-500 text-white px-2 py-0.5 rounded">MUDAR</button>
-        </div>
-      )}
 
       {/* Tab content */}
       {activeTab === 'retirada' && <RetiradaTab />}
