@@ -313,6 +313,17 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
     chart.priceScale('right').applyOptions({ autoScale: true })
   }
 
+  // Zoom horizontally by manipulating barSpacing. Larger spacing = bars are
+  // wider apart = visually zoomed in (fewer candles visible). Bounded to
+  // keep the chart readable; factor > 1 zooms in, factor < 1 zooms out.
+  function zoomChart(factor: number) {
+    const ts = chartRef.current?.timeScale()
+    if (!ts) return
+    const current = (ts.options() as any).barSpacing ?? 8
+    const next    = Math.max(2, Math.min(50, current * factor))
+    ts.applyOptions({ barSpacing: next })
+  }
+
   useEffect(() => {
     let chart: any = null
     let disposed = false
@@ -846,30 +857,32 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
           )}
         </div>
 
-        {/* Reset view — fit content + autoScale + scroll to live edge */}
+        </div>
+
+      {/* Bottom-center chart controls: zoom in / zoom out / reset view.
+          Mirrors the Quotex layout — three small pill buttons centered
+          above the date label & TradingView attribution. */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-10">
+        <button
+          onClick={() => zoomChart(1.25)}
+          title="Aproximar"
+          className="w-8 h-8 flex items-center justify-center rounded bg-[#1d2130] border border-[#2a2e3b] text-[#8b8f9a] hover:text-white hover:border-blue-500/50 transition-colors active:scale-95"
+        >
+          <ZoomIn size={14} />
+        </button>
+        <button
+          onClick={() => zoomChart(0.8)}
+          title="Afastar"
+          className="w-8 h-8 flex items-center justify-center rounded bg-[#1d2130] border border-[#2a2e3b] text-[#8b8f9a] hover:text-white hover:border-blue-500/50 transition-colors active:scale-95"
+        >
+          <ZoomOut size={14} />
+        </button>
         <button
           onClick={resetChartView}
           title="Centralizar gráfico (zoom padrão)"
-          className="w-9 h-9 flex items-center justify-center rounded border bg-[#1d2130] border-[#2a2e3b] text-[#8b8f9a] hover:text-white hover:border-blue-500/50 transition-colors active:scale-95"
+          className="w-8 h-8 flex items-center justify-center rounded bg-[#1d2130] border border-[#2a2e3b] text-[#8b8f9a] hover:text-white hover:border-blue-500/50 transition-colors active:scale-95"
         >
-          <Crosshair size={16} />
-        </button>
-
-        </div>
-
-      {/* Bottom right zoom */}
-      <div className="absolute bottom-3 right-3 flex items-center gap-1 z-10">
-        <button
-          onClick={() => chartRef.current?.timeScale().scrollToPosition((chartRef.current.timeScale().scrollPosition() ?? 0) - 5, true)}
-          className="w-7 h-7 flex items-center justify-center rounded bg-[#1d2130] border border-[#2a2e3b] text-[#8b8f9a] hover:text-white transition-colors"
-        >
-          <ZoomOut size={12} />
-        </button>
-        <button
-          onClick={() => chartRef.current?.timeScale().scrollToPosition((chartRef.current.timeScale().scrollPosition() ?? 0) + 5, true)}
-          className="w-7 h-7 flex items-center justify-center rounded bg-[#1d2130] border border-[#2a2e3b] text-[#8b8f9a] hover:text-white transition-colors"
-        >
-          <ZoomIn size={12} />
+          <Crosshair size={14} />
         </button>
       </div>
     </div>
