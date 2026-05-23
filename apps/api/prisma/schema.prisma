@@ -52,6 +52,20 @@ enum UserRole {
   ADMIN
 }
 
+enum DepositStatus {
+  PENDING      // Created — awaiting payment / admin confirmation
+  PAID         // Confirmed and credited
+  FAILED       // Gateway error
+  CANCELLED    // User cancelled
+}
+
+enum DepositMethod {
+  PIX
+  CREDIT_CARD
+  BANK_TRANSFER
+  CRYPTO
+}
+
 enum WithdrawalStatus {
   PENDING     // Awaiting admin / processor review
   APPROVED    // Approved, sent to payment provider
@@ -116,6 +130,7 @@ model Account {
   operations   Operation[]
   transactions Transaction[]
   withdrawals  Withdrawal[]
+  deposits     Deposit[]
 
   @@unique([userId, type])
   @@map("accounts")
@@ -175,6 +190,27 @@ model KycSubmission {
 
   @@index([status, submittedAt])
   @@map("kyc_submissions")
+}
+
+model Deposit {
+  id          String         @id @default(cuid())
+  accountId   String
+  amount      Decimal        @db.Decimal(18, 2)
+  bonus       Decimal?       @db.Decimal(18, 2)  // promotional bonus credited on payment
+  method      DepositMethod  @default(PIX)
+  externalId  String?        // gateway transaction reference
+  status      DepositStatus  @default(PENDING)
+  isFake      Boolean        @default(false)     // admin marker: test/manual deposit
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  paidAt      DateTime?
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([accountId, status])
+  @@map("deposits")
 }
 
 model Withdrawal {
