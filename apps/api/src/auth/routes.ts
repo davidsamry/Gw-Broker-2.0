@@ -44,6 +44,9 @@ export async function authRoutes(app: FastifyInstance) {
       if (err.message === 'INVALID_CREDENTIALS') {
         return reply.status(401).send({ error: 'INVALID_CREDENTIALS' })
       }
+      if (err.message === 'ACCOUNT_BLOCKED') {
+        return reply.status(403).send({ error: 'ACCOUNT_BLOCKED' })
+      }
       // 2FA: password OK but code missing — surface this so the frontend can
       // ask for it. Don't issue any token yet.
       if (err.message === 'REQUIRES_2FA') {

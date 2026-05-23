@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { dashboardRoutes } from './dashboard/routes.js'
+import { userAdminRoutes } from './users/routes.js'
 
 // All routes in this module sit behind requireAdmin, so the JWT must be valid
 // AND the user.role must be ADMIN (live-checked against the DB per request).
@@ -18,4 +19,5 @@ export async function adminRoutes(app: FastifyInstance) {
   }))
 
   await app.register(dashboardRoutes, { prefix: '/dashboard' })
+  await app.register(userAdminRoutes, { prefix: '/users' })
 }

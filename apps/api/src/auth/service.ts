@@ -48,6 +48,13 @@ export async function loginUser(input: LoginInput) {
   const ok = await bcrypt.compare(input.password, user.password)
   if (!ok) throw new Error('INVALID_CREDENTIALS')
 
+  // Blocked accounts can't log in (existing sessions are NOT killed — they
+  // expire naturally when the 15min access token does). Surface separately
+  // from INVALID_CREDENTIALS so the UI can show a clear message.
+  if ((user as any).blocked) {
+    throw new Error('ACCOUNT_BLOCKED')
+  }
+
   // Password OK. If 2FA is enabled, require + verify the code now.
   // Non-2FA users skip this branch entirely → existing behavior preserved.
   if (user.twoFactorEnabled) {
