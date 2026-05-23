@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  LayoutGrid, Brain, Users, Wallet, Activity, ShieldCheck,
+  LayoutGrid, Users, Wallet, Activity, ShieldCheck,
   ArrowDownToLine, ArrowUpFromLine, MessageSquare, Network,
   Copy, Layers, Gift, Zap, TrendingUp, Clock, FileSpreadsheet,
   Trophy, Image as ImageIcon, FileText, Mail, CreditCard,
@@ -19,7 +19,6 @@ interface MenuItem {
 // Order mirrors the reference admin design.
 const MENU: MenuItem[] = [
   { href: '/admin',                label: 'Dashboard',       icon: <LayoutGrid size={15} /> },
-  { href: '/admin/analise-ia',     label: 'Análise IA',      icon: <Brain size={15} /> },
   { href: '/admin/usuarios',       label: 'Usuários',        icon: <Users size={15} /> },
   { href: '/admin/carteira',       label: 'Carteira',        icon: <Wallet size={15} /> },
   { href: '/admin/operacoes',      label: 'Operações',       icon: <Activity size={15} /> },
