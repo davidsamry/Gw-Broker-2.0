@@ -11,7 +11,7 @@ interface LogoProps {
 // Heights of the wordmark image at each size. The image (vx-logo.png in /public)
 // already contains the "V↗ Vx Global" mark — we just scale it.
 const SIZES: Record<Size, { height: number; sub: string }> = {
-  sm: { height: 34, sub: 'text-[8px]' },
+  sm: { height: 26, sub: 'text-[8px]' },
   md: { height: 28, sub: 'text-[9px]' },
   lg: { height: 40, sub: 'text-[10px]' },
 }

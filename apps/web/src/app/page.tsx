@@ -229,32 +229,34 @@ export default function TradingPage() {
       <div className="flex md:hidden h-full flex-col overflow-hidden">
 
         {/* Mobile header */}
-        <header className="flex items-center justify-between px-4 h-12 bg-[#1d2130] border-b border-[#2a2e3b] flex-shrink-0">
+        <header className="flex items-center justify-between gap-2 px-4 h-12 bg-[#1d2130] border-b border-[#2a2e3b] flex-shrink-0">
           {/* Logo */}
-          <Logo size="sm" />
+          <div className="flex-shrink min-w-0">
+            <Logo size="sm" />
+          </div>
 
 
           {/* Right: balance + deposit */}
-          <div className="flex items-center gap-2">
-            {/* Balance chip */}
-            <div className="relative">
+          <div className="flex items-center gap-1.5 min-w-0">
+            {/* Balance chip — shrinks if needed */}
+            <div className="relative min-w-0">
               <button
                 onClick={() => setMobileAccountOpen(v => !v)}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#252a3a] border border-[#2a2e3b]"
+                className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-[#252a3a] border border-[#2a2e3b] max-w-full"
               >
                 {isDemo
-                  ? <GraduationCap size={18} className="text-yellow-400 flex-shrink-0" />
-                  : <Gem size={18} className="text-purple-400 flex-shrink-0" />
+                  ? <GraduationCap size={16} className="text-yellow-400 flex-shrink-0" />
+                  : <Gem size={16} className="text-purple-400 flex-shrink-0" />
                 }
-                <div className="text-left">
-                  <div className={cn('text-[10px] font-bold leading-tight', isDemo ? 'text-yellow-400' : 'text-green-400')}>
+                <div className="text-left min-w-0">
+                  <div className={cn('text-[9px] font-bold leading-tight', isDemo ? 'text-yellow-400' : 'text-green-400')}>
                     {isDemo ? 'DEMO' : 'REAL'}
                   </div>
-                  <div className="text-sm font-bold text-white leading-tight">
+                  <div className="text-xs font-bold text-white leading-tight whitespace-nowrap">
                     R${balance.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                   </div>
                 </div>
-                <ChevronDown size={12} className={cn('text-[#8b8f9a] transition-transform', mobileAccountOpen && 'rotate-180')} />
+                <ChevronDown size={11} className={cn('text-[#8b8f9a] transition-transform flex-shrink-0', mobileAccountOpen && 'rotate-180')} />
               </button>
 
               {mobileAccountOpen && (
@@ -280,13 +282,13 @@ export default function TradingPage() {
               )}
             </div>
 
-            {/* Deposit */}
+            {/* Deposit — text hides on very narrow screens (< 380px) */}
             <button
               onClick={() => setDepositoOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-green-500 hover:bg-green-400 text-sm font-bold text-white transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-green-500 hover:bg-green-400 text-xs font-bold text-white transition-colors flex-shrink-0"
             >
               <Plus size={14} strokeWidth={2.5} />
-              Depósito
+              <span className="hidden min-[380px]:inline">Depósito</span>
             </button>
           </div>
         </header>
