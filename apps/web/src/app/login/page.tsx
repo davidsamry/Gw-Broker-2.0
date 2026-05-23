@@ -51,7 +51,9 @@ export default function LoginPage() {
       router.replace('/')
     } catch (err: any) {
       const code = err.response?.data?.error
-      setError(code === 'INVALID_CREDENTIALS' ? 'E-mail ou senha incorretos.' : 'Erro ao entrar. Tente novamente.')
+      if      (code === 'INVALID_CREDENTIALS') setError('E-mail ou senha incorretos.')
+      else if (code === 'ACCOUNT_BLOCKED')     setError('Conta bloqueada. Entre em contato com o suporte.')
+      else                                     setError('Erro ao entrar. Tente novamente.')
     } finally {
       setLoading(false)
     }

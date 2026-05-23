@@ -43,6 +43,8 @@ export default function AdminLoginPage() {
         setCode('')
       } else if (errCode === 'INVALID_CREDENTIALS') {
         setError('E-mail ou senha incorretos.')
+      } else if (errCode === 'ACCOUNT_BLOCKED') {
+        setError('Conta bloqueada. Entre em contato com o suporte.')
       } else {
         setError('Erro ao entrar. Tente novamente.')
       }

@@ -1,0 +1,312 @@
+'use client'
+
+import { useCallback, useEffect, useState } from 'react'
+import {
+  Users, Search, RefreshCw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  ShieldCheck, ShieldAlert, CheckCircle2, XCircle, Clock as ClockIcon,
+} from 'lucide-react'
+import { api } from '@/lib/api'
+import { cn } from '@/lib/utils'
+import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer'
+
+interface UserRow {
+  id:               string
+  name:             string
+  email:            string
+  role:             'USER' | 'ADMIN'
+  kycStatus:        string
+  blocked:          boolean
+  twoFactorEnabled: boolean
+  createdAt:        string
+  realBalance:      string
+  demoBalance:      string
+  totalOps:         number
+  lastActivity:     string | null
+}
+
+interface ListResponse {
+  users:    UserRow[]
+  total:    number
+  page:     number
+  pageSize: number
+}
+
+type RoleFilter    = 'ALL' | 'USER' | 'ADMIN'
+type KycFilter     = 'ALL' | 'PENDING' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'
+type BlockedFilter = 'ALL' | 'YES' | 'NO'
+
+const PAGE_SIZE = 20
+
+export default function AdminUsersPage() {
+  const [data, setData]       = useState<ListResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
+
+  // Filters
+  const [search, setSearch]   = useState('')
+  const [role, setRole]       = useState<RoleFilter>('ALL')
+  const [kyc, setKyc]         = useState<KycFilter>('ALL')
+  const [blocked, setBlocked] = useState<BlockedFilter>('ALL')
+  const [page, setPage]       = useState(1)
+
+  // Drawer selection
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const params: any = { page, pageSize: PAGE_SIZE }
+      if (search.trim()) params.search = search.trim()
+      if (role     !== 'ALL') params.role    = role
+      if (kyc      !== 'ALL') params.kyc     = kyc
+      if (blocked  !== 'ALL') params.blocked = blocked
+      const res = await api.get<ListResponse>('/admin/users', { params })
+      setData(res.data)
+    } catch {
+      setError('Erro ao carregar usuários.')
+    } finally {
+      setLoading(false)
+    }
+  }, [search, role, kyc, blocked, page])
+
+  // Reset to page 1 whenever filters change.
+  useEffect(() => { setPage(1) }, [search, role, kyc, blocked])
+  useEffect(() => { load() }, [load])
+
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1
+
+  return (
+    <div className="px-6 py-6 max-w-[1400px] mx-auto">
+      {/* Topbar */}
+      <div className="flex items-start justify-between mb-5">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+            <Users size={20} className="text-emerald-400" />
+            Usuários
+          </h1>
+          <p className="text-xs text-[#8b8f9a] mt-0.5">
+            Gestão de todos os usuários da plataforma
+          </p>
+        </div>
+        <button
+          onClick={() => load()}
+          disabled={loading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1f232e] bg-[#13161f] text-xs font-semibold text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+        >
+          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+          Atualizar
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-[#13161f] border border-[#1f232e] rounded-xl p-4 flex flex-wrap items-center gap-3 mb-5">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b8f9a]" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nome ou email..."
+            className="w-full h-9 bg-[#1a1e2a] border border-[#1f232e] rounded-lg pl-8 pr-3 text-xs text-white placeholder-[#8b8f9a] outline-none focus:border-emerald-500/50"
+          />
+        </div>
+        <FilterPills label="Perfil"  value={role}    options={[['ALL','Todos'],['USER','Usuário'],['ADMIN','Admin']]}                  onChange={(v) => setRole(v as RoleFilter)} />
+        <FilterPills label="KYC"     value={kyc}     options={[['ALL','Todos'],['PENDING','Pendente'],['SUBMITTED','Enviado'],['APPROVED','Aprovado'],['REJECTED','Rejeitado']]} onChange={(v) => setKyc(v as KycFilter)} />
+        <FilterPills label="Status"  value={blocked} options={[['ALL','Todos'],['NO','Ativos'],['YES','Bloqueados']]}                  onChange={(v) => setBlocked(v as BlockedFilter)} />
+      </div>
+
+      {error && (
+        <div className="mb-5 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-400">
+          {error}
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="bg-[#13161f] border border-[#1f232e] rounded-xl overflow-hidden">
+        {/* Header */}
+        <div className="hidden md:grid grid-cols-[1fr_120px_120px_120px_160px_120px_60px] gap-3 px-4 py-3 border-b border-[#1f232e] text-[10px] font-bold text-[#8b8f9a] uppercase tracking-wide">
+          <span>Usuário</span>
+          <span>Perfil</span>
+          <span>KYC</span>
+          <span>Status</span>
+          <span className="text-right">Saldo Real</span>
+          <span className="text-right">Operações</span>
+          <span></span>
+        </div>
+
+        {/* Rows */}
+        {loading && !data ? (
+          <div className="py-12 text-center text-sm text-[#8b8f9a]">Carregando…</div>
+        ) : data && data.users.length === 0 ? (
+          <div className="py-12 text-center text-sm text-[#8b8f9a]">
+            Nenhum usuário encontrado com esses filtros.
+          </div>
+        ) : (
+          data?.users.map((u) => (
+            <button
+              key={u.id}
+              onClick={() => setSelectedId(u.id)}
+              className="w-full text-left grid grid-cols-1 md:grid-cols-[1fr_120px_120px_120px_160px_120px_60px] gap-3 px-4 py-3 border-b border-[#1f232e]/50 hover:bg-white/[0.03] transition-colors items-center"
+            >
+              {/* User col */}
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-xs font-bold flex-shrink-0">
+                  {initials(u.name || u.email)}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-white truncate">{u.name || '—'}</div>
+                  <div className="text-[11px] text-[#8b8f9a] truncate">{u.email}</div>
+                </div>
+              </div>
+
+              <RoleBadge   role={u.role} />
+              <KycBadge    status={u.kycStatus} />
+              <BlockedBadge blocked={u.blocked} twoFactor={u.twoFactorEnabled} />
+
+              <div className="text-right">
+                <div className="text-sm font-bold text-white">R$ {fmtBRL(u.realBalance)}</div>
+                <div className="text-[10px] text-[#8b8f9a]">Demo R$ {fmtBRL(u.demoBalance)}</div>
+              </div>
+
+              <div className="text-right">
+                <div className="text-sm text-white">{u.totalOps}</div>
+                <div className="text-[10px] text-[#8b8f9a]">{u.lastActivity ? formatDateShort(u.lastActivity) : '—'}</div>
+              </div>
+
+              <div className="flex justify-end">
+                <ChevronRight size={14} className="text-[#3a3f50]" />
+              </div>
+            </button>
+          ))
+        )}
+
+        {/* Pagination */}
+        {data && data.users.length > 0 && (
+          <div className="flex items-center justify-between px-4 py-3 text-xs text-[#8b8f9a]">
+            <span>
+              Mostrando {(data.page - 1) * data.pageSize + 1}–
+              {Math.min(data.page * data.pageSize, data.total)} de {data.total}
+            </span>
+            <div className="flex items-center gap-1">
+              <Pager disabled={page === 1}          onClick={() => setPage(1)}            ><ChevronsLeft  size={14} /></Pager>
+              <Pager disabled={page === 1}          onClick={() => setPage((p) => p - 1)} ><ChevronLeft   size={14} /></Pager>
+              <span className="px-2">{page} / {totalPages}</span>
+              <Pager disabled={page === totalPages} onClick={() => setPage((p) => p + 1)} ><ChevronRight  size={14} /></Pager>
+              <Pager disabled={page === totalPages} onClick={() => setPage(totalPages)}   ><ChevronsRight size={14} /></Pager>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Detail drawer */}
+      {selectedId && (
+        <UserDetailDrawer
+          userId={selectedId}
+          onClose={() => setSelectedId(null)}
+          onChanged={() => load()}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Subcomponents ───────────────────────────────────────────────────────────
+
+function FilterPills({
+  label, value, options, onChange,
+}: { label: string; value: string; options: [string, string][]; onChange: (v: string) => void }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[10px] text-[#8b8f9a] mr-1">{label}:</span>
+      {options.map(([v, lbl]) => (
+        <button
+          key={v}
+          onClick={() => onChange(v)}
+          className={cn(
+            'px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors',
+            value === v
+              ? 'bg-emerald-500 text-black'
+              : 'bg-[#1a1e2a] text-[#8b8f9a] hover:text-white border border-[#1f232e]'
+          )}
+        >
+          {lbl}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function RoleBadge({ role }: { role: string }) {
+  const isAdmin = role === 'ADMIN'
+  return (
+    <span className={cn(
+      'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold w-fit',
+      isAdmin
+        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/40'
+        : 'bg-[#1a1e2a] text-[#8b8f9a] border border-[#1f232e]'
+    )}>
+      {isAdmin && <ShieldCheck size={9} />}
+      {isAdmin ? 'ADMIN' : 'Usuário'}
+    </span>
+  )
+}
+
+function KycBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; tone: string; icon: React.ReactNode }> = {
+    PENDING:   { label: 'Pendente',  tone: 'bg-[#1a1e2a] text-[#8b8f9a] border-[#1f232e]',         icon: <ClockIcon size={9} /> },
+    SUBMITTED: { label: 'Enviado',   tone: 'bg-blue-500/15 text-blue-400 border-blue-500/40',     icon: <ClockIcon size={9} /> },
+    APPROVED:  { label: 'Aprovado',  tone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40', icon: <CheckCircle2 size={9} /> },
+    REJECTED:  { label: 'Rejeitado', tone: 'bg-red-500/15 text-red-400 border-red-500/40',        icon: <XCircle size={9} /> },
+  }
+  const cfg = map[status] ?? map.PENDING
+  return (
+    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold w-fit border', cfg.tone)}>
+      {cfg.icon}
+      {cfg.label}
+    </span>
+  )
+}
+
+function BlockedBadge({ blocked, twoFactor }: { blocked: boolean; twoFactor: boolean }) {
+  if (blocked) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold w-fit bg-red-500/15 text-red-400 border border-red-500/40">
+        <ShieldAlert size={9} /> Bloqueado
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] text-[#8b8f9a]">
+      Ativo {twoFactor && <span className="text-emerald-400" title="2FA ativo">· 2FA</span>}
+    </span>
+  )
+}
+
+function Pager({ children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      {...rest}
+      className="w-7 h-7 flex items-center justify-center rounded border border-[#1f232e] text-[#8b8f9a] hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors"
+    >
+      {children}
+    </button>
+  )
+}
+
+function initials(name: string) {
+  const parts = name.split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0][0]!.toUpperCase()
+  return (parts[0][0]! + parts[parts.length - 1][0]!).toUpperCase()
+}
+
+function fmtBRL(s: string) {
+  return (parseFloat(s) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function formatDateShort(iso: string) {
+  const d = new Date(iso)
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}/${d.getFullYear()}`
+}
