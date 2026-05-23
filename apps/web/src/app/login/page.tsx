@@ -23,6 +23,9 @@ export default function LoginPage() {
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
+  // 2FA — populated when the server says REQUIRES_2FA.
+  const [twoFA,    setTwoFA]    = useState(false)
+  const [code,     setCode]     = useState('')
 
   // Register
   const [country,    setCountry]    = useState('')
@@ -47,13 +50,25 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      await login(email, password)
+      await login(email, password, twoFA ? code : undefined)
       router.replace('/')
     } catch (err: any) {
-      const code = err.response?.data?.error
-      if      (code === 'INVALID_CREDENTIALS') setError('E-mail ou senha incorretos.')
-      else if (code === 'ACCOUNT_BLOCKED')     setError('Conta bloqueada. Entre em contato com o suporte.')
-      else                                     setError('Erro ao entrar. Tente novamente.')
+      const errCode = err.response?.data?.error
+      if (errCode === 'REQUIRES_2FA') {
+        // Account has 2FA enabled — switch the form to ask for the code.
+        setTwoFA(true)
+        setCode('')
+      } else if (errCode === 'INVALID_2FA_CODE') {
+        setError('Código inválido. Tente novamente.')
+        setCode('')
+      } else if (errCode === 'INVALID_CREDENTIALS') {
+        setError('E-mail ou senha incorretos.')
+        setTwoFA(false); setCode('')
+      } else if (errCode === 'ACCOUNT_BLOCKED') {
+        setError('Conta bloqueada. Entre em contato com o suporte.')
+      } else {
+        setError('Erro ao entrar. Tente novamente.')
+      }
     } finally {
       setLoading(false)
     }
@@ -136,24 +151,54 @@ export default function LoginPage() {
           <div className="p-6">
             {tab === 'login' ? (
               <form onSubmit={handleLogin} className="flex flex-col gap-4">
-                <FloatingInput label="E-mail" type="email" value={email} onChange={setEmail} required />
-                <FloatingInput label="Senha" type={showPass ? 'text' : 'password'} value={password} onChange={setPassword} required
-                  rightIcon={<EyeIcon show={showPass} onClick={() => setShowPass(v => !v)} />}
-                />
+                {twoFA ? (
+                  <>
+                    <div className="text-center mb-1">
+                      <p className="text-sm font-semibold text-white">Verificação em 2 etapas</p>
+                      <p className="text-xs text-[#8b8f9a] mt-1">
+                        Digite o código de 6 dígitos do seu app autenticador
+                      </p>
+                    </div>
+                    <input
+                      autoFocus
+                      type="text"
+                      inputMode="numeric"
+                      pattern="\d{6}"
+                      value={code}
+                      onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="000000"
+                      className="w-full bg-transparent border border-[#2a2e4a] rounded-lg px-3 py-3 text-center text-xl font-mono text-white outline-none focus:border-blue-500 transition-colors tracking-[0.5em]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { setTwoFA(false); setCode(''); setError('') }}
+                      className="text-xs text-[#8b8f9a] hover:text-white transition-colors self-center"
+                    >
+                      ← Usar outro e-mail
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <FloatingInput label="E-mail" type="email" value={email} onChange={setEmail} required />
+                    <FloatingInput label="Senha" type={showPass ? 'text' : 'password'} value={password} onChange={setPassword} required
+                      rightIcon={<EyeIcon show={showPass} onClick={() => setShowPass(v => !v)} />}
+                    />
 
-                <div className="flex items-center justify-between text-xs">
-                  <label className="flex items-center gap-2 text-[#8b8f9a] cursor-pointer select-none">
-                    <input type="checkbox" className="accent-blue-500 w-3.5 h-3.5" />
-                    Lembrar-me
-                  </label>
-                  <button type="button" className="text-blue-400 hover:text-blue-300 transition-colors">
-                    Esqueceu sua senha?
-                  </button>
-                </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <label className="flex items-center gap-2 text-[#8b8f9a] cursor-pointer select-none">
+                        <input type="checkbox" className="accent-blue-500 w-3.5 h-3.5" />
+                        Lembrar-me
+                      </label>
+                      <button type="button" className="text-blue-400 hover:text-blue-300 transition-colors">
+                        Esqueceu sua senha?
+                      </button>
+                    </div>
+                  </>
+                )}
 
                 {error && <p className="text-red-400 text-xs text-center">{error}</p>}
 
-                <SubmitButton loading={loading} label="Entrar" />
+                <SubmitButton loading={loading} label={twoFA ? 'Verificar' : 'Entrar'} />
               </form>
             ) : (
               <form onSubmit={handleRegister} className="flex flex-col gap-4">
