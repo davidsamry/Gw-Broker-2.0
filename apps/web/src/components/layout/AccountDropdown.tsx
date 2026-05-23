@@ -117,9 +117,6 @@ export function AccountDropdown({
         <div>
           <div className="text-sm text-white font-medium truncate">{userEmail || 'usuario@gwbroker.com'}</div>
           <div className="text-xs text-[#8b8f9a] mt-0.5">ID: {shortId}</div>
-          <div className="mt-1.5">
-            <span className="text-xs text-[#8b8f9a]">Moeda: BRL</span>
-          </div>
         </div>
 
         <div className="h-px bg-[#2a2e3b]" />
