@@ -1056,7 +1056,6 @@ function MinhaContaTab() {
               </div>
               <span className="text-sm text-white">App autenticador (TOTP)</span>
             </button>
-            <Toggle label="Para retirar fundos (em breve)" defaultOn={false} />
           </div>
 
           <div className="border-t border-[#2a2e3b] pt-5">
