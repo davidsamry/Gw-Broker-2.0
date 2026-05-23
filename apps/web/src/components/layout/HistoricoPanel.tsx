@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { X, ChevronDown, ArrowUp, ArrowDown, Package } from 'lucide-react'
-import { api } from '@/lib/api'
 import { ASSETS } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
+import { useOperationsStore, type ApiOperation } from '@/store/operations'
 
 interface HistoricoPanelProps {
   onClose: () => void
@@ -13,20 +13,6 @@ interface HistoricoPanelProps {
 }
 
 type Filter = 'FINALIZADAS' | 'PENDENTES' | 'TODAS'
-
-interface ApiOperation {
-  id:          string
-  assetId:     string
-  assetSymbol: string
-  direction:   'CALL' | 'PUT'
-  amount:      string
-  payout:      number
-  profit:      string | null
-  status:      'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
-  expiresAt:   string
-  openedAt:    string
-  closedAt:    string | null
-}
 
 interface Item {
   id:        string
@@ -70,28 +56,25 @@ function toItem(op: ApiOperation): Item {
 export function HistoricoPanel({ onClose, isDemo }: HistoricoPanelProps) {
   const [filter, setFilter]       = useState<Filter>('FINALIZADAS')
   const [filterOpen, setFilterOpen] = useState(false)
-  const [ops, setOps]             = useState<Item[]>([])
-  const [loading, setLoading]     = useState(true)
 
+  // Read from the shared operations cache (hydrated by /auth/me on mount).
+  // No more duplicate /operations fetches — the cache is already populated.
+  const operations = useOperationsStore((s) => s.operations)
+  const hydrated   = useOperationsStore((s) => s.hydrated)
+  const refetch    = useOperationsStore((s) => s.refetch)
+  const loading    = !hydrated
+
+  // Refresh every 5s while the panel is open so pending ops update + new
+  // resolutions appear without forcing a full page reload.
   useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    api.get('/operations').then(({ data }) => {
-      if (cancelled) return
-      const items = (data?.operations ?? []).map(toItem) as Item[]
-      setOps(items)
-    }).catch(() => { /* silent */ }).finally(() => {
-      if (!cancelled) setLoading(false)
-    })
-    // Refresh every 5s so pending ones update + new resolutions appear
-    const tick = setInterval(() => {
-      api.get('/operations').then(({ data }) => {
-        if (cancelled) return
-        setOps((data?.operations ?? []).map(toItem))
-      }).catch(() => {})
-    }, 5000)
-    return () => { cancelled = true; clearInterval(tick) }
-  }, [])
+    const tick = setInterval(() => { refetch() }, 5000)
+    return () => clearInterval(tick)
+  }, [refetch])
+
+  const ops = useMemo(
+    () => operations.map((o) => toItem(o as ApiOperation)),
+    [operations],
+  )
 
   const filtered = ops.filter((o) => {
     if (filter === 'PENDENTES')   return o.status === 'OPEN'

@@ -7,6 +7,7 @@ import { FlagPair } from '@/components/ui/FlagPair'
 import { TradingInputsCompact } from './TradingInputsCompact'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/store/auth'
 
 const TIME_OPTIONS = [
   { label: '01:00', value: 60   },
@@ -46,15 +47,20 @@ export function TradingCompactCard({
     setPlacing(true)
 
     // ── Optimistic UI ────────────────────────────────────────────────────────
-    // Render the marker BEFORE the server roundtrip so the user sees feedback
-    // in <50ms instead of after the ~700-1400ms POST latency. The chart marker
-    // uses `clientTradeId` throughout its lifetime (OPEN → RESOLVED/CANCELLED);
-    // the real `operationId` from the server is only used for the resolution
-    // GET request below.
+    // Render the marker AND debit the local balance BEFORE the server
+    // roundtrip so the user sees feedback in <50ms instead of after the
+    // ~700-1400ms POST latency. The chart marker uses `clientTradeId`
+    // throughout its lifetime (OPEN → RESOLVED/CANCELLED); the real
+    // `operationId` from the server is only used for the resolution GET.
     const clientTradeId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const entryTime     = Math.floor(Date.now() / 1000) + BRT_OFFSET
     const expiryTime    = entryTime + timeSec
     const entryPrice    = asset.source === 'BINANCE' ? livePrice : asset.price
+
+    // Optimistically debit the stake — server already does this atomically
+    // in the create-operation CTE; we just mirror it client-side to avoid a
+    // /accounts refetch.
+    useAuthStore.getState().applyBalanceDelta(accountId, -investment)
 
     onTradePlaced?.({
       id: clientTradeId,
@@ -86,6 +92,11 @@ export function TradingCompactCard({
           const op    = data?.operation ?? data
           const won   = op?.status === 'WON'
           const prof  = won ? parseFloat(op?.profit ?? '0') : 0
+          // Credit winnings locally (stake + profit). Loss = no change since
+          // stake was already debited on click.
+          if (won) {
+            useAuthStore.getState().applyBalanceDelta(accountId, investment + prof)
+          }
           onTradePlaced?.({
             id: clientTradeId,
             entryPrice, entryTime, expiryTime,
@@ -98,7 +109,8 @@ export function TradingCompactCard({
         }
       }, timeSec * 1000)
     } catch (err: any) {
-      // Server rejected the trade — roll back the optimistic marker silently.
+      // Server rejected — refund the optimistic debit + roll back marker.
+      useAuthStore.getState().applyBalanceDelta(accountId, investment)
       onTradePlaced?.({
         id: clientTradeId,
         entryPrice, entryTime, expiryTime,

@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { loginSchema, registerSchema } from './schema.js'
 import { getUserById, loginUser, registerUser } from './service.js'
+import { listOperations } from '../operations/service.js'
 
 const REFRESH_COOKIE = 'refresh_token'
 const REFRESH_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
@@ -63,8 +64,13 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/me', { preHandler: [(app as any).authenticate] }, async (req, reply) => {
     const userId = ((req as any).user.sub) as string
     try {
-      const user = await getUserById(userId)
-      return reply.send({ user })
+      // Fetch user + recent operations in parallel — saves 1 RTT on every page
+      // mount by letting the client hydrate balance + history from one call.
+      const [user, operations] = await Promise.all([
+        getUserById(userId),
+        listOperations(userId).catch(() => []),
+      ])
+      return reply.send({ user, operations })
     } catch {
       return reply.status(404).send({ error: 'USER_NOT_FOUND' })
     }

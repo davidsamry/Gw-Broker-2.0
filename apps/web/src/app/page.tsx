@@ -113,9 +113,8 @@ export default function TradingPage() {
       ])
     } else if (trade.status === 'CANCELLED') {
       // Optimistic trade failed at the server — silently remove the marker.
-      // No result popup, no balance refresh (server never debited).
+      // Stake refund + balance reconciliation happen at the call site.
       setActiveTrades(prev => prev.filter(t => t.id !== trade.id))
-      return
     } else { // RESOLVED
       setActiveTrades(prev => prev.filter(t => t.id !== trade.id))
       setChartTradeEvents(prev => [...prev.filter(t => t.id !== trade.id), trade])
@@ -124,7 +123,9 @@ export default function TradingPage() {
       }, 4000)
     }
 
-    authStore.refreshAccounts()
+    // No refreshAccounts() — balance is now mutated locally by the trading
+    // components via applyBalanceDelta. Next /auth/me revalidate (page reload
+    // or stale-while-revalidate window) reconciles any drift.
   }
 
   const isDemo      = authStore.isDemo

@@ -1,11 +1,13 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Minus, Plus, ArrowUp, ArrowDown, ChevronDown, ChevronUp, Package, X } from 'lucide-react'
 import { ASSETS, type Asset, type OpenTrade, type ClosedTrade, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
 import { api } from '@/lib/api'
+import { useOperationsStore, type ApiOperation } from '@/store/operations'
+import { useAuthStore } from '@/store/auth'
 
 interface TradingPanelProps {
   asset: Asset
@@ -173,43 +175,35 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
   const [timeIndex, setTimeIndex] = useState(0) // 60s = 1 min (padrão)
   const [timerPickerOpen, setTimerPickerOpen] = useState(false)
   const [openTrades, setOpenTrades] = useState<OpenTrade[]>([])
-  const [closedTrades, setClosedTrades] = useState<ClosedTrade[]>([])
   const [placing, setPlacing] = useState(false)
   const [tradeError, setTradeError] = useState('')
   const [tradeResult, setTradeResult] = useState<{ direction: 'CALL' | 'PUT'; amount: number; profit: number; won: boolean } | null>(null)
 
-  // Load recent operations history on mount + when accountId changes.
-  // Server returns up to 50 most-recent ops for the user.
-  useEffect(() => {
-    let cancelled = false
-    if (!accountId) return
-    api.get('/operations').then(({ data }) => {
-      if (cancelled) return
-      const ops = data?.operations ?? []
-      const closed: ClosedTrade[] = ops
-        .filter((o: any) => o.status === 'WON' || o.status === 'LOST' || o.status === 'CANCELLED')
-        .slice(0, 30)
-        .map((o: any) => {
-          // Look up the asset in the catalog to get the proper short symbol +
-          // flag codes (same icons the header asset tabs use).
-          const asset = ASSETS.find((a) => a.id === o.assetId)
-          const parts = o.assetId.split('-')
-          return {
-            id:          o.id,
-            assetSymbol: asset?.symbol ?? o.assetSymbol,
-            code1:       asset?.code1 ?? parts[0] ?? '',
-            code2:       asset?.code2 ?? parts[1] ?? '',
-            direction:   o.direction,
-            amount:      Number(o.amount),
-            profit:      Number(o.profit ?? 0),
-            status:      o.status,
-            closedAt:    o.closedAt ?? o.expiresAt,
-          }
-        })
-      setClosedTrades(closed)
-    }).catch(() => { /* silent fail — empty list */ })
-    return () => { cancelled = true }
-  }, [accountId])
+  // Closed-trades come from the shared operations store (hydrated by /auth/me
+  // on app mount). When a trade resolves, placeTrade upserts the new op into
+  // the same store — this list updates automatically via useMemo.
+  const storeOperations = useOperationsStore((s) => s.operations)
+  const closedTrades: ClosedTrade[] = useMemo(
+    () => storeOperations
+      .filter((o) => o.status === 'WON' || o.status === 'LOST' || o.status === 'CANCELLED')
+      .slice(0, 30)
+      .map((o) => {
+        const a = ASSETS.find((x) => x.id === o.assetId)
+        const parts = o.assetId.split('-')
+        return {
+          id:          o.id,
+          assetSymbol: a?.symbol ?? o.assetSymbol,
+          code1:       a?.code1 ?? parts[0] ?? '',
+          code2:       a?.code2 ?? parts[1] ?? '',
+          direction:   o.direction,
+          amount:      Number(o.amount),
+          profit:      Number(o.profit ?? 0),
+          status:      o.status as ClosedTrade['status'],
+          closedAt:    o.closedAt ?? o.expiresAt,
+        }
+      }),
+    [storeOperations],
+  )
 
   const livePrice = marketPrice ?? asset.price
   const payout  = asset.payout / 100
@@ -249,6 +243,10 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
       expiryTime,
     }
     setOpenTrades(prev => [newTrade, ...prev])
+
+    // Optimistically debit stake (mirrors what the server CTE does atomically)
+    // — saves a /accounts RTT after the trade.
+    useAuthStore.getState().applyBalanceDelta(accountId, -investment)
 
     onTradePlaced?.({
       id: clientTradeId,
@@ -300,21 +298,29 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
           }
 
           setOpenTrades(prev => prev.filter(t => t.id !== clientTradeId))
-          // Prepend to the closed-trades list so it appears at the top of "FECHADAS"
-          setClosedTrades(prev => [
-            {
-              id:          operationId,
-              assetSymbol: asset.symbol,  // short form (e.g. "BTC/USDT") to match asset tabs
-              code1:       asset.code1,
-              code2:       asset.code2,
-              direction,
-              amount:      investment,
-              profit,
-              status:      won ? 'WON' : 'LOST',
-              closedAt:    operation?.closedAt ?? new Date().toISOString(),
-            },
-            ...prev.filter(t => t.id !== operationId),
-          ])
+          // Credit winnings locally (stake + profit). Loss = no change since
+          // stake was already debited on click.
+          if (won) {
+            useAuthStore.getState().applyBalanceDelta(accountId, investment + profit)
+          }
+          // Push the resolved op into the shared store — closedTrades is
+          // derived from it via useMemo above, and HistoricoPanel reads the
+          // same source.
+          useOperationsStore.getState().upsertOne({
+            id:          operationId,
+            accountId,
+            assetId:     asset.id,
+            assetSymbol: asset.symbol,
+            direction,
+            amount:      String(investment),
+            payout:      asset.payout,
+            profit:      String(profit),
+            status:      won ? 'WON' : 'LOST',
+            entryPrice:  String(entryPrice),
+            expiresAt:   operation?.expiresAt ?? new Date(expiryTime * 1000).toISOString(),
+            openedAt:    operation?.openedAt ?? new Date(entryTime * 1000).toISOString(),
+            closedAt:    operation?.closedAt ?? new Date().toISOString(),
+          })
           onTradePlaced?.(resolvedTrade)
           setTradeResult({ direction, amount: investment, profit, won })
           setTimeout(() => onTradePlaced?.(null), 4000)
@@ -326,8 +332,9 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
       }, expiresInSec * 1000)
 
     } catch (err: any) {
-      // Server rejected — roll back the optimistic open trade + marker.
+      // Server rejected — roll back the optimistic open trade + marker + refund.
       setOpenTrades(prev => prev.filter(t => t.id !== clientTradeId))
+      useAuthStore.getState().applyBalanceDelta(accountId, investment)
       onTradePlaced?.({
         id: clientTradeId,
         entryPrice,

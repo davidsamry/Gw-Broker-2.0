@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { api } from '@/lib/api'
+import { useOperationsStore } from './operations'
 
 export interface Account {
   id:       string
@@ -17,18 +18,50 @@ export interface User {
 }
 
 interface AuthState {
-  user:     User | null
-  token:    string | null
-  isDemo:   boolean
-  loading:  boolean
+  user:               User | null
+  token:              string | null
+  isDemo:             boolean
+  loading:            boolean
 
-  login:           (email: string, password: string) => Promise<void>
-  register:        (name: string, email: string, password: string) => Promise<void>
-  logout:          () => Promise<void>
-  init:            () => Promise<void>
-  setIsDemo:       (v: boolean) => void
-  refreshAccounts: () => Promise<void>
-  resetDemo:       () => Promise<void>
+  login:              (email: string, password: string) => Promise<void>
+  register:           (name: string, email: string, password: string) => Promise<void>
+  logout:             () => Promise<void>
+  init:               () => Promise<void>
+  setIsDemo:          (v: boolean) => void
+  refreshAccounts:    () => Promise<void>
+  resetDemo:          () => Promise<void>
+  applyBalanceDelta:  (accountId: string, delta: number) => void
+}
+
+// ── User cache (localStorage) ─────────────────────────────────────────────────
+// Persists the User object across reloads so the app can render balance
+// immediately (0 RTT) instead of waiting for /auth/me. Server is still the
+// source of truth — init() fires /auth/me in the background to revalidate.
+
+const USER_CACHE_KEY = 'vx_user_cache'
+const USER_CACHE_TTL = 5 * 60 * 1000 // 5 min — short enough that stale balance corrects quickly
+
+interface UserCache { user: User; savedAt: number }
+
+function loadUserCache(): User | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(USER_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as UserCache
+    if (Date.now() - parsed.savedAt > USER_CACHE_TTL) return null
+    return parsed.user ?? null
+  } catch {
+    return null
+  }
+}
+
+function saveUserCache(user: User | null) {
+  if (typeof window === 'undefined') return
+  if (!user) { localStorage.removeItem(USER_CACHE_KEY); return }
+  try {
+    localStorage.setItem(USER_CACHE_KEY, JSON.stringify({ user, savedAt: Date.now() }))
+  } catch { /* quota / private mode — ignore */ }
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -42,30 +75,58 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (email, password) => {
     const { data } = await api.post('/auth/login', { email, password })
     localStorage.setItem('token', data.token)
+    saveUserCache(data.user)
     set({ user: data.user, token: data.token })
   },
 
   register: async (name, email, password) => {
     const { data } = await api.post('/auth/register', { name, email, password })
     localStorage.setItem('token', data.token)
+    saveUserCache(data.user)
     set({ user: data.user, token: data.token })
   },
 
   logout: async () => {
     await api.post('/auth/logout').catch(() => {})
     localStorage.removeItem('token')
+    saveUserCache(null)
     set({ user: null, token: null })
+    useOperationsStore.getState().reset()
   },
 
   init: async () => {
     const token = localStorage.getItem('token')
     if (!token) { set({ loading: false }); return }
+
+    // ── Stale-while-revalidate ───────────────────────────────────────────────
+    // 1. Hydrate from cache immediately (0 RTT) so the user sees their balance
+    //    on screen as soon as the JS bundle parses.
+    // 2. Always revalidate against /auth/me in the background — server is the
+    //    source of truth. Fresh data replaces the cache silently.
+    const cachedUser = get().user ?? loadUserCache()
+    if (cachedUser) {
+      set({ user: cachedUser, token, loading: false })
+    }
+
     try {
       const { data } = await api.get('/auth/me')
+      saveUserCache(data.user)
       set({ user: data.user, token, loading: false })
+      // Hydrate operations cache from the same response — eliminates the
+      // separate /operations RTT that TradingPanel/HistoricoPanel used to fire.
+      if (Array.isArray(data.operations)) {
+        useOperationsStore.getState().hydrate(data.operations)
+      }
     } catch {
-      localStorage.removeItem('token')
-      set({ loading: false })
+      // Only blow away cache if we definitely heard a 401 — network errors
+      // (which the axios interceptor already redirects to /login on 401)
+      // shouldn't trash the cached user.
+      if (!cachedUser) {
+        localStorage.removeItem('token')
+        saveUserCache(null)
+        set({ user: null, loading: false })
+        useOperationsStore.getState().reset()
+      }
     }
   },
 
@@ -73,12 +134,31 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const { data } = await api.get('/accounts')
     const user = get().user
     if (!user) return
-    set({ user: { ...user, accounts: data.accounts } })
+    const next = { ...user, accounts: data.accounts }
+    saveUserCache(next)
+    set({ user: next })
   },
 
   resetDemo: async () => {
     await api.post('/accounts/demo/reset')
     await get().refreshAccounts()
+  },
+
+  // Mutate a single account's balance in place — used after a trade resolves
+  // so the UI updates instantly without paying a /accounts RTT. Server stays
+  // the source of truth (next /auth/me revalidate reconciles any drift).
+  applyBalanceDelta: (accountId, delta) => {
+    const user = get().user
+    if (!user) return
+    const accounts = user.accounts.map((a) => {
+      if (a.id !== accountId) return a
+      const current = parseFloat(a.balance) || 0
+      const next    = Math.max(0, current + delta)
+      return { ...a, balance: next.toFixed(2) }
+    })
+    const nextUser = { ...user, accounts }
+    saveUserCache(nextUser)
+    set({ user: nextUser })
   },
 }))
 
