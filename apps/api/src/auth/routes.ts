@@ -1,9 +1,11 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
-import { loginSchema, registerSchema, updateProfileSchema } from './schema.js'
+import { loginSchema, registerSchema, updateProfileSchema, twoFactorCodeSchema } from './schema.js'
 import { getUserById, loginUser, registerUser, updateUserProfile } from './service.js'
 import { listOperations } from '../operations/service.js'
 import { listWithdrawals } from '../withdrawals/service.js'
 import { listTransactions } from '../transactions/service.js'
+import { generateSecret, otpauthUrl, qrCodeDataUrl, verifyTotp } from './twoFactor.js'
+import { prisma } from '../prisma.js'
 
 const REFRESH_COOKIE = 'refresh_token'
 const REFRESH_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
@@ -41,6 +43,14 @@ export async function authRoutes(app: FastifyInstance) {
     } catch (err: any) {
       if (err.message === 'INVALID_CREDENTIALS') {
         return reply.status(401).send({ error: 'INVALID_CREDENTIALS' })
+      }
+      // 2FA: password OK but code missing — surface this so the frontend can
+      // ask for it. Don't issue any token yet.
+      if (err.message === 'REQUIRES_2FA') {
+        return reply.status(401).send({ error: 'REQUIRES_2FA', requires2FA: true })
+      }
+      if (err.message === 'INVALID_2FA_CODE') {
+        return reply.status(401).send({ error: 'INVALID_2FA_CODE', requires2FA: true })
       }
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
@@ -94,6 +104,78 @@ export async function authRoutes(app: FastifyInstance) {
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }
+  })
+
+  // ── 2FA management ─────────────────────────────────────────────────────────
+  // Setup: generates a new secret + QR. Stored as twoFactorSecret but flag
+  // stays false until the user confirms a code via /2fa/enable.
+  app.post('/2fa/setup', { preHandler: [(app as any).authenticate] }, async (req, reply) => {
+    const userId = ((req as any).user.sub) as string
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } })
+    if (!user) return reply.status(404).send({ error: 'USER_NOT_FOUND' })
+
+    const secret = generateSecret()
+    await prisma.user.update({
+      where: { id: userId },
+      data:  { twoFactorSecret: secret, twoFactorEnabled: false },
+    })
+
+    const qrDataUrl = await qrCodeDataUrl(secret, user.email)
+    return reply.send({
+      secret,
+      otpauthUrl: otpauthUrl(secret, user.email),
+      qrDataUrl,
+    })
+  })
+
+  // Enable: confirms the user actually scanned by requiring a valid code.
+  app.post('/2fa/enable', { preHandler: [(app as any).authenticate] }, async (req, reply) => {
+    const parsed = twoFactorCodeSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'INVALID_CODE_FORMAT' })
+
+    const userId = ((req as any).user.sub) as string
+    const user = await prisma.user.findUnique({
+      where:  { id: userId },
+      select: { twoFactorSecret: true, twoFactorEnabled: true },
+    })
+    if (!user || !user.twoFactorSecret) {
+      return reply.status(400).send({ error: 'SETUP_NOT_STARTED' })
+    }
+    if (!verifyTotp(user.twoFactorSecret, parsed.data.code)) {
+      return reply.status(401).send({ error: 'INVALID_2FA_CODE' })
+    }
+    await prisma.user.update({
+      where: { id: userId },
+      data:  { twoFactorEnabled: true },
+    })
+    return reply.send({ ok: true, enabled: true })
+  })
+
+  // Disable: requires a valid code so a stolen session can't kill 2FA.
+  app.post('/2fa/disable', { preHandler: [(app as any).authenticate] }, async (req, reply) => {
+    const parsed = twoFactorCodeSchema.safeParse(req.body)
+    if (!parsed.success) return reply.status(400).send({ error: 'INVALID_CODE_FORMAT' })
+
+    const userId = ((req as any).user.sub) as string
+    const user = await prisma.user.findUnique({
+      where:  { id: userId },
+      select: { twoFactorSecret: true, twoFactorEnabled: true, role: true },
+    })
+    if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
+      return reply.status(400).send({ error: 'NOT_ENABLED' })
+    }
+    // Admins cannot disable 2FA (would defeat the mandatory policy).
+    if (user.role === 'ADMIN') {
+      return reply.status(403).send({ error: 'ADMIN_2FA_REQUIRED' })
+    }
+    if (!verifyTotp(user.twoFactorSecret, parsed.data.code)) {
+      return reply.status(401).send({ error: 'INVALID_2FA_CODE' })
+    }
+    await prisma.user.update({
+      where: { id: userId },
+      data:  { twoFactorSecret: null, twoFactorEnabled: false },
+    })
+    return reply.send({ ok: true, enabled: false })
   })
 }
 

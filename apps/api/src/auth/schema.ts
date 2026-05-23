@@ -9,6 +9,13 @@ export const registerSchema = z.object({
 export const loginSchema = z.object({
   email:    z.string().email().toLowerCase().trim(),
   password: z.string().min(1),
+  // Optional — required only for users with twoFactorEnabled = true.
+  // The login flow returns { requires2FA: true } when code is missing.
+  code:     z.string().regex(/^\d{6}$/).optional(),
+})
+
+export const twoFactorCodeSchema = z.object({
+  code: z.string().regex(/^\d{6}$/),
 })
 
 export const updateProfileSchema = z.object({
@@ -25,3 +32,4 @@ export const updateProfileSchema = z.object({
 export type RegisterInput      = z.infer<typeof registerSchema>
 export type LoginInput         = z.infer<typeof loginSchema>
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>
+export type TwoFactorCodeInput = z.infer<typeof twoFactorCodeSchema>

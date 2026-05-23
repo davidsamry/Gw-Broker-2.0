@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import { prisma } from '../prisma.js'
 import type { LoginInput, RegisterInput, UpdateProfileInput } from './schema.js'
+import { verifyTotp } from './twoFactor.js'
 
 const DEMO_BALANCE = Number(process.env.DEMO_INITIAL_BALANCE ?? 10000)
 
@@ -47,6 +48,14 @@ export async function loginUser(input: LoginInput) {
   const ok = await bcrypt.compare(input.password, user.password)
   if (!ok) throw new Error('INVALID_CREDENTIALS')
 
+  // Password OK. If 2FA is enabled, require + verify the code now.
+  // Non-2FA users skip this branch entirely → existing behavior preserved.
+  if (user.twoFactorEnabled) {
+    if (!input.code) throw new Error('REQUIRES_2FA')
+    const valid = user.twoFactorSecret && verifyTotp(user.twoFactorSecret, input.code)
+    if (!valid) throw new Error('INVALID_2FA_CODE')
+  }
+
   return sanitizeUser(user)
 }
 
@@ -60,7 +69,8 @@ export async function getUserById(userId: string) {
 }
 
 function sanitizeUser(user: any) {
-  const { password: _pw, ...safe } = user
+  // Strip secrets that must never reach the client.
+  const { password: _pw, twoFactorSecret: _2fa, ...safe } = user
   return {
     ...safe,
     // Dates come out of Prisma as Date — serialize to ISO so JSON works.

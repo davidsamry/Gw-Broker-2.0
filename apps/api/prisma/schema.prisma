@@ -79,6 +79,12 @@ model User {
   address      String?
   kycStatus    KycStatus  @default(PENDING)
   role         UserRole   @default(USER)
+  // ── Two-factor authentication (TOTP / Google Authenticator) ──
+  // twoFactorSecret is base32 — only present once enrolled.
+  // twoFactorEnabled flips true only after the user confirms a code,
+  // proving they scanned the QR. Login flow checks the flag, not the secret.
+  twoFactorSecret  String?
+  twoFactorEnabled Boolean   @default(false)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
