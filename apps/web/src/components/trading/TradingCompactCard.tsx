@@ -44,11 +44,26 @@ export function TradingCompactCard({
     if (!accountId || placing) return
     setTradeError('')
     setPlacing(true)
-    try {
-      const entryTime  = Math.floor(Date.now() / 1000) + BRT_OFFSET
-      const expiryTime = entryTime + timeSec
-      const entryPrice = asset.source === 'BINANCE' ? livePrice : asset.price
 
+    // ── Optimistic UI ────────────────────────────────────────────────────────
+    // Render the marker BEFORE the server roundtrip so the user sees feedback
+    // in <50ms instead of after the ~700-1400ms POST latency. The chart marker
+    // uses `clientTradeId` throughout its lifetime (OPEN → RESOLVED/CANCELLED);
+    // the real `operationId` from the server is only used for the resolution
+    // GET request below.
+    const clientTradeId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const entryTime     = Math.floor(Date.now() / 1000) + BRT_OFFSET
+    const expiryTime    = entryTime + timeSec
+    const entryPrice    = asset.source === 'BINANCE' ? livePrice : asset.price
+
+    onTradePlaced?.({
+      id: clientTradeId,
+      entryPrice, entryTime, expiryTime,
+      direction, amount: investment, payout: asset.payout,
+      status: 'OPEN',
+    })
+
+    try {
       const res = await api.post('/operations', {
         accountId,
         assetId:          asset.id,
@@ -61,16 +76,10 @@ export function TradingCompactCard({
         expiresInSeconds: timeSec,
       })
 
-      const operationId: string = res.data?.operation?.id ?? `local-${Date.now()}`
-
-      onTradePlaced?.({
-        id: operationId,
-        entryPrice, entryTime, expiryTime,
-        direction, amount: investment, payout: asset.payout,
-        status: 'OPEN',
-      })
+      const operationId: string = res.data?.operation?.id ?? clientTradeId
 
       // Poll for resolution after expiry, then signal the chart.
+      // Uses real operationId for the GET, clientTradeId for chart events.
       setTimeout(async () => {
         try {
           const { data } = await api.get(`/operations/${operationId}`)
@@ -78,7 +87,7 @@ export function TradingCompactCard({
           const won   = op?.status === 'WON'
           const prof  = won ? parseFloat(op?.profit ?? '0') : 0
           onTradePlaced?.({
-            id: operationId,
+            id: clientTradeId,
             entryPrice, entryTime, expiryTime,
             direction, amount: investment, payout: asset.payout,
             status: 'RESOLVED', won, profit: prof,
@@ -89,6 +98,13 @@ export function TradingCompactCard({
         }
       }, timeSec * 1000)
     } catch (err: any) {
+      // Server rejected the trade — roll back the optimistic marker silently.
+      onTradePlaced?.({
+        id: clientTradeId,
+        entryPrice, entryTime, expiryTime,
+        direction, amount: investment, payout: asset.payout,
+        status: 'CANCELLED',
+      })
       const code = err.response?.data?.error
       if (code === 'INSUFFICIENT_BALANCE') setTradeError('Saldo insuficiente.')
       else setTradeError('Erro ao abrir operação.')

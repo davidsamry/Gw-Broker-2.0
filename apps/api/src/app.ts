@@ -22,6 +22,10 @@ export async function buildApp() {
       cb(new Error('Not allowed by CORS'), false)
     },
     credentials: true,
+    // Cache the CORS preflight (OPTIONS) for 1h. Without this the browser
+    // sends a separate OPTIONS request before every non-simple request
+    // (POST with JSON body, etc.), doubling latency on each trade.
+    maxAge: 3600,
   })
 
   await app.register(cookie)

@@ -225,13 +225,43 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
     if (!accountId) return
     setTradeError('')
     setPlacing(true)
-    try {
-      const expiresInSec = TIME_OPTIONS[timeIndex]
-      const BRT_OFFSET = -3 * 3600
-      const entryTime = Math.floor(Date.now() / 1000) + BRT_OFFSET
-      const expiryTime = entryTime + expiresInSec
 
-      const entryPrice = asset.source === 'BINANCE' ? livePrice : asset.price
+    // ── Optimistic UI ────────────────────────────────────────────────────────
+    // Marker + open-trades row appear BEFORE the server roundtrip. The chart
+    // identifies the trade by clientTradeId throughout; the real operationId
+    // from the server is only used for the GET resolution call. On error we
+    // roll back both lists + emit a CANCELLED event to silently remove the
+    // marker.
+    const expiresInSec  = TIME_OPTIONS[timeIndex]
+    const entryTime     = Math.floor(Date.now() / 1000) + BRT_OFFSET
+    const expiryTime    = entryTime + expiresInSec
+    const entryPrice    = asset.source === 'BINANCE' ? livePrice : asset.price
+    const clientTradeId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+    const newTrade: OpenTrade = {
+      id: clientTradeId,
+      asset,
+      direction,
+      amount: investment,
+      profit: 0,
+      timeLeft: 0,
+      entryPrice,
+      expiryTime,
+    }
+    setOpenTrades(prev => [newTrade, ...prev])
+
+    onTradePlaced?.({
+      id: clientTradeId,
+      entryPrice,
+      entryTime,
+      expiryTime,
+      direction,
+      amount: investment,
+      payout: asset.payout,
+      status: 'OPEN',
+    })
+
+    try {
       const res = await api.post('/operations', {
         accountId,
         assetId:          asset.id,
@@ -245,34 +275,10 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
         expiresInSeconds: expiresInSec,
       })
 
-      const operationId: string = res.data?.operation?.id ?? res.data?.id ?? `local-${Date.now()}`
+      const operationId: string = res.data?.operation?.id ?? res.data?.id ?? clientTradeId
 
-      // Add to open trades list — expiryTime drives the regressive countdown in TradeItem
-      const newTrade: OpenTrade = {
-        id: operationId,
-        asset,
-        direction,
-        amount: investment,
-        profit: 0,
-        timeLeft: 0,
-        entryPrice,
-        expiryTime,
-      }
-      setOpenTrades(prev => [newTrade, ...prev])
-
-      // Signal chart to draw lines
-      onTradePlaced?.({
-        id: operationId,
-        entryPrice,
-        entryTime,
-        expiryTime,
-        direction,
-        amount: investment,
-        payout: asset.payout,
-        status: 'OPEN',
-      })
-
-      // Schedule result popup after expiry
+      // Schedule result popup after expiry — GETs the real operationId, but
+      // emits chart events keyed by clientTradeId (matches the OPEN above).
       setTimeout(async () => {
         try {
           const { data } = await api.get(`/operations/${operationId}`)
@@ -281,7 +287,7 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
           const profit = won ? parseFloat(operation?.profit ?? '0') : 0
 
           const resolvedTrade: ChartTradeEvent = {
-            id: operationId,
+            id: clientTradeId,
             entryPrice,
             entryTime,
             expiryTime,
@@ -293,7 +299,7 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
             profit,
           }
 
-          setOpenTrades(prev => prev.filter(t => t.id !== operationId))
+          setOpenTrades(prev => prev.filter(t => t.id !== clientTradeId))
           // Prepend to the closed-trades list so it appears at the top of "FECHADAS"
           setClosedTrades(prev => [
             {
@@ -314,12 +320,24 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
           setTimeout(() => onTradePlaced?.(null), 4000)
         } catch {
           setTradeError('Erro ao atualizar resultado da operação.')
-          setOpenTrades(prev => prev.filter(t => t.id !== operationId))
+          setOpenTrades(prev => prev.filter(t => t.id !== clientTradeId))
           setTimeout(() => onTradePlaced?.(null), 4000)
         }
       }, expiresInSec * 1000)
 
     } catch (err: any) {
+      // Server rejected — roll back the optimistic open trade + marker.
+      setOpenTrades(prev => prev.filter(t => t.id !== clientTradeId))
+      onTradePlaced?.({
+        id: clientTradeId,
+        entryPrice,
+        entryTime,
+        expiryTime,
+        direction,
+        amount: investment,
+        payout: asset.payout,
+        status: 'CANCELLED',
+      })
       const code = err.response?.data?.error
       if (code === 'INSUFFICIENT_BALANCE') setTradeError('Saldo insuficiente.')
       else setTradeError('Erro ao abrir operação.')

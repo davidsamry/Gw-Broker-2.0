@@ -25,6 +25,7 @@ import { AccountDropdown } from '@/components/layout/AccountDropdown'
 import { ASSETS, type Asset, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { useBinanceTicker } from '@/lib/binanceMarket'
 import { fetchMarketAssets } from '@/lib/marketApi'
+import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 type SidebarTab = 'TRADE' | 'HISTORICO' | 'RANKING' | 'SUPORTE' | 'CONTA' | 'COPY' | 'BONUS'
@@ -38,6 +39,13 @@ export default function TradingPage() {
     authStore.init().then(() => {
       if (!useAuthStore.getState().user) router.replace('/login')
     })
+  }, [])
+
+  // Pre-warm the API connection: opens TLS + TCP + CORS preflight on page load
+  // so the first trade doesn't pay the ~340ms handshake cost. Cheap fire-and-
+  // forget GET — server returns 200 in <5ms.
+  useEffect(() => {
+    api.get('/health').catch(() => { /* silent: warming, not blocking */ })
   }, [])
 
   useEffect(() => {
@@ -103,6 +111,11 @@ export default function TradingPage() {
           payout:     trade.payout,
         },
       ])
+    } else if (trade.status === 'CANCELLED') {
+      // Optimistic trade failed at the server — silently remove the marker.
+      // No result popup, no balance refresh (server never debited).
+      setActiveTrades(prev => prev.filter(t => t.id !== trade.id))
+      return
     } else { // RESOLVED
       setActiveTrades(prev => prev.filter(t => t.id !== trade.id))
       setChartTradeEvents(prev => [...prev.filter(t => t.id !== trade.id), trade])

@@ -20,7 +20,10 @@ export interface ChartTradeEvent {
   direction: 'CALL' | 'PUT'
   amount: number
   payout: number
-  status: 'OPEN' | 'RESOLVED'
+  // OPEN     → optimistic marker placed on chart
+  // RESOLVED → server returned WON/LOST/CANCELLED, shows result marker
+  // CANCELLED→ optimistic placement failed (server error); silently remove
+  status: 'OPEN' | 'RESOLVED' | 'CANCELLED'
   won?: boolean
   profit?: number
 }

@@ -67,7 +67,7 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
           'flex flex-col bg-[#151822] border-blue-500/15 shadow-2xl shadow-blue-500/10',
           'animate-scaleIn',
           // desktop: tall left panel; mobile: bottom sheet
-          'md:w-[640px] md:h-full md:border-r md:rounded-none',
+          'md:w-[460px] md:h-full md:border-r md:rounded-none',
           'w-full max-h-[88vh] rounded-t-2xl border-t border-[#2a2e3b]'
         )}
       >
@@ -140,14 +140,13 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
       </div>
 
       {/* Table header */}
-      <div className="grid grid-cols-[1fr_100px_90px_80px] px-4 pb-1">
+      <div className="grid grid-cols-[220px_90px_60px] gap-x-4 px-4 pb-1">
         <div className="text-[11px] text-[#8b8f9a]">Nome</div>
         <div className="text-[11px] text-[#8b8f9a]">Mudança 24h</div>
         <div className="flex items-center gap-0.5 text-[11px] text-[#8b8f9a]">
-          Lucro 1+ min
+          Lucro
           <ChevronDown size={10} />
         </div>
-        <div className="text-[11px] text-[#8b8f9a]">5+ min</div>
       </div>
 
       {/* Asset list */}
@@ -177,7 +176,7 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
                 <div
                   onClick={() => { onSelect(asset); onClose() }}
                   className={cn(
-                    'grid grid-cols-[1fr_100px_90px_80px] items-center px-4 py-2.5 cursor-pointer transition-colors border-b border-[#1e2235]',
+                    'grid grid-cols-[220px_90px_60px] gap-x-4 items-center px-4 py-2.5 cursor-pointer transition-colors border-b border-[#1e2235]',
                     isActive ? 'bg-[#252a3a]' : 'hover:bg-white/5'
                   )}
                 >
@@ -197,9 +196,6 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
                   {asset.type === 'OTC' && (
                     <span className="text-[9px] text-[#8b8f9a] border border-[#3a3f50] px-1 py-0.5 rounded flex-shrink-0">OTC</span>
                   )}
-                  {asset.source === 'BINANCE' && (
-                    <span className="text-[9px] text-green-400 border border-green-400/30 px-1 py-0.5 rounded flex-shrink-0">BINANCE</span>
-                  )}
                 </div>
 
                 {/* 24h change */}
@@ -208,11 +204,8 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
                   {isUp ? '+' : ''}{asset.change24h.toFixed(2)}%
                 </div>
 
-                {/* Payout 1min */}
-                <div className="text-sm font-bold text-orange-400">{asset.payout}%</div>
-
-                {/* Payout 5min */}
-                <div className="text-sm font-bold text-orange-400">{asset.payout5min}%</div>
+                {/* Payout */}
+                <div className="text-sm font-bold text-green-400">{asset.payout}%</div>
                 </div>
               </div>
             )
