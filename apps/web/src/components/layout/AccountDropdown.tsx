@@ -117,11 +117,8 @@ export function AccountDropdown({
         <div>
           <div className="text-sm text-white font-medium truncate">{userEmail || 'usuario@gwbroker.com'}</div>
           <div className="text-xs text-[#8b8f9a] mt-0.5">ID: {shortId}</div>
-          <div className="flex items-center gap-2 mt-1.5">
+          <div className="mt-1.5">
             <span className="text-xs text-[#8b8f9a]">Moeda: BRL</span>
-            <button className="text-[10px] font-bold text-blue-400 border border-blue-500/40 bg-blue-500/10 px-2 py-0.5 rounded hover:bg-blue-500/20 transition-colors">
-              MUDAR
-            </button>
           </div>
         </div>
 
