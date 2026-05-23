@@ -97,7 +97,8 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  accounts     Account[]
+  accounts        Account[]
+  kycSubmission   KycSubmission?
 
   @@map("users")
 }
@@ -156,6 +157,24 @@ model Transaction {
 
   @@index([accountId])
   @@map("transactions")
+}
+
+model KycSubmission {
+  id                String     @id @default(cuid())
+  userId            String     @unique  // one active submission per user
+  documentFrontUrl  String
+  documentBackUrl   String
+  selfieUrl         String
+  status            KycStatus  @default(SUBMITTED)  // SUBMITTED → APPROVED|REJECTED
+  reason            String?    // populated when status = REJECTED
+  submittedAt       DateTime   @default(now())
+  reviewedAt        DateTime?
+  reviewedBy        String?    // admin user id
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, submittedAt])
+  @@map("kyc_submissions")
 }
 
 model Withdrawal {
