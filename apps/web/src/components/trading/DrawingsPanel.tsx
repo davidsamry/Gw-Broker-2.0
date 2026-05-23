@@ -1,41 +1,18 @@
 'use client'
 
-import { X, ChevronRight } from 'lucide-react'
+import { X, Check, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useState } from 'react'
-
-const DRAWING_TOOLS = [
-  { label: 'Linha horizontal' },
-  { label: 'Faixa de preço' },
-  { label: 'Parte superior/inferior plana' },
-  { label: 'Canal separado', dot: '#ef4444' },
-  { label: 'Arco' },
-  { label: 'Linha Cruzada' },
-  { label: 'Caixa Gann' },
-  { label: 'Ângulo de tendência' },
-  { label: 'Curva' },
-  { label: 'Data e faixa de preço' },
-  { label: 'Pitchfan' },
-  { label: 'Triângulo' },
-  { label: 'Retração de Fibonacci' },
-  { label: 'Canal paralelo' },
-  { label: 'Pitchfork' },
-  { label: 'Leque de Fibonacci' },
-  { label: 'Período' },
-  { label: 'Raio' },
-  { label: 'Linha Estendida' },
-  { label: 'Retângulo' },
-  { label: 'Linha vertical' },
-  { label: 'Linha de trend' },
-]
+import { DRAWING_TOOLS, type DrawingToolId } from '@/lib/drawings'
 
 interface DrawingsPanelProps {
-  onClose: () => void
+  onClose:      () => void
+  onSelectTool: (id: DrawingToolId) => void
+  onClearAll:   () => void
+  activeTool:   DrawingToolId | null
+  hasDrawings:  boolean
 }
 
-export function DrawingsPanel({ onClose }: DrawingsPanelProps) {
-  const [selected, setSelected] = useState<string | null>(null)
-
+export function DrawingsPanel({ onClose, onSelectTool, onClearAll, activeTool, hasDrawings }: DrawingsPanelProps) {
   return (
     <div className="absolute top-0 left-0 h-full z-30 flex" style={{ width: 220 }}>
       <div className="flex flex-col w-full bg-[#1a1e2e] border-r border-[#2a2e3b] shadow-2xl">
@@ -50,34 +27,47 @@ export function DrawingsPanel({ onClose }: DrawingsPanelProps) {
           </button>
         </div>
 
-        {/* Section label */}
-        <div className="px-4 pt-3 pb-1">
-          <span className="text-[10px] font-bold text-[#8b8f9a] tracking-widest">DESENHOS</span>
+        {/* Tip line */}
+        <div className="px-4 pt-3 pb-2 text-[11px] text-[#8b8f9a] leading-snug">
+          {activeTool
+            ? 'Clique no gráfico para posicionar.'
+            : 'Selecione uma ferramenta abaixo.'}
         </div>
 
         {/* Tools list */}
         <div className="flex-1 overflow-y-auto">
-          {DRAWING_TOOLS.map((tool) => (
-            <button
-              key={tool.label}
-              onClick={() => setSelected(tool.label)}
-              className={cn(
-                'w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors group',
-                selected === tool.label
-                  ? 'bg-blue-600/20 text-white'
-                  : 'text-white hover:bg-white/5'
-              )}
-            >
-              <div className="flex items-center gap-2">
-                {tool.dot && (
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: tool.dot }} />
+          {DRAWING_TOOLS.map((tool) => {
+            const active = activeTool === tool.id
+            return (
+              <button
+                key={tool.id}
+                onClick={() => onSelectTool(tool.id)}
+                className={cn(
+                  'w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors group',
+                  active ? 'bg-blue-600/30' : 'hover:bg-white/5'
                 )}
-                <span className="text-[13px] font-medium leading-tight">{tool.label}</span>
-              </div>
-              <ChevronRight size={13} className="text-[#8b8f9a] group-hover:text-white transition-colors flex-shrink-0" />
-            </button>
-          ))}
+              >
+                <span className={cn('text-[13px] font-medium', active ? 'text-white' : 'text-white')}>
+                  {tool.label}
+                </span>
+                {active && <Check size={14} className="text-blue-300 flex-shrink-0" />}
+              </button>
+            )
+          })}
         </div>
+
+        {/* Footer */}
+        {hasDrawings && (
+          <div className="border-t border-[#2a2e3b] p-3 flex-shrink-0">
+            <button
+              onClick={onClearAll}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors text-sm font-semibold"
+            >
+              <Trash2 size={13} />
+              Excluir tudo
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

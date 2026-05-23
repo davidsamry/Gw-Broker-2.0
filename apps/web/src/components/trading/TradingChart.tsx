@@ -14,6 +14,14 @@ import {
   calculateBollingerBands,
   calculateRSI,
 } from '@/lib/indicators'
+import {
+  DRAWING_TOOLS,
+  FIB_LEVELS,
+  DRAWING_DEFAULT_COLOR,
+  type Drawing,
+  type DrawingToolId,
+  type Point as DrawingPoint,
+} from '@/lib/drawings'
 
 type ChartTheme = 'diurno' | 'crepusculo' | 'noite'
 type ChartType = 'velas' | 'area' | 'barras' | 'heiken-ashi'
@@ -105,6 +113,10 @@ const BINANCE_INTERVAL_BY_TIMEFRAME: Record<number, string> = {
   86400: '1d',
 }
 
+function nextDrawingId() {
+  return `dr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+}
+
 function toHeikenAshi(candles: Candle[]): Candle[] {
   const ha: Candle[] = []
   for (let i = 0; i < candles.length; i++) {
@@ -154,6 +166,95 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
 
   function clearAllIndicators() {
     setActiveIndicators(new Set())
+  }
+
+  // ── Drawing tools ────────────────────────────────────────────────────────
+  // Active drawings persist in state. Horizontal lines render via the
+  // series' built-in createPriceLine; vertical / trend / fib render as SVG
+  // overlays positioned with time/price → pixel mapping (re-positioned on
+  // pan/zoom). Clicks on the chart consume the active tool.
+  const [activeTool,   setActiveTool]   = useState<DrawingToolId | null>(null)
+  const [drawings,     setDrawings]     = useState<Drawing[]>([])
+  const [pendingPoint, setPendingPoint] = useState<DrawingPoint | null>(null)
+
+  const activeToolRef   = useRef<DrawingToolId | null>(null)
+  const pendingPointRef = useRef<DrawingPoint | null>(null)
+  const priceLinesRef   = useRef<Map<string, any>>(new Map())
+
+  useEffect(() => { activeToolRef.current   = activeTool   }, [activeTool])
+  useEffect(() => { pendingPointRef.current = pendingPoint }, [pendingPoint])
+
+  // Reset drawings whenever the asset changes — prices/scales differ.
+  useEffect(() => {
+    setDrawings([])
+    setPendingPoint(null)
+    setActiveTool(null)
+  }, [asset.id])
+
+  // When the chart instance is recreated, the priceLines we held are dead
+  // (their parent series no longer exists). Drop the map so the next sync
+  // effect re-creates them on the new series.
+  useEffect(() => {
+    if (!chartReady) priceLinesRef.current.clear()
+  }, [chartReady])
+
+  // ESC cancels the active drawing tool / pending point.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setActiveTool(null)
+        setPendingPoint(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Sync horizontal-line drawings with the series' built-in price lines.
+  // (V-line / trend / fib render as overlays — handled separately.)
+  useEffect(() => {
+    if (!chartReady) return
+    const series = seriesRef.current
+    if (!series) return
+    const lines = priceLinesRef.current
+    const wantedIds = new Set<string>()
+
+    for (const d of drawings) {
+      if (d.type !== 'h-line') continue
+      wantedIds.add(d.id)
+      if (lines.has(d.id)) continue
+      try {
+        const ln = series.createPriceLine({
+          price:            d.price,
+          color:            DRAWING_DEFAULT_COLOR,
+          lineWidth:        1,
+          lineStyle:        0,  // Solid
+          axisLabelVisible: true,
+          title:            '',
+        })
+        lines.set(d.id, ln)
+      } catch { /* series might be mid-recreate */ }
+    }
+
+    // Remove price lines whose drawings were deleted.
+    for (const [id, ln] of Array.from(lines.entries())) {
+      if (!wantedIds.has(id)) {
+        try { series.removePriceLine(ln) } catch {}
+        lines.delete(id)
+      }
+    }
+  }, [drawings, chartReady])
+
+  // Toggle / activate a drawing tool from the panel.
+  function selectDrawingTool(id: DrawingToolId) {
+    setActiveTool(prev => (prev === id ? null : id))
+    setPendingPoint(null)
+  }
+  function clearAllDrawings() {
+    setDrawings([])
+    setPendingPoint(null)
+    setActiveTool(null)
+    // createPriceLine cleanup happens in the h-line sync effect.
   }
 
   const selectedTf = TIMEFRAMES[tfIndex]
@@ -379,6 +480,39 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       chart.timeScale().fitContent()
       chart.timeScale().scrollToRealTime()
 
+      // ── Drawing click handler ───────────────────────────────────────────
+      // Reads activeTool / pendingPoint via refs so it always sees the
+      // latest state without re-subscribing on every render.
+      chart.subscribeClick((param: any) => {
+        const tool = activeToolRef.current
+        if (!tool || !param.point) return
+        const seriesNow = seriesRef.current
+        if (!seriesNow) return
+        const priceAtClick = seriesNow.coordinateToPrice(param.point.y)
+        const timeAtClick  = (param.time as number | undefined) ?? chart.timeScale().coordinateToTime(param.point.x)
+        if (priceAtClick == null || timeAtClick == null) return
+        const point: DrawingPoint = { time: Number(timeAtClick), price: Number(priceAtClick) }
+
+        if (tool === 'h-line') {
+          setDrawings(d => [...d, { id: nextDrawingId(), type: 'h-line', price: point.price }])
+          setActiveTool(null)
+        } else if (tool === 'v-line') {
+          setDrawings(d => [...d, { id: nextDrawingId(), type: 'v-line', time: point.time }])
+          setActiveTool(null)
+        } else {
+          // trend / fib — needs 2 clicks
+          const pending = pendingPointRef.current
+          if (!pending) {
+            setPendingPoint(point)
+          } else {
+            const t = tool
+            setDrawings(d => [...d, { id: nextDrawingId(), type: t, p1: pending, p2: point }])
+            setPendingPoint(null)
+            setActiveTool(null)
+          }
+        }
+      })
+
       const tfSec = selectedTf.seconds
 
       const nowSec = () => Math.floor(Date.now() / 1000) + BRT_OFFSET
@@ -524,7 +658,47 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       )}
 
       {/* Drawings panel overlay */}
-      {drawingsOpen && <DrawingsPanel onClose={() => setDrawingsOpen(false)} />}
+      {drawingsOpen && (
+        <DrawingsPanel
+          onClose={() => setDrawingsOpen(false)}
+          onSelectTool={selectDrawingTool}
+          onClearAll={clearAllDrawings}
+          activeTool={activeTool}
+          hasDrawings={drawings.length > 0}
+        />
+      )}
+
+      {/* Drawing overlays (vertical line, trend line, fibonacci) — anchored
+          to chart coords via timeToCoordinate / priceToCoordinate. */}
+      {chartReady && drawings
+        .filter((d): d is Exclude<Drawing, { type: 'h-line' }> => d.type !== 'h-line')
+        .map((d) => (
+          <DrawingOverlay
+            key={d.id}
+            drawing={d}
+            chartRef={chartRef}
+            seriesRef={seriesRef}
+            containerRef={chartContainerRef}
+          />
+        ))}
+
+      {/* Pending-first-click marker for trend / fib (visual confirmation of step 1/2). */}
+      {chartReady && pendingPoint && (
+        <PendingPointMarker
+          point={pendingPoint}
+          chartRef={chartRef}
+          seriesRef={seriesRef}
+        />
+      )}
+
+      {/* Drawing tool status chip (top-right) */}
+      {activeTool && (
+        <div className="absolute top-2 right-3 z-20 bg-blue-600/90 border border-blue-400 rounded px-2 py-1 text-[10px] text-white font-bold pointer-events-none shadow-lg">
+          {DRAWING_TOOLS.find(t => t.id === activeTool)?.label}
+          {pendingPoint ? ' — clique no 2º ponto' : ''}
+          {' '}<span className="opacity-70">(ESC p/ cancelar)</span>
+        </div>
+      )}
 
       {/* Indicators panel overlay */}
       {indicadoresOpen && (
@@ -946,5 +1120,140 @@ function TradeResultMarker({ event, chartRef, seriesRef, tfSec }: TradeResultMar
         )} />
       </div>
     </>
+  )
+}
+
+// ── DrawingOverlay ──────────────────────────────────────────────────────────
+// Renders vertical line / trend line / fibonacci as an SVG overlay positioned
+// in chart pixel space. Subscribes to visible-range changes + uses a low-rate
+// timer to also pick up price-scale shifts (autoScale recalcs, etc.).
+interface DrawingOverlayProps {
+  drawing:      Exclude<Drawing, { type: 'h-line' }>
+  chartRef:     React.MutableRefObject<any>
+  seriesRef:    React.MutableRefObject<any>
+  containerRef: React.RefObject<HTMLDivElement | null>
+}
+
+function DrawingOverlay({ drawing, chartRef, seriesRef, containerRef }: DrawingOverlayProps) {
+  // Force re-render when chart range / size changes. Value unused — the
+  // setter triggers a render which re-reads chart coords below.
+  const [, setTick] = useState(0)
+
+  useEffect(() => {
+    if (!chartRef.current) return
+    const update = () => setTick(t => t + 1)
+    const ts = chartRef.current.timeScale()
+    try { ts.subscribeVisibleLogicalRangeChange(update) } catch {}
+    // Polling catches price-scale autoScale shifts that don't fire a range event.
+    const interval = setInterval(update, 250)
+    return () => {
+      try { ts.unsubscribeVisibleLogicalRangeChange(update) } catch {}
+      clearInterval(interval)
+    }
+  }, [chartRef])
+
+  const chart     = chartRef.current
+  const series    = seriesRef.current
+  const container = containerRef.current
+  if (!chart || !series || !container) return null
+  const w = container.clientWidth
+  const h = container.clientHeight
+
+  if (drawing.type === 'v-line') {
+    const x = chart.timeScale().timeToCoordinate(drawing.time)
+    if (x == null) return null
+    return (
+      <svg className="absolute inset-0 z-20 pointer-events-none" width={w} height={h}>
+        <line x1={x} y1={0} x2={x} y2={h} stroke={DRAWING_DEFAULT_COLOR} strokeWidth={1} />
+      </svg>
+    )
+  }
+
+  if (drawing.type === 'trend') {
+    const x1 = chart.timeScale().timeToCoordinate(drawing.p1.time)
+    const x2 = chart.timeScale().timeToCoordinate(drawing.p2.time)
+    const y1 = series.priceToCoordinate(drawing.p1.price)
+    const y2 = series.priceToCoordinate(drawing.p2.price)
+    if (x1 == null || x2 == null || y1 == null || y2 == null) return null
+    return (
+      <svg className="absolute inset-0 z-20 pointer-events-none" width={w} height={h}>
+        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={DRAWING_DEFAULT_COLOR} strokeWidth={2} />
+        <circle cx={x1} cy={y1} r={3} fill={DRAWING_DEFAULT_COLOR} />
+        <circle cx={x2} cy={y2} r={3} fill={DRAWING_DEFAULT_COLOR} />
+      </svg>
+    )
+  }
+
+  // Fibonacci: levels run from p1.price (ratio 0) to p2.price (ratio 1).
+  const x1 = chart.timeScale().timeToCoordinate(drawing.p1.time)
+  const x2 = chart.timeScale().timeToCoordinate(drawing.p2.time)
+  if (x1 == null || x2 == null) return null
+  const xLeft  = Math.min(x1, x2)
+  const xRight = Math.max(x1, x2)
+  const range  = drawing.p2.price - drawing.p1.price
+
+  return (
+    <svg className="absolute inset-0 z-20 pointer-events-none" width={w} height={h}>
+      {FIB_LEVELS.map((lvl) => {
+        const lvlPrice = drawing.p1.price + range * lvl.ratio
+        const y = series.priceToCoordinate(lvlPrice)
+        if (y == null) return null
+        return (
+          <g key={lvl.ratio}>
+            <line
+              x1={xLeft} y1={y} x2={xRight} y2={y}
+              stroke={lvl.color} strokeWidth={1} strokeDasharray="4 3"
+            />
+            <text x={xRight + 4} y={y + 3} fill={lvl.color} fontSize="10" fontWeight="bold">
+              {lvl.label}
+            </text>
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+// ── PendingPointMarker ──────────────────────────────────────────────────────
+// Small visual confirmation of the 1st click while waiting for the 2nd
+// (trend / fib). Re-positions on chart pan/zoom.
+interface PendingPointMarkerProps {
+  point:     DrawingPoint
+  chartRef:  React.MutableRefObject<any>
+  seriesRef: React.MutableRefObject<any>
+}
+
+function PendingPointMarker({ point, chartRef, seriesRef }: PendingPointMarkerProps) {
+  const [, setTick] = useState(0)
+
+  useEffect(() => {
+    if (!chartRef.current) return
+    const update = () => setTick(t => t + 1)
+    const ts = chartRef.current.timeScale()
+    try { ts.subscribeVisibleLogicalRangeChange(update) } catch {}
+    const interval = setInterval(update, 250)
+    return () => {
+      try { ts.unsubscribeVisibleLogicalRangeChange(update) } catch {}
+      clearInterval(interval)
+    }
+  }, [chartRef])
+
+  const chart  = chartRef.current
+  const series = seriesRef.current
+  if (!chart || !series) return null
+  const x = chart.timeScale().timeToCoordinate(point.time)
+  const y = series.priceToCoordinate(point.price)
+  if (x == null || y == null) return null
+
+  return (
+    <div
+      className="absolute z-20 pointer-events-none"
+      style={{ left: x - 5, top: y - 5 }}
+    >
+      <div
+        className="w-2.5 h-2.5 rounded-full ring-2 ring-white animate-pulse"
+        style={{ backgroundColor: DRAWING_DEFAULT_COLOR }}
+      />
+    </div>
   )
 }
