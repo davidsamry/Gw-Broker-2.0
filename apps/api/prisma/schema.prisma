@@ -43,6 +43,20 @@ enum KycStatus {
   REJECTED
 }
 
+enum WithdrawalStatus {
+  PENDING     // Awaiting admin / processor review
+  APPROVED    // Approved, sent to payment provider
+  COMPLETED   // Provider confirmed funds sent
+  CANCELLED   // User cancelled OR admin rejected — funds refunded
+  FAILED      // Provider error — funds refunded
+}
+
+enum WithdrawalMethod {
+  PIX
+  USDT_TRC20
+  BANK_TRANSFER
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -73,6 +87,7 @@ model Account {
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   operations   Operation[]
   transactions Transaction[]
+  withdrawals  Withdrawal[]
 
   @@unique([userId, type])
   @@map("accounts")
@@ -114,4 +129,23 @@ model Transaction {
 
   @@index([accountId])
   @@map("transactions")
+}
+
+model Withdrawal {
+  id          String           @id @default(cuid())
+  accountId   String
+  amount      Decimal          @db.Decimal(18, 2)
+  method      WithdrawalMethod
+  destination String           // PIX key, USDT wallet, bank account info
+  status      WithdrawalStatus @default(PENDING)
+  notes       String?          // Admin notes / failure reason
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  processedAt DateTime?        // Set when status moves out of PENDING
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, status])
+  @@index([status, createdAt])
+  @@map("withdrawals")
 }

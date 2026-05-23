@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { api } from '@/lib/api'
 import { useOperationsStore } from './operations'
+import { useWithdrawalsStore } from './withdrawals'
 
 export interface Account {
   id:       string
@@ -92,6 +93,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     saveUserCache(null)
     set({ user: null, token: null })
     useOperationsStore.getState().reset()
+    useWithdrawalsStore.getState().reset()
   },
 
   init: async () => {
@@ -112,10 +114,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const { data } = await api.get('/auth/me')
       saveUserCache(data.user)
       set({ user: data.user, token, loading: false })
-      // Hydrate operations cache from the same response — eliminates the
-      // separate /operations RTT that TradingPanel/HistoricoPanel used to fire.
+      // Hydrate operations + withdrawals caches from the same response —
+      // eliminates the separate RTTs the panels used to fire on mount.
       if (Array.isArray(data.operations)) {
         useOperationsStore.getState().hydrate(data.operations)
+      }
+      if (Array.isArray(data.withdrawals)) {
+        useWithdrawalsStore.getState().hydrate(data.withdrawals)
       }
     } catch {
       // Only blow away cache if we definitely heard a 401 — network errors
@@ -126,6 +131,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         saveUserCache(null)
         set({ user: null, loading: false })
         useOperationsStore.getState().reset()
+        useWithdrawalsStore.getState().reset()
       }
     }
   },

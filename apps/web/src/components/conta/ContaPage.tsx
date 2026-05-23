@@ -1,12 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   Camera, CheckCircle2, Lock, Globe, Clock, X, ChevronDown, Pencil,
-  AlertCircle, ChevronRight, Landmark, Zap, ChevronLeft,
+  ChevronRight, Landmark, Zap, ChevronLeft, Plus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AnalisePage } from '@/components/analise/AnalisePage'
+import { useAuthStore } from '@/store/auth'
+import { useWithdrawalsStore, type ApiWithdrawal, type WithdrawalMethod } from '@/store/withdrawals'
+import { api } from '@/lib/api'
 
 type ContaTab = 'retirada' | 'transacoes' | 'operacoes' | 'minha-conta' | 'mercado' | 'torneios' | 'analise'
 
@@ -28,11 +31,26 @@ const FAQ_RETIRADA = [
   ['Preciso fornecer algum documento para fazer uma retirada?', ''],
 ]
 
-const MOCK_WITHDRAWALS = [
-  { id: '40741052802', date: '20.05.2026', time: '17:04:05', status: 'pending', method: 'USDT', amount: '-R$ 200.000,00' },
-  { id: '40739150181', date: '04.03.2026', time: '03:10:17', status: 'cancelled', method: 'USDT', amount: '-R$ 100.000,00' },
-  { id: '40739150061', date: '04.03.2026', time: '03:01:54', status: 'cancelled', method: 'USDT', amount: '-R$ 100.000,00' },
-]
+const WITHDRAWAL_METHOD_LABEL: Record<WithdrawalMethod, string> = {
+  PIX:           'PIX',
+  USDT_TRC20:    'USDT (TRC-20)',
+  BANK_TRANSFER: 'Transferência bancária',
+}
+
+function formatBRL(v: number) {
+  return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function formatWithdrawalDate(iso: string) {
+  const d = new Date(iso)
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  return { date: `${dd}.${mm}.${yyyy}`, time: `${hh}:${mi}:${ss}` }
+}
 
 function FloatingInput({
   label, value, rightLabel, rightLabelColor = 'text-green-400', readOnly = false,
@@ -379,106 +397,346 @@ function OperacoesTab() {
   )
 }
 
+// Minimal modal for creating a new withdrawal request. Lets the user pick
+// amount + method + destination (PIX key / wallet address). Server validates
+// balance, debits, and returns the persisted row which the parent upserts.
+function NovaRetiradaModal({
+  accountId,
+  maxAmount,
+  onClose,
+  onCreated,
+}: {
+  accountId: string
+  maxAmount: number
+  onClose:   () => void
+  onCreated: (w: ApiWithdrawal) => void
+}) {
+  const [amount, setAmount]         = useState('')
+  const [method, setMethod]         = useState<WithdrawalMethod>('PIX')
+  const [destination, setDest]      = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError]           = useState('')
+
+  const amountNum = parseFloat(amount.replace(',', '.')) || 0
+  const valid     = amountNum >= 50 && amountNum <= maxAmount && destination.trim().length >= 3
+
+  const destPlaceholder = method === 'PIX'
+    ? 'Chave PIX (CPF / email / telefone / aleatória)'
+    : method === 'USDT_TRC20'
+      ? 'Endereço da carteira TRC-20'
+      : 'Banco / agência / conta'
+
+  async function submit() {
+    if (!valid || submitting) return
+    setSubmitting(true)
+    setError('')
+    try {
+      const { data } = await api.post('/withdrawals', {
+        accountId,
+        amount: Math.round(amountNum * 100) / 100,
+        method,
+        destination: destination.trim(),
+      })
+      onCreated(data.withdrawal as ApiWithdrawal)
+    } catch (err: any) {
+      const code = err?.response?.data?.error
+      if      (code === 'INSUFFICIENT_BALANCE') setError('Saldo insuficiente.')
+      else if (code === 'ACCOUNT_NOT_FOUND')    setError('Conta não encontrada.')
+      else                                       setError('Erro ao solicitar retirada.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[420px] bg-[#1a1e2e] border border-[#2a2e3b] rounded-2xl shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a2e3b]">
+          <h2 className="text-sm font-bold text-white">Nova retirada</h2>
+          <button onClick={onClose} className="text-[#8b8f9a] hover:text-white transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 flex flex-col gap-4">
+          {/* Amount */}
+          <div>
+            <label className="text-[10px] font-medium text-[#8b8f9a] mb-1 block">Valor (R$)</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ''))}
+              placeholder="50,00"
+              className="w-full bg-[#252a3a] border border-[#2a2e3b] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/60"
+            />
+            <p className="text-[10px] text-[#8b8f9a] mt-1">
+              Mínimo R$ 50,00 · Disponível R$ {formatBRL(maxAmount)}
+            </p>
+          </div>
+
+          {/* Method */}
+          <div>
+            <label className="text-[10px] font-medium text-[#8b8f9a] mb-1 block">Método</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['PIX', 'USDT_TRC20', 'BANK_TRANSFER'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMethod(m)}
+                  className={cn(
+                    'px-2 py-2 rounded-lg text-[11px] font-semibold transition-colors border',
+                    method === m
+                      ? 'bg-blue-600/20 border-blue-500/60 text-white'
+                      : 'bg-[#252a3a] border-[#2a2e3b] text-[#8b8f9a] hover:text-white'
+                  )}
+                >
+                  {WITHDRAWAL_METHOD_LABEL[m]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Destination */}
+          <div>
+            <label className="text-[10px] font-medium text-[#8b8f9a] mb-1 block">Destino</label>
+            <input
+              type="text"
+              value={destination}
+              onChange={(e) => setDest(e.target.value)}
+              placeholder={destPlaceholder}
+              className="w-full bg-[#252a3a] border border-[#2a2e3b] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/60"
+            />
+          </div>
+
+          {error && (
+            <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
+          <button
+            onClick={submit}
+            disabled={!valid || submitting}
+            className="w-full h-10 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-bold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {submitting ? 'Enviando…' : 'Confirmar retirada'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function RetiradaTab() {
-  const [expandedId, setExpandedId] = useState<string | null>('40741052802')
+  const authStore   = useAuthStore()
+  const withdrawals = useWithdrawalsStore((s) => s.withdrawals)
+  const upsertOne   = useWithdrawalsStore((s) => s.upsertOne)
+  const refetch     = useWithdrawalsStore((s) => s.refetch)
+
+  // Real account (always REAL — demo withdrawals don't make sense).
+  const realAccount   = authStore.user?.accounts.find((a) => a.type === 'REAL')
+  const balance       = realAccount ? parseFloat(realAccount.balance) : 0
+  const pendingTotal  = useMemo(
+    () => withdrawals
+      .filter((w) => w.status === 'PENDING' && w.accountId === realAccount?.id)
+      .reduce((s, w) => s + parseFloat(w.amount), 0),
+    [withdrawals, realAccount?.id],
+  )
+  // Balance is already debited on create — so "Disponível" == account.balance.
+  // "Na conta" displays balance + pending (what the user originally had).
+  const totalOnAccount = balance + pendingTotal
+
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+
+  async function handleCancel(id: string) {
+    if (cancellingId) return
+    setCancellingId(id)
+    try {
+      await api.post(`/withdrawals/${id}/cancel`)
+      // Optimistically mark cancelled and refund balance.
+      const cancelled = withdrawals.find((w) => w.id === id)
+      if (cancelled) {
+        upsertOne({ ...cancelled, status: 'CANCELLED', processedAt: new Date().toISOString() })
+        authStore.applyBalanceDelta(cancelled.accountId, parseFloat(cancelled.amount))
+      }
+    } catch {
+      // Refetch on failure to resync state.
+      refetch()
+    } finally {
+      setCancellingId(null)
+    }
+  }
 
   return (
     <div className="flex-1 overflow-y-auto">
+      {createOpen && realAccount && (
+        <NovaRetiradaModal
+          accountId={realAccount.id}
+          maxAmount={balance}
+          onClose={() => setCreateOpen(false)}
+          onCreated={(w) => {
+            upsertOne(w)
+            authStore.applyBalanceDelta(w.accountId, -parseFloat(w.amount))
+            setCreateOpen(false)
+          }}
+        />
+      )}
       {/* Layout: stacked on mobile, 3 columns on desktop. */}
       <div className="flex flex-col md:flex-row min-h-full">
 
-        {/* Left — Conta */}
+        {/* Left — Conta (real balance from authStore) */}
         <div className="w-full md:w-[260px] md:flex-shrink-0 px-4 md:px-6 py-4 md:py-6 border-b md:border-b-0 md:border-r border-[#2a2e3b]">
           <p className="text-sm font-semibold text-white mb-4 md:mb-5">Conta:</p>
           <div className="grid grid-cols-2 md:grid-cols-1 gap-4">
             <div>
               <div className="text-[11px] md:text-xs text-[#8b8f9a] mb-1">Na conta:</div>
-              <div className="text-lg md:text-2xl font-bold text-white">R$ 108.289,70</div>
+              <div className="text-lg md:text-2xl font-bold text-white">R$ {formatBRL(totalOnAccount)}</div>
             </div>
             <div className="hidden md:block border-t border-dashed border-[#2a2e3b] my-1" />
             <div>
               <div className="text-[11px] md:text-xs text-[#8b8f9a] mb-1">Disponível para retirada:</div>
-              <div className="text-lg md:text-2xl font-bold text-white">R$ 108.289,70</div>
+              <div className="text-lg md:text-2xl font-bold text-white">R$ {formatBRL(balance)}</div>
+              {pendingTotal > 0 && (
+                <div className="text-[10px] text-orange-400 mt-1">
+                  R$ {formatBRL(pendingTotal)} aguardando confirmação
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* Middle — Retirada + histórico */}
         <div className="flex-1 min-w-0 px-4 md:px-6 py-4 md:py-6 border-b md:border-b-0 md:border-r border-[#2a2e3b] flex flex-col">
-          <p className="text-sm font-semibold text-white mb-3 md:mb-4">Retirada:</p>
-
-          {/* Warning box */}
-          <div className="flex items-start gap-2.5 md:gap-3 bg-orange-500/10 border border-orange-500/30 rounded-xl px-3 md:px-4 py-3 mb-4 md:mb-6">
-            <AlertCircle size={16} className="text-orange-400 flex-shrink-0 mt-0.5" />
-            <p className="text-xs md:text-sm text-[#ccc] leading-relaxed">
-              Desculpe, você atingiu o limite de retiradas pendentes. Aguarde o processamento de sua solicitação de retirada ou cancele as retiradas pendentes para prosseguir.
-            </p>
+          <div className="flex items-center justify-between mb-3 md:mb-4">
+            <p className="text-sm font-semibold text-white">Retirada:</p>
+            <button
+              onClick={() => setCreateOpen(true)}
+              disabled={balance < 50}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title={balance < 50 ? 'Saldo insuficiente (mínimo R$50)' : 'Solicitar nova retirada'}
+            >
+              <Plus size={13} />
+              Solicitar retirada
+            </button>
           </div>
 
           <div className="border-t border-dashed border-[#2a2e3b] mb-4 md:mb-5" />
 
-          {/* Recent orders header — title stacks above link on mobile */}
+          {/* Recent orders header */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
             <p className="text-sm font-semibold text-white">Alguns de seus pedidos recentes:</p>
-            <button className="flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors self-start md:self-auto">
-              Histórico financeiro
+            <button
+              onClick={() => refetch()}
+              className="flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors self-start md:self-auto"
+            >
+              Atualizar
               <span className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
                 <ChevronRight size={11} className="text-white" />
               </span>
             </button>
           </div>
 
-          {/* Withdrawals list — 2-line layout, works on both mobile and desktop */}
-          <div className="flex flex-col gap-0">
-            {MOCK_WITHDRAWALS.map((w) => (
-              <div key={w.id}>
-                <button
-                  onClick={() => setExpandedId(expandedId === w.id ? null : w.id)}
-                  className="w-full text-left hover:bg-white/5 transition-colors border-b border-[#2a2e3b]/50 py-3 px-1"
-                >
-                  {/* Row 1: id + date  ←→  amount */}
-                  <div className="flex items-start justify-between gap-3 mb-1.5">
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-[11px] md:text-xs text-[#8b8f9a] font-mono truncate">{w.id}</span>
-                      <span className="text-[10px] md:text-[11px] text-[#8b8f9a] mt-0.5">{w.date} · {w.time}</span>
-                    </div>
-                    <span className="text-sm font-semibold text-red-400 flex-shrink-0 whitespace-nowrap">{w.amount}</span>
-                  </div>
-                  {/* Row 2: status  ←→  method */}
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      {w.status === 'pending' ? (
-                        <>
-                          <div className="w-3.5 h-3.5 rounded-full border-2 border-[#8b8f9a] flex-shrink-0" />
-                          <span className="text-xs text-[#8b8f9a]">Aguardando confirmação</span>
-                        </>
-                      ) : (
-                        <>
-                          <X size={13} className="text-red-400 flex-shrink-0" />
-                          <span className="text-xs text-[#8b8f9a]">Cancelado</span>
-                        </>
-                      )}
-                    </div>
-                    <span className="text-xs text-[#8b8f9a] flex-shrink-0">{w.method}</span>
-                  </div>
-                </button>
-
-                {/* Expanded tooltip for pending */}
-                {expandedId === w.id && w.status === 'pending' && (
-                  <div className="mt-2 mb-3 ml-2 md:ml-4">
-                    <div className="bg-[#1a1e2e] border border-[#2a2e3b] rounded-xl px-3 md:px-4 py-3 max-w-full md:max-w-[320px]">
-                      <p className="text-xs text-[#ccc] leading-relaxed mb-3">
-                        A retirada está sendo processada no lado do operador financeiro. Aguarde - os fundos devem ser recebidos dentro de 48 horas.
-                      </p>
-                      <button className="px-4 py-1.5 rounded-lg border border-[#3a3f50] text-xs font-semibold text-white hover:bg-white/5 transition-colors">
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
+          {/* Withdrawals list — real data from store */}
+          {withdrawals.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <div className="w-12 h-12 rounded-full bg-[#252a3a] flex items-center justify-center mb-3">
+                <Landmark size={20} className="text-[#8b8f9a]" />
               </div>
-            ))}
-          </div>
+              <p className="text-sm text-[#8b8f9a] leading-relaxed">
+                Você ainda não tem retiradas.
+              </p>
+              <p className="text-xs text-[#8b8f9a]/70 mt-1">
+                Use o botão "Solicitar retirada" para criar a primeira.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-0">
+              {withdrawals.map((w) => {
+                const dt        = formatWithdrawalDate(w.createdAt)
+                const amount    = parseFloat(w.amount)
+                const isPending = w.status === 'PENDING'
+                const isCancelled = w.status === 'CANCELLED' || w.status === 'FAILED'
+                return (
+                  <div key={w.id}>
+                    <button
+                      onClick={() => setExpandedId(expandedId === w.id ? null : w.id)}
+                      className="w-full text-left hover:bg-white/5 transition-colors border-b border-[#2a2e3b]/50 py-3 px-1"
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-1.5">
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-[11px] md:text-xs text-[#8b8f9a] font-mono truncate">{w.id.slice(0, 12).toUpperCase()}</span>
+                          <span className="text-[10px] md:text-[11px] text-[#8b8f9a] mt-0.5">{dt.date} · {dt.time}</span>
+                        </div>
+                        <span className="text-sm font-semibold text-red-400 flex-shrink-0 whitespace-nowrap">
+                          -R$ {formatBRL(amount)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          {isPending && (
+                            <>
+                              <div className="w-3.5 h-3.5 rounded-full border-2 border-orange-400 flex-shrink-0" />
+                              <span className="text-xs text-orange-400">Aguardando confirmação</span>
+                            </>
+                          )}
+                          {w.status === 'APPROVED' && (
+                            <>
+                              <CheckCircle2 size={14} className="text-blue-400 flex-shrink-0" />
+                              <span className="text-xs text-blue-400">Aprovada — enviando</span>
+                            </>
+                          )}
+                          {w.status === 'COMPLETED' && (
+                            <>
+                              <CheckCircle2 size={14} className="text-green-400 flex-shrink-0" />
+                              <span className="text-xs text-green-400">Concluída</span>
+                            </>
+                          )}
+                          {isCancelled && (
+                            <>
+                              <X size={14} className="text-red-400 flex-shrink-0" />
+                              <span className="text-xs text-[#8b8f9a]">
+                                {w.status === 'CANCELLED' ? 'Cancelada' : 'Falhou'}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        <span className="text-xs text-[#8b8f9a] flex-shrink-0">
+                          {WITHDRAWAL_METHOD_LABEL[w.method]}
+                        </span>
+                      </div>
+                    </button>
+
+                    {expandedId === w.id && isPending && (
+                      <div className="mt-2 mb-3 ml-2 md:ml-4">
+                        <div className="bg-[#1a1e2e] border border-[#2a2e3b] rounded-xl px-3 md:px-4 py-3 max-w-full md:max-w-[360px]">
+                          <p className="text-xs text-[#8b8f9a] mb-1">Destino:</p>
+                          <p className="text-xs text-white font-mono break-all mb-3">{w.destination}</p>
+                          <p className="text-xs text-[#ccc] leading-relaxed mb-3">
+                            A retirada está sendo processada. Cancele a qualquer momento para receber o valor de volta no saldo.
+                          </p>
+                          <button
+                            onClick={() => handleCancel(w.id)}
+                            disabled={cancellingId === w.id}
+                            className="px-4 py-1.5 rounded-lg border border-[#3a3f50] text-xs font-semibold text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+                          >
+                            {cancellingId === w.id ? 'Cancelando…' : 'Cancelar retirada'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
 
           {/* Footer info */}
           <div className="mt-6 md:mt-auto pt-4 md:pt-6 flex flex-col gap-1.5">

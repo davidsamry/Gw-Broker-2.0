@@ -6,6 +6,7 @@ import { authRoutes } from './auth/routes.js'
 import { operationRoutes } from './operations/routes.js'
 import { accountRoutes } from './accounts/routes.js'
 import { marketRoutes } from './market/routes.js'
+import { withdrawalRoutes } from './withdrawals/routes.js'
 
 export async function buildApp() {
   const app = Fastify({ logger: { level: process.env.NODE_ENV === 'production' ? 'info' : 'debug' } })
@@ -55,10 +56,11 @@ export async function buildApp() {
   app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 
   // ── Routes ────────────────────────────────────────────────────────────────
-  await app.register(authRoutes,      { prefix: '/auth' })
-  await app.register(operationRoutes, { prefix: '/operations' })
-  await app.register(accountRoutes,   { prefix: '/accounts' })
-  await app.register(marketRoutes,    { prefix: '/market' })
+  await app.register(authRoutes,       { prefix: '/auth' })
+  await app.register(operationRoutes,  { prefix: '/operations' })
+  await app.register(accountRoutes,    { prefix: '/accounts' })
+  await app.register(marketRoutes,     { prefix: '/market' })
+  await app.register(withdrawalRoutes, { prefix: '/withdrawals' })
 
   return app
 }
