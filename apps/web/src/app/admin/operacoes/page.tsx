@@ -50,7 +50,9 @@ export default function AdminOperationsPage() {
 
   const [search, setSearch]           = useState('')
   const [status, setStatus]           = useState<StatusFilter>('ALL')
-  const [accountType, setAccountType] = useState<AccountTypeFilter>('ALL')
+  // Default to REAL — admin's main interest is real-money activity; DEMO ops
+  // are visible via the filter but don't pollute the initial view.
+  const [accountType, setAccountType] = useState<AccountTypeFilter>('REAL')
   const [page, setPage]               = useState(1)
   const [viewing, setViewing]         = useState<OpRow | null>(null)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
