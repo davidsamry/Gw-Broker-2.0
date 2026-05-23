@@ -384,40 +384,43 @@ function RetiradaTab() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="flex min-h-full">
+      {/* Layout: stacked on mobile, 3 columns on desktop. */}
+      <div className="flex flex-col md:flex-row min-h-full">
 
         {/* Left — Conta */}
-        <div className="w-[260px] flex-shrink-0 px-6 py-6 border-r border-[#2a2e3b]">
-          <p className="text-sm font-semibold text-white mb-5">Conta:</p>
-          <div className="mb-4">
-            <div className="text-xs text-[#8b8f9a] mb-1">Na conta:</div>
-            <div className="text-2xl font-bold text-white">R$ 108.289,70</div>
-          </div>
-          <div className="border-t border-dashed border-[#2a2e3b] my-4" />
-          <div>
-            <div className="text-xs text-[#8b8f9a] mb-1">Disponível para retirada:</div>
-            <div className="text-2xl font-bold text-white">R$ 108.289,70</div>
+        <div className="w-full md:w-[260px] md:flex-shrink-0 px-4 md:px-6 py-4 md:py-6 border-b md:border-b-0 md:border-r border-[#2a2e3b]">
+          <p className="text-sm font-semibold text-white mb-4 md:mb-5">Conta:</p>
+          <div className="grid grid-cols-2 md:grid-cols-1 gap-4">
+            <div>
+              <div className="text-[11px] md:text-xs text-[#8b8f9a] mb-1">Na conta:</div>
+              <div className="text-lg md:text-2xl font-bold text-white">R$ 108.289,70</div>
+            </div>
+            <div className="hidden md:block border-t border-dashed border-[#2a2e3b] my-1" />
+            <div>
+              <div className="text-[11px] md:text-xs text-[#8b8f9a] mb-1">Disponível para retirada:</div>
+              <div className="text-lg md:text-2xl font-bold text-white">R$ 108.289,70</div>
+            </div>
           </div>
         </div>
 
         {/* Middle — Retirada + histórico */}
-        <div className="flex-1 px-6 py-6 border-r border-[#2a2e3b] flex flex-col">
-          <p className="text-sm font-semibold text-white mb-4">Retirada:</p>
+        <div className="flex-1 min-w-0 px-4 md:px-6 py-4 md:py-6 border-b md:border-b-0 md:border-r border-[#2a2e3b] flex flex-col">
+          <p className="text-sm font-semibold text-white mb-3 md:mb-4">Retirada:</p>
 
           {/* Warning box */}
-          <div className="flex items-start gap-3 bg-orange-500/10 border border-orange-500/30 rounded-xl px-4 py-3 mb-6">
-            <AlertCircle size={18} className="text-orange-400 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-[#ccc] leading-relaxed">
+          <div className="flex items-start gap-2.5 md:gap-3 bg-orange-500/10 border border-orange-500/30 rounded-xl px-3 md:px-4 py-3 mb-4 md:mb-6">
+            <AlertCircle size={16} className="text-orange-400 flex-shrink-0 mt-0.5" />
+            <p className="text-xs md:text-sm text-[#ccc] leading-relaxed">
               Desculpe, você atingiu o limite de retiradas pendentes. Aguarde o processamento de sua solicitação de retirada ou cancele as retiradas pendentes para prosseguir.
             </p>
           </div>
 
-          <div className="border-t border-dashed border-[#2a2e3b] mb-5" />
+          <div className="border-t border-dashed border-[#2a2e3b] mb-4 md:mb-5" />
 
-          {/* Recent orders header */}
-          <div className="flex items-center justify-between mb-3">
+          {/* Recent orders header — title stacks above link on mobile */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
             <p className="text-sm font-semibold text-white">Alguns de seus pedidos recentes:</p>
-            <button className="flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors">
+            <button className="flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors self-start md:self-auto">
               Histórico financeiro
               <span className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
                 <ChevronRight size={11} className="text-white" />
@@ -425,40 +428,45 @@ function RetiradaTab() {
             </button>
           </div>
 
-          {/* Withdrawals list */}
+          {/* Withdrawals list — 2-line layout, works on both mobile and desktop */}
           <div className="flex flex-col gap-0">
             {MOCK_WITHDRAWALS.map((w) => (
               <div key={w.id}>
                 <button
                   onClick={() => setExpandedId(expandedId === w.id ? null : w.id)}
-                  className="w-full grid grid-cols-[1fr_160px_80px_140px] gap-4 py-3 text-left hover:bg-white/3 transition-colors border-b border-[#2a2e3b]/50"
+                  className="w-full text-left hover:bg-white/5 transition-colors border-b border-[#2a2e3b]/50 py-3 px-1"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[#8b8f9a] font-mono">{w.id}</span>
-                    <span className="text-xs text-[#8b8f9a]">{w.date}</span>
-                    <span className="text-xs text-[#8b8f9a]">{w.time}</span>
+                  {/* Row 1: id + date  ←→  amount */}
+                  <div className="flex items-start justify-between gap-3 mb-1.5">
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[11px] md:text-xs text-[#8b8f9a] font-mono truncate">{w.id}</span>
+                      <span className="text-[10px] md:text-[11px] text-[#8b8f9a] mt-0.5">{w.date} · {w.time}</span>
+                    </div>
+                    <span className="text-sm font-semibold text-red-400 flex-shrink-0 whitespace-nowrap">{w.amount}</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {w.status === 'pending' ? (
-                      <>
-                        <div className="w-4 h-4 rounded-full border-2 border-[#8b8f9a] flex-shrink-0" />
-                        <span className="text-xs text-[#8b8f9a]">Aguardando confirmação</span>
-                      </>
-                    ) : (
-                      <>
-                        <X size={14} className="text-red-400 flex-shrink-0" />
-                        <span className="text-xs text-[#8b8f9a]">Cancelado</span>
-                      </>
-                    )}
+                  {/* Row 2: status  ←→  method */}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      {w.status === 'pending' ? (
+                        <>
+                          <div className="w-3.5 h-3.5 rounded-full border-2 border-[#8b8f9a] flex-shrink-0" />
+                          <span className="text-xs text-[#8b8f9a]">Aguardando confirmação</span>
+                        </>
+                      ) : (
+                        <>
+                          <X size={13} className="text-red-400 flex-shrink-0" />
+                          <span className="text-xs text-[#8b8f9a]">Cancelado</span>
+                        </>
+                      )}
+                    </div>
+                    <span className="text-xs text-[#8b8f9a] flex-shrink-0">{w.method}</span>
                   </div>
-                  <span className="text-xs text-[#8b8f9a]">{w.method}</span>
-                  <span className="text-xs font-semibold text-red-400 text-right">{w.amount}</span>
                 </button>
 
                 {/* Expanded tooltip for pending */}
                 {expandedId === w.id && w.status === 'pending' && (
-                  <div className="ml-4 mb-3">
-                    <div className="bg-[#1a1e2e] border border-[#2a2e3b] rounded-xl px-4 py-3 max-w-[320px] mt-2">
+                  <div className="mt-2 mb-3 ml-2 md:ml-4">
+                    <div className="bg-[#1a1e2e] border border-[#2a2e3b] rounded-xl px-3 md:px-4 py-3 max-w-full md:max-w-[320px]">
                       <p className="text-xs text-[#ccc] leading-relaxed mb-3">
                         A retirada está sendo processada no lado do operador financeiro. Aguarde - os fundos devem ser recebidos dentro de 48 horas.
                       </p>
@@ -473,23 +481,23 @@ function RetiradaTab() {
           </div>
 
           {/* Footer info */}
-          <div className="mt-auto pt-6 flex flex-col gap-1.5">
+          <div className="mt-6 md:mt-auto pt-4 md:pt-6 flex flex-col gap-1.5">
             <div className="flex items-center gap-2">
-              <Landmark size={13} className="text-green-400" />
+              <Landmark size={13} className="text-green-400 flex-shrink-0" />
               <span className="text-xs text-[#8b8f9a]">Valor mínimo do depósito: <span className="text-green-400 font-semibold">R$50</span></span>
             </div>
             <div className="flex items-center gap-2">
-              <Landmark size={13} className="text-green-400" />
+              <Landmark size={13} className="text-green-400 flex-shrink-0" />
               <span className="text-xs text-[#8b8f9a]">Valor mínimo de retirada: <span className="text-green-400 font-semibold">R$50</span></span>
             </div>
             <div className="flex items-center gap-2">
-              <Zap size={13} className="text-orange-400" />
+              <Zap size={13} className="text-orange-400 flex-shrink-0" />
               <span className="text-xs text-[#8b8f9a]">Retirada rápida de sua conta</span>
             </div>
           </div>
 
-          {/* Security badges */}
-          <div className="flex items-center gap-4 mt-5 pt-4 border-t border-[#2a2e3b]">
+          {/* Security badges — wrap on mobile */}
+          <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 md:gap-4 mt-4 md:mt-5 pt-4 border-t border-[#2a2e3b]">
             {['Verified by VISA', 'SECURE PAYMENT', 'MasterCard SecureCode', '3D Secure', 'SSL ENCRYPTION'].map((b) => (
               <div key={b} className="flex flex-col items-center gap-0.5 opacity-40">
                 <div className="w-8 h-8 rounded bg-[#2a2e3b]" />
@@ -499,11 +507,11 @@ function RetiradaTab() {
           </div>
         </div>
 
-        {/* Right — FAQ */}
-        <div className="w-[420px] flex-shrink-0 px-6 py-6">
-          <div className="flex items-center justify-between mb-4">
+        {/* Right — FAQ — single column on mobile, 2 cols on desktop */}
+        <div className="w-full md:w-[420px] md:flex-shrink-0 px-4 md:px-6 py-4 md:py-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-4">
             <p className="text-sm font-semibold text-white">FAQ:</p>
-            <button className="flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors">
+            <button className="flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors self-start md:self-auto">
               Confira todas as perguntas frequentes
               <span className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
                 <ChevronRight size={11} className="text-white" />
@@ -511,23 +519,13 @@ function RetiradaTab() {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-x-6">
-            <div className="flex flex-col gap-3">
-              {FAQ_RETIRADA.map((row, i) => row[0] && (
-                <button key={i} className="flex items-start gap-2 text-left group">
-                  <ChevronDown size={13} className="text-[#8b8f9a] mt-0.5 flex-shrink-0 group-hover:text-white transition-colors" />
-                  <span className="text-xs text-[#8b8f9a] group-hover:text-white transition-colors leading-relaxed">{row[0]}</span>
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-col gap-3">
-              {FAQ_RETIRADA.map((row, i) => row[1] && (
-                <button key={i} className="flex items-start gap-2 text-left group">
-                  <ChevronDown size={13} className="text-[#8b8f9a] mt-0.5 flex-shrink-0 group-hover:text-white transition-colors" />
-                  <span className="text-xs text-[#8b8f9a] group-hover:text-white transition-colors leading-relaxed">{row[1]}</span>
-                </button>
-              ))}
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+            {FAQ_RETIRADA.flatMap((row) => row.filter(Boolean)).map((q, i) => (
+              <button key={i} className="flex items-start gap-2 text-left group">
+                <ChevronDown size={13} className="text-[#8b8f9a] mt-0.5 flex-shrink-0 group-hover:text-white transition-colors" />
+                <span className="text-xs text-[#8b8f9a] group-hover:text-white transition-colors leading-relaxed">{q}</span>
+              </button>
+            ))}
           </div>
         </div>
 
@@ -542,14 +540,14 @@ export function ContaPage({ initialTab = 'minha-conta' }: { initialTab?: ContaTa
   return (
     <div className="flex-1 flex flex-col bg-[#151822] min-h-0 overflow-hidden">
 
-      {/* Top tabs */}
-      <div className="flex items-center px-6 border-b border-[#2a2e3b] bg-[#1a1e2e] flex-shrink-0 gap-1">
+      {/* Top tabs — horizontally scrollable on mobile */}
+      <div className="flex items-center px-3 md:px-6 border-b border-[#2a2e3b] bg-[#1a1e2e] flex-shrink-0 gap-1 overflow-x-auto">
         {CONTA_TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => setActiveTab(t.key)}
             className={cn(
-              'px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px',
+              'px-3 md:px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap flex-shrink-0',
               activeTab === t.key
                 ? 'text-white border-white font-semibold'
                 : 'text-[#8b8f9a] border-transparent hover:text-white'
@@ -560,8 +558,8 @@ export function ContaPage({ initialTab = 'minha-conta' }: { initialTab?: ContaTa
         ))}
       </div>
 
-      {/* Balance info bar */}
-      <div className="flex items-center justify-end gap-8 px-6 py-3 border-b border-[#2a2e3b] bg-[#1a1e2e] flex-shrink-0">
+      {/* Balance info bar — wraps and shrinks on mobile */}
+      <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 md:gap-x-8 px-3 md:px-6 py-2 md:py-3 border-b border-[#2a2e3b] bg-[#1a1e2e] flex-shrink-0">
         {activeTab === 'minha-conta' && (
           <div className="flex items-center gap-2 mr-auto">
             <span className="text-xs text-[#8b8f9a]">Minha moeda atual</span>
@@ -570,12 +568,12 @@ export function ContaPage({ initialTab = 'minha-conta' }: { initialTab?: ContaTa
           </div>
         )}
         <div className="text-right">
-          <div className="text-xs text-[#8b8f9a]">Disponível para retirada</div>
-          <div className="text-sm font-bold text-white">R$ 108.289,70</div>
+          <div className="text-[10px] md:text-xs text-[#8b8f9a]">Disponível para retirada</div>
+          <div className="text-xs md:text-sm font-bold text-white">R$ 108.289,70</div>
         </div>
         <div className="text-right">
-          <div className="text-xs text-[#8b8f9a]">Na conta</div>
-          <div className="text-sm font-bold text-white">R$ 108.289,70</div>
+          <div className="text-[10px] md:text-xs text-[#8b8f9a]">Na conta</div>
+          <div className="text-xs md:text-sm font-bold text-white">R$ 108.289,70</div>
         </div>
       </div>
 
