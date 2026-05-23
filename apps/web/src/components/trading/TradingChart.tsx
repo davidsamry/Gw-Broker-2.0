@@ -40,16 +40,10 @@ const THEME_COLORS: Record<ChartTheme, {
 
 interface Timeframe { label: string; seconds: number }
 const TIMEFRAMES: Timeframe[] = [
-  { label: '5s',  seconds: 5    },
-  { label: '15s', seconds: 15   },
-  { label: '30s', seconds: 30   },
   { label: '1m',  seconds: 60   },
   { label: '5m',  seconds: 300  },
   { label: '15m', seconds: 900  },
-  { label: '30m', seconds: 1800 },
   { label: '1h',  seconds: 3600 },
-  { label: '4h',  seconds: 14400},
-  { label: '1D',  seconds: 86400},
 ]
 
 const BRT_OFFSET = -3 * 3600
@@ -101,16 +95,10 @@ interface TradingChartProps {
 }
 
 const BINANCE_INTERVAL_BY_TIMEFRAME: Record<number, string> = {
-  5: '1m',
-  15: '1m',
-  30: '1m',
-  60: '1m',
-  300: '5m',
-  900: '15m',
-  1800: '30m',
+  60:   '1m',
+  300:  '5m',
+  900:  '15m',
   3600: '1h',
-  14400: '4h',
-  86400: '1d',
 }
 
 function nextDrawingId() {
@@ -138,7 +126,7 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
   const displayPriceRef = useRef(marketPrice ?? asset.price)
 
   const [timestamp, setTimestamp] = useState('')
-  const [tfIndex, setTfIndex] = useState(3)
+  const [tfIndex, setTfIndex] = useState(0)  // 1m default
   const [tfOpen, setTfOpen] = useState(false)
   const [chartReady, setChartReady] = useState(false)
   const [candleSecsLeft, setCandleSecsLeft] = useState(0)
