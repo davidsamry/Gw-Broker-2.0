@@ -142,6 +142,7 @@ export async function submitKyc(userId: string, input: KycSubmitInput) {
 export async function updateUserProfile(userId: string, input: UpdateProfileInput) {
   const data: any = {}
   if (input.name      !== undefined) data.name      = input.name
+  if (input.email     !== undefined) data.email     = input.email
   if (input.nickname  !== undefined) data.nickname  = input.nickname  || null
   if (input.lastName  !== undefined) data.lastName  = input.lastName  || null
   if (input.birthDate !== undefined) data.birthDate = input.birthDate ? new Date(input.birthDate) : null
@@ -150,11 +151,19 @@ export async function updateUserProfile(userId: string, input: UpdateProfileInpu
   if (input.country   !== undefined) data.country   = input.country   || null
   if (input.address   !== undefined) data.address   = input.address   || null
 
-  const user = await prisma.user.update({
-    where:   { id: userId },
-    data,
-    include: { accounts: true },
-  })
-  return sanitizeUser(user)
+  try {
+    const user = await prisma.user.update({
+      where:   { id: userId },
+      data,
+      include: { accounts: true },
+    })
+    return sanitizeUser(user)
+  } catch (err: any) {
+    // Unique constraint violation on email — surface a clean error code.
+    if (err?.code === 'P2002' && err?.meta?.target?.includes?.('email')) {
+      throw new Error('EMAIL_TAKEN')
+    }
+    throw err
+  }
 }
 

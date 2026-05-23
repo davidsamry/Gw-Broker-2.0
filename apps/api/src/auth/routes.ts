@@ -106,6 +106,9 @@ export async function authRoutes(app: FastifyInstance) {
       const user = await updateUserProfile(userId, parsed.data)
       return reply.send({ user })
     } catch (err: any) {
+      if (err.message === 'EMAIL_TAKEN') {
+        return reply.status(409).send({ error: 'EMAIL_TAKEN' })
+      }
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }

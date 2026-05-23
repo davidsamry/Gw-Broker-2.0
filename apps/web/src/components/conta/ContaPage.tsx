@@ -800,6 +800,7 @@ function MinhaContaTab() {
   const [lastName,  setLastName]  = useState(user?.lastName  ?? '')
   const [birthDate, setBirthDate] = useState(user?.birthDate ?? '')
   const [cpf,       setCpf]       = useState(user?.cpf       ?? '')
+  const [email,     setEmail]     = useState(user?.email     ?? '')
   const [country,   setCountry]   = useState(user?.country   ?? 'Brasil')
   const [address,   setAddress]   = useState(user?.address   ?? '')
   const [saving,    setSaving]    = useState(false)
@@ -857,6 +858,7 @@ function MinhaContaTab() {
     setLastName (user.lastName  ?? '')
     setBirthDate(user.birthDate ?? '')
     setCpf      (user.cpf       ?? '')
+    setEmail    (user.email     ?? '')
     setCountry  (user.country   ?? 'Brasil')
     setAddress  (user.address   ?? '')
   }, [user?.id, user?.updatedAt])
@@ -878,6 +880,7 @@ function MinhaContaTab() {
     try {
       const { data } = await api.patch('/auth/me', {
         name:      name.trim()      || undefined,
+        email:     email.trim().toLowerCase() || undefined,
         nickname:  nickname.trim(),
         lastName:  lastName.trim(),
         birthDate: birthDate || null,
@@ -892,7 +895,9 @@ function MinhaContaTab() {
       setSavedAt(Date.now())
     } catch (err: any) {
       const code = err?.response?.data?.error
-      setError(code === 'VALIDATION_ERROR' ? 'Algum campo é inválido.' : 'Erro ao salvar.')
+      if      (code === 'VALIDATION_ERROR') setError('Algum campo é inválido.')
+      else if (code === 'EMAIL_TAKEN')      setError('Este e-mail já está em uso por outra conta.')
+      else                                  setError('Erro ao salvar.')
     } finally {
       setSaving(false)
     }
@@ -1009,7 +1014,7 @@ function MinhaContaTab() {
             <FloatingInput label="Sobrenome"           value={lastName}  onChange={setLastName}  placeholder="Seu sobrenome" />
             <FloatingInput label="Data de nascimento"  value={birthDate} onChange={setBirthDate} type="date" />
             <FloatingInput label="CPF"                 value={cpf}       onChange={setCpf}       placeholder="000.000.000-00" />
-            <FloatingInput label="Email"               value={user.email} readOnly rightLabel="Verificado" />
+            <FloatingInput label="Email"               value={email}     onChange={setEmail} placeholder="seu@email.com" />
             <FloatingInput label="País"                value={country}   onChange={setCountry} />
             <FloatingInput label="Endereço"            value={address}   onChange={setAddress}   placeholder="Rua, número, cidade" />
           </div>

@@ -32,6 +32,7 @@ export const kycSubmitSchema = z.object({
 
 export const updateProfileSchema = z.object({
   name:      z.string().min(2).max(80).trim().optional(),
+  email:     z.string().email().toLowerCase().trim().optional(),
   nickname:  z.string().max(60).trim().optional(),
   lastName:  z.string().max(80).trim().optional(),
   birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
