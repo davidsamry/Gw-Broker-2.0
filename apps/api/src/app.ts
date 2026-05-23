@@ -9,6 +9,8 @@ import { marketRoutes } from './market/routes.js'
 import { withdrawalRoutes } from './withdrawals/routes.js'
 import { transactionRoutes } from './transactions/routes.js'
 import { adminRoutes } from './admin/routes.js'
+import { depositRoutes } from './deposits/routes.js'
+import { bspayWebhookRoutes } from './webhooks/bspay.js'
 import { prisma } from './prisma.js'
 
 export async function buildApp() {
@@ -81,13 +83,15 @@ export async function buildApp() {
   app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
 
   // ── Routes ────────────────────────────────────────────────────────────────
-  await app.register(authRoutes,        { prefix: '/auth' })
-  await app.register(operationRoutes,   { prefix: '/operations' })
-  await app.register(accountRoutes,     { prefix: '/accounts' })
-  await app.register(marketRoutes,      { prefix: '/market' })
-  await app.register(withdrawalRoutes,  { prefix: '/withdrawals' })
-  await app.register(transactionRoutes, { prefix: '/transactions' })
-  await app.register(adminRoutes,       { prefix: '/admin' })
+  await app.register(authRoutes,         { prefix: '/auth' })
+  await app.register(operationRoutes,    { prefix: '/operations' })
+  await app.register(accountRoutes,      { prefix: '/accounts' })
+  await app.register(marketRoutes,       { prefix: '/market' })
+  await app.register(withdrawalRoutes,   { prefix: '/withdrawals' })
+  await app.register(transactionRoutes,  { prefix: '/transactions' })
+  await app.register(adminRoutes,        { prefix: '/admin' })
+  await app.register(depositRoutes,      { prefix: '/deposits' })
+  await app.register(bspayWebhookRoutes, { prefix: '/webhooks' })
 
   return app
 }
