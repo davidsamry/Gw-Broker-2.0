@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { api } from '@/lib/api'
 import { useOperationsStore } from './operations'
 import { useWithdrawalsStore } from './withdrawals'
+import { useTransactionsStore } from './transactions'
 
 export interface Account {
   id:       string
@@ -11,11 +12,20 @@ export interface Account {
 }
 
 export interface User {
-  id:        string
-  name:      string
-  email:     string
-  kycStatus: string
-  accounts:  Account[]
+  id:         string
+  name:       string
+  email:      string
+  kycStatus:  string
+  accounts:   Account[]
+  // Optional profile fields populated by the Minha Conta form.
+  nickname?:  string | null
+  lastName?:  string | null
+  birthDate?: string | null  // ISO date "YYYY-MM-DD"
+  cpf?:       string | null
+  phone?:     string | null
+  country?:   string | null
+  address?:   string | null
+  updatedAt?: string         // used to re-sync MinhaContaTab local state
 }
 
 interface AuthState {
@@ -94,6 +104,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ user: null, token: null })
     useOperationsStore.getState().reset()
     useWithdrawalsStore.getState().reset()
+    useTransactionsStore.getState().reset()
   },
 
   init: async () => {
@@ -122,6 +133,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (Array.isArray(data.withdrawals)) {
         useWithdrawalsStore.getState().hydrate(data.withdrawals)
       }
+      if (Array.isArray(data.transactions)) {
+        useTransactionsStore.getState().hydrate(data.transactions)
+      }
     } catch {
       // Only blow away cache if we definitely heard a 401 — network errors
       // (which the axios interceptor already redirects to /login on 401)
@@ -132,6 +146,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         set({ user: null, loading: false })
         useOperationsStore.getState().reset()
         useWithdrawalsStore.getState().reset()
+        useTransactionsStore.getState().reset()
       }
     }
   },

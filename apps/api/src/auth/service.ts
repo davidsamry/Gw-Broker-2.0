@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs'
 import { prisma } from '../prisma.js'
-import type { LoginInput, RegisterInput } from './schema.js'
+import type { LoginInput, RegisterInput, UpdateProfileInput } from './schema.js'
 
 const DEMO_BALANCE = Number(process.env.DEMO_INITIAL_BALANCE ?? 10000)
 
@@ -63,7 +63,9 @@ function sanitizeUser(user: any) {
   const { password: _pw, ...safe } = user
   return {
     ...safe,
-    accounts: safe.accounts.map((a: any) => ({
+    // Dates come out of Prisma as Date — serialize to ISO so JSON works.
+    birthDate: user.birthDate ? user.birthDate.toISOString().slice(0, 10) : null,
+    accounts: (safe.accounts ?? []).map((a: any) => ({
       id:       a.id,
       type:     a.type,
       balance:  a.balance.toString(),
@@ -71,3 +73,23 @@ function sanitizeUser(user: any) {
     })),
   }
 }
+
+export async function updateUserProfile(userId: string, input: UpdateProfileInput) {
+  const data: any = {}
+  if (input.name      !== undefined) data.name      = input.name
+  if (input.nickname  !== undefined) data.nickname  = input.nickname  || null
+  if (input.lastName  !== undefined) data.lastName  = input.lastName  || null
+  if (input.birthDate !== undefined) data.birthDate = input.birthDate ? new Date(input.birthDate) : null
+  if (input.cpf       !== undefined) data.cpf       = input.cpf       || null
+  if (input.phone     !== undefined) data.phone     = input.phone     || null
+  if (input.country   !== undefined) data.country   = input.country   || null
+  if (input.address   !== undefined) data.address   = input.address   || null
+
+  const user = await prisma.user.update({
+    where:   { id: userId },
+    data,
+    include: { accounts: true },
+  })
+  return sanitizeUser(user)
+}
+

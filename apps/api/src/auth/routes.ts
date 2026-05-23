@@ -1,8 +1,9 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
-import { loginSchema, registerSchema } from './schema.js'
-import { getUserById, loginUser, registerUser } from './service.js'
+import { loginSchema, registerSchema, updateProfileSchema } from './schema.js'
+import { getUserById, loginUser, registerUser, updateUserProfile } from './service.js'
 import { listOperations } from '../operations/service.js'
 import { listWithdrawals } from '../withdrawals/service.js'
+import { listTransactions } from '../transactions/service.js'
 
 const REFRESH_COOKIE = 'refresh_token'
 const REFRESH_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
@@ -65,17 +66,33 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/me', { preHandler: [(app as any).authenticate] }, async (req, reply) => {
     const userId = ((req as any).user.sub) as string
     try {
-      // Fetch user + recent operations + withdrawals in parallel — saves
-      // multiple RTTs on every page mount by letting the client hydrate
-      // balance + history from one call.
-      const [user, operations, withdrawals] = await Promise.all([
+      // Fetch user + recent operations + withdrawals + transactions in
+      // parallel — saves multiple RTTs on every page mount by letting the
+      // client hydrate all the Conta tabs from one call.
+      const [user, operations, withdrawals, transactions] = await Promise.all([
         getUserById(userId),
         listOperations(userId).catch(() => []),
         listWithdrawals(userId).catch(() => []),
+        listTransactions(userId).catch(() => []),
       ])
-      return reply.send({ user, operations, withdrawals })
+      return reply.send({ user, operations, withdrawals, transactions })
     } catch {
       return reply.status(404).send({ error: 'USER_NOT_FOUND' })
+    }
+  })
+
+  app.patch('/me', { preHandler: [(app as any).authenticate] }, async (req, reply) => {
+    const parsed = updateProfileSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
+    }
+    const userId = ((req as any).user.sub) as string
+    try {
+      const user = await updateUserProfile(userId, parsed.data)
+      return reply.send({ user })
+    } catch (err: any) {
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }
   })
 }
