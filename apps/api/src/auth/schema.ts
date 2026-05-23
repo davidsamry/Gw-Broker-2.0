@@ -18,6 +18,18 @@ export const twoFactorCodeSchema = z.object({
   code: z.string().regex(/^\d{6}$/),
 })
 
+// KYC: 3 base64 data URLs (data:image/...;base64,XXX). Server stores them
+// as-is in kyc_submissions URL columns. ~2-3MB combined when 3 phone photos.
+const dataUrlSchema = z.string()
+  .regex(/^data:image\/(jpeg|jpg|png|webp);base64,/, 'Apenas imagens JPEG/PNG/WEBP.')
+  .max(4_500_000, 'Imagem muito grande (máx ~3MB cada).')
+
+export const kycSubmitSchema = z.object({
+  documentFrontUrl: dataUrlSchema,
+  documentBackUrl:  dataUrlSchema,
+  selfieUrl:        dataUrlSchema,
+})
+
 export const updateProfileSchema = z.object({
   name:      z.string().min(2).max(80).trim().optional(),
   nickname:  z.string().max(60).trim().optional(),
@@ -33,3 +45,4 @@ export type RegisterInput      = z.infer<typeof registerSchema>
 export type LoginInput         = z.infer<typeof loginSchema>
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>
 export type TwoFactorCodeInput = z.infer<typeof twoFactorCodeSchema>
+export type KycSubmitInput     = z.infer<typeof kycSubmitSchema>

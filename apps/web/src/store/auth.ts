@@ -13,6 +13,16 @@ export interface Account {
 
 export type UserRole = 'USER' | 'ADMIN'
 
+export type KycStatus = 'PENDING' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'
+
+export interface KycSubmission {
+  id:          string
+  status:      KycStatus
+  reason:      string | null
+  submittedAt: string
+  reviewedAt:  string | null
+}
+
 export interface User {
   id:                string
   name:              string
@@ -37,6 +47,7 @@ interface AuthState {
   token:              string | null
   isDemo:             boolean
   loading:            boolean
+  kycSubmission:      KycSubmission | null
 
   // 2FA: pass `code` for users with twoFactorEnabled. If omitted and the
   // account has 2FA on, the API throws REQUIRES_2FA — callers can catch
@@ -58,8 +69,8 @@ interface AuthState {
 
 // Bump the cache key whenever the User shape changes so existing clients
 // don't read a stale cached object missing new fields. Current schema
-// version: v3 (added twoFactorEnabled).
-const USER_CACHE_KEY = 'vx_user_cache_v3'
+// version: v4 (added kycSubmission via /auth/me + KycStatus typing).
+const USER_CACHE_KEY = 'vx_user_cache_v4'
 const USER_CACHE_TTL = 5 * 60 * 1000 // 5 min — short enough that stale balance corrects quickly
 
 interface UserCache { user: User; savedAt: number }
@@ -86,10 +97,11 @@ function saveUserCache(user: User | null) {
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  user:    null,
-  token:   null,
-  isDemo:  true,
-  loading: true,
+  user:          null,
+  token:         null,
+  isDemo:        true,
+  loading:       true,
+  kycSubmission: null,
 
   setIsDemo: (v) => set({ isDemo: v }),
 
@@ -113,7 +125,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await api.post('/auth/logout').catch(() => {})
     localStorage.removeItem('token')
     saveUserCache(null)
-    set({ user: null, token: null })
+    set({ user: null, token: null, kycSubmission: null })
     useOperationsStore.getState().reset()
     useWithdrawalsStore.getState().reset()
     useTransactionsStore.getState().reset()
@@ -148,6 +160,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (Array.isArray(data.transactions)) {
         useTransactionsStore.getState().hydrate(data.transactions)
       }
+      set({ kycSubmission: data.kycSubmission ?? null })
     } catch {
       // Only blow away cache if we definitely heard a 401 — network errors
       // (which the axios interceptor already redirects to /login on 401)

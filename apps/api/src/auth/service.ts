@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
+import { randomUUID } from 'node:crypto'
 import { prisma } from '../prisma.js'
-import type { LoginInput, RegisterInput, UpdateProfileInput } from './schema.js'
+import type { LoginInput, RegisterInput, UpdateProfileInput, KycSubmitInput } from './schema.js'
 import { verifyTotp } from './twoFactor.js'
 
 const DEMO_BALANCE = Number(process.env.DEMO_INITIAL_BALANCE ?? 10000)
@@ -89,6 +90,53 @@ function sanitizeUser(user: any) {
       currency: a.currency,
     })),
   }
+}
+
+// KYC: returns the user's submission (if any) — used by /auth/me hydrate so
+// the Conta tab knows whether to show "Enviar documentos" or the pending
+// banner.
+export async function getKycSubmission(userId: string) {
+  const rows = await prisma.$queryRaw<Array<{
+    id: string
+    status: string
+    reason: string | null
+    submittedAt: Date
+    reviewedAt: Date | null
+  }>>`
+    SELECT id, status::text AS status, reason, "submittedAt", "reviewedAt"
+    FROM kyc_submissions
+    WHERE "userId" = ${userId}
+    LIMIT 1
+  `
+  return rows[0] ?? null
+}
+
+// User-initiated KYC submission. Inserts or replaces (one submission per
+// user) and bumps User.kycStatus to SUBMITTED so the admin queue picks it up.
+export async function submitKyc(userId: string, input: KycSubmitInput) {
+  const id = randomUUID()
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      INSERT INTO kyc_submissions
+        (id, "userId", "documentFrontUrl", "documentBackUrl", "selfieUrl", status, "submittedAt")
+      VALUES
+        (${id}, ${userId}, ${input.documentFrontUrl}, ${input.documentBackUrl}, ${input.selfieUrl},
+         'SUBMITTED'::"KycStatus", NOW())
+      ON CONFLICT ("userId") DO UPDATE SET
+        "documentFrontUrl" = EXCLUDED."documentFrontUrl",
+        "documentBackUrl"  = EXCLUDED."documentBackUrl",
+        "selfieUrl"        = EXCLUDED."selfieUrl",
+        status             = 'SUBMITTED'::"KycStatus",
+        reason             = NULL,
+        "submittedAt"      = NOW(),
+        "reviewedAt"       = NULL,
+        "reviewedBy"       = NULL
+    `
+    await tx.$executeRaw`
+      UPDATE users SET "kycStatus" = 'SUBMITTED'::"KycStatus" WHERE id = ${userId}
+    `
+  })
+  return getKycSubmission(userId)
 }
 
 export async function updateUserProfile(userId: string, input: UpdateProfileInput) {

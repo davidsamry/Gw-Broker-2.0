@@ -1,0 +1,215 @@
+'use client'
+
+import { useRef, useState } from 'react'
+import { X, Upload, CheckCircle2, AlertCircle } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { api } from '@/lib/api'
+import { useAuthStore } from '@/store/auth'
+
+interface Props {
+  onClose: () => void
+  onDone:  () => void
+}
+
+interface FileSlot {
+  key:   'documentFrontUrl' | 'documentBackUrl' | 'selfieUrl'
+  label: string
+  hint:  string
+}
+
+const SLOTS: FileSlot[] = [
+  { key: 'documentFrontUrl', label: 'Documento (Frente)',   hint: 'RG, CNH ou Passaporte' },
+  { key: 'documentBackUrl',  label: 'Documento (Verso)',    hint: 'Mesmo documento' },
+  { key: 'selfieUrl',        label: 'Selfie com Documento', hint: 'Você segurando o doc' },
+]
+
+const MAX_BYTES = 3 * 1024 * 1024  // 3MB per file
+const ACCEPT    = 'image/jpeg,image/png,image/webp'
+
+// Modal for the user to upload their 3 KYC documents. Files are read as
+// base64 data URLs client-side and POSTed to /auth/kyc/submit. This avoids
+// needing a separate file storage backend for the MVP.
+
+export function KycUploadModal({ onClose, onDone }: Props) {
+  const [files, setFiles] = useState<Record<FileSlot['key'], string | null>>({
+    documentFrontUrl: null,
+    documentBackUrl:  null,
+    selfieUrl:        null,
+  })
+  const [error, setError]     = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const allReady = SLOTS.every((s) => files[s.key])
+
+  async function handleFile(slot: FileSlot['key'], file: File) {
+    setError('')
+    if (!ACCEPT.split(',').includes(file.type)) {
+      setError(`Arquivo "${file.name}": apenas JPEG, PNG ou WEBP.`)
+      return
+    }
+    if (file.size > MAX_BYTES) {
+      setError(`Arquivo "${file.name}": tamanho máximo 3MB (atual: ${(file.size / 1024 / 1024).toFixed(1)}MB).`)
+      return
+    }
+    const dataUrl = await readAsDataUrl(file)
+    setFiles((prev) => ({ ...prev, [slot]: dataUrl }))
+  }
+
+  async function submit() {
+    if (!allReady || loading) return
+    setLoading(true); setError('')
+    try {
+      const { data } = await api.post('/auth/kyc/submit', files)
+      if (data?.submission) {
+        useAuthStore.setState({ kycSubmission: data.submission })
+        // Also bump the user.kycStatus locally for instant UI update
+        const u = useAuthStore.getState().user
+        if (u) useAuthStore.setState({ user: { ...u, kycStatus: 'SUBMITTED' } })
+      }
+      onDone()
+    } catch (err: any) {
+      const code = err?.response?.data?.error
+      setError(code === 'VALIDATION_ERROR' ? 'Algum arquivo é inválido (formato ou tamanho).' : 'Erro ao enviar. Tente novamente.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-[560px] bg-[#1a1e2e] border border-[#2a2e3b] rounded-2xl shadow-2xl flex flex-col max-h-[92vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a2e3b] flex-shrink-0">
+          <h2 className="text-sm font-bold text-white">Enviar documentos</h2>
+          <button onClick={onClose} className="text-[#8b8f9a] hover:text-white"><X size={18} /></button>
+        </div>
+
+        <div className="overflow-y-auto px-5 py-5 flex flex-col gap-4">
+          <p className="text-xs text-[#ccc] leading-relaxed">
+            Envie 3 imagens claras e legíveis. Sua conta será analisada pela equipe em
+            até 48 horas. Formatos aceitos: JPG, PNG, WEBP. Tamanho máximo: 3MB por foto.
+          </p>
+
+          {SLOTS.map((slot) => (
+            <FilePicker
+              key={slot.key}
+              slot={slot}
+              dataUrl={files[slot.key]}
+              onPick={(f) => handleFile(slot.key, f)}
+              onClear={() => setFiles((prev) => ({ ...prev, [slot.key]: null }))}
+            />
+          ))}
+
+          {error && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30">
+              <AlertCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
+              <span className="text-xs text-red-400">{error}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 px-5 py-4 border-t border-[#2a2e3b] flex-shrink-0">
+          <button onClick={onClose} className="flex-1 h-10 rounded-lg border border-[#2a2e3b] text-xs font-semibold text-[#8b8f9a] hover:text-white">
+            Cancelar
+          </button>
+          <button
+            onClick={submit}
+            disabled={!allReady || loading}
+            className="flex-1 h-10 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            <Upload size={13} />
+            {loading ? 'Enviando…' : 'Enviar para análise'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FilePicker({
+  slot, dataUrl, onPick, onClear,
+}: {
+  slot:    FileSlot
+  dataUrl: string | null
+  onPick:  (file: File) => void
+  onClear: () => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const has      = !!dataUrl
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <div>
+          <div className="text-xs font-bold text-white">{slot.label}</div>
+          <div className="text-[10px] text-[#8b8f9a]">{slot.hint}</div>
+        </div>
+        {has && <CheckCircle2 size={14} className="text-green-400" />}
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept={ACCEPT}
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) onPick(f)
+          e.target.value = ''  // allow re-picking the same file
+        }}
+      />
+
+      {has ? (
+        <div className="relative">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={dataUrl!}
+            alt={slot.label}
+            className="w-full aspect-[4/3] object-cover rounded-lg border border-[#2a2e3b]"
+          />
+          <div className="absolute top-2 right-2 flex gap-1">
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              className="px-2 py-1 rounded bg-black/70 text-[10px] font-semibold text-white border border-white/20 hover:bg-black/85"
+            >
+              Trocar
+            </button>
+            <button
+              type="button"
+              onClick={onClear}
+              className="px-2 py-1 rounded bg-red-500/90 text-[10px] font-semibold text-white hover:bg-red-500"
+            >
+              Remover
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className={cn(
+            'w-full aspect-[4/3] rounded-lg border-2 border-dashed border-[#2a2e3b]',
+            'flex flex-col items-center justify-center gap-1.5',
+            'text-[#8b8f9a] hover:border-blue-500/60 hover:text-white transition-colors'
+          )}
+        >
+          <Upload size={20} />
+          <span className="text-xs font-semibold">Selecionar arquivo</span>
+          <span className="text-[10px]">JPG, PNG ou WEBP — até 3MB</span>
+        </button>
+      )}
+    </div>
+  )
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload  = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}

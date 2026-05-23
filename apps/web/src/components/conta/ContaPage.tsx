@@ -7,13 +7,14 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AnalisePage } from '@/components/analise/AnalisePage'
-import { useAuthStore } from '@/store/auth'
+import { useAuthStore, type KycSubmission as KycSub } from '@/store/auth'
 import { useWithdrawalsStore, type ApiWithdrawal, type WithdrawalMethod } from '@/store/withdrawals'
 import { useTransactionsStore, type TransactionType } from '@/store/transactions'
 import { useOperationsStore, type ApiOperation } from '@/store/operations'
 import { ASSETS } from '@/lib/mockData'
 import { api } from '@/lib/api'
 import { TwoFactorSetup } from '@/components/admin/TwoFactorSetup'
+import { KycUploadModal } from '@/components/conta/KycUploadModal'
 
 type ContaTab = 'retirada' | 'transacoes' | 'operacoes' | 'minha-conta' | 'mercado' | 'torneios' | 'analise'
 
@@ -787,6 +788,8 @@ function RetiradaTab() {
 function MinhaContaTab() {
   const authStore = useAuthStore()
   const user      = authStore.user
+  const kycSub    = authStore.kycSubmission
+  const [kycModalOpen, setKycModalOpen] = useState(false)
 
   const [nickname,  setNickname]  = useState(user?.nickname  ?? '')
   const [name,      setName]      = useState(user?.name      ?? '')
@@ -893,6 +896,14 @@ function MinhaContaTab() {
 
   return (
     <div className="flex-1 overflow-y-auto">
+      {/* KYC upload modal */}
+      {kycModalOpen && (
+        <KycUploadModal
+          onClose={() => setKycModalOpen(false)}
+          onDone={() => setKycModalOpen(false)}
+        />
+      )}
+
       {/* 2FA setup modal */}
       {twoFAOpen === 'setup' && (
         <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setTwoFAOpen(null)}>
@@ -978,6 +989,15 @@ function MinhaContaTab() {
               </div>
             </div>
           </div>
+
+          {/* KYC card — only shown when verification is needed or in-flight */}
+          {user.kycStatus !== 'APPROVED' && (
+            <KycCard
+              status={user.kycStatus as 'PENDING' | 'SUBMITTED' | 'REJECTED'}
+              submission={kycSub}
+              onUpload={() => setKycModalOpen(true)}
+            />
+          )}
 
           <div className="flex flex-col gap-3">
             <FloatingInput label="Apelido"             value={nickname}  onChange={setNickname}  placeholder="Como prefere ser chamado" />
@@ -1136,6 +1156,75 @@ export function ContaPage({ initialTab = 'minha-conta' }: { initialTab?: ContaTa
         </div>
       )}
 
+    </div>
+  )
+}
+
+// ── KycCard ─────────────────────────────────────────────────────────────────
+// CTA / status panel shown above the personal-data form. Renders different
+// content depending on where the verification is in its lifecycle.
+
+function KycCard({ status, submission, onUpload }: {
+  status:     'PENDING' | 'SUBMITTED' | 'REJECTED'
+  submission: KycSub | null
+  onUpload:   () => void
+}) {
+  if (status === 'SUBMITTED') {
+    const sentAt = submission ? new Date(submission.submittedAt).toLocaleString('pt-BR') : null
+    return (
+      <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-blue-500/10 border border-blue-500/30 mb-3">
+        <Clock size={16} className="text-blue-400 flex-shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <div className="text-sm font-bold text-blue-400">Documentos em análise</div>
+          <div className="text-xs text-[#ccc] mt-0.5">
+            Sua verificação está sendo analisada. Prazo: até 48 horas.
+            {sentAt && <span className="block text-[10px] text-[#8b8f9a] mt-1">Enviado em {sentAt}</span>}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === 'REJECTED') {
+    return (
+      <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 mb-3">
+        <X size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <div className="text-sm font-bold text-red-400">Verificação rejeitada</div>
+          {submission?.reason && (
+            <div className="text-xs text-[#ccc] mt-1">
+              <span className="text-[10px] uppercase font-bold text-[#8b8f9a]">Motivo: </span>
+              {submission.reason}
+            </div>
+          )}
+          <button
+            onClick={onUpload}
+            className="mt-2 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white transition-colors"
+          >
+            Enviar novamente
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // PENDING (never submitted yet)
+  return (
+    <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-orange-500/10 border border-orange-500/30 mb-3">
+      <Camera size={16} className="text-orange-400 flex-shrink-0 mt-0.5" />
+      <div className="flex-1">
+        <div className="text-sm font-bold text-orange-400">Conta não verificada</div>
+        <div className="text-xs text-[#ccc] mt-0.5">
+          Envie 3 fotos (documento frente, verso e selfie segurando o documento) para
+          desbloquear retiradas e operar com conta real.
+        </div>
+        <button
+          onClick={onUpload}
+          className="mt-2 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-bold text-white transition-colors"
+        >
+          Verificar conta agora
+        </button>
+      </div>
     </div>
   )
 }

@@ -1,11 +1,13 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
-import { loginSchema, registerSchema, updateProfileSchema, twoFactorCodeSchema } from './schema.js'
-import { getUserById, loginUser, registerUser, updateUserProfile } from './service.js'
+import { loginSchema, registerSchema, updateProfileSchema, twoFactorCodeSchema, kycSubmitSchema } from './schema.js'
+import { getKycSubmission, getUserById, loginUser, registerUser, submitKyc, updateUserProfile } from './service.js'
 import { listOperations } from '../operations/service.js'
 import { listWithdrawals } from '../withdrawals/service.js'
 import { listTransactions } from '../transactions/service.js'
 import { generateSecret, otpauthUrl, qrCodeDataUrl, verifyTotp } from './twoFactor.js'
 import { prisma } from '../prisma.js'
+
+const KYC_BODY_LIMIT = 10 * 1024 * 1024  // 10MB for the 3 base64 images
 
 const REFRESH_COOKIE = 'refresh_token'
 const REFRESH_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
@@ -79,16 +81,16 @@ export async function authRoutes(app: FastifyInstance) {
   app.get('/me', { preHandler: [(app as any).authenticate] }, async (req, reply) => {
     const userId = ((req as any).user.sub) as string
     try {
-      // Fetch user + recent operations + withdrawals + transactions in
-      // parallel — saves multiple RTTs on every page mount by letting the
-      // client hydrate all the Conta tabs from one call.
-      const [user, operations, withdrawals, transactions] = await Promise.all([
+      // Fetch user + recent operations + withdrawals + transactions + KYC
+      // submission in parallel — saves multiple RTTs on every page mount.
+      const [user, operations, withdrawals, transactions, kycSubmission] = await Promise.all([
         getUserById(userId),
         listOperations(userId).catch(() => []),
         listWithdrawals(userId).catch(() => []),
         listTransactions(userId).catch(() => []),
+        getKycSubmission(userId).catch(() => null),
       ])
-      return reply.send({ user, operations, withdrawals, transactions })
+      return reply.send({ user, operations, withdrawals, transactions, kycSubmission })
     } catch {
       return reply.status(404).send({ error: 'USER_NOT_FOUND' })
     }
@@ -152,6 +154,26 @@ export async function authRoutes(app: FastifyInstance) {
       data:  { twoFactorEnabled: true },
     })
     return reply.send({ ok: true, enabled: true })
+  })
+
+  // ── KYC submission (user-initiated) ──────────────────────────────────────
+  // Bumped bodyLimit because the 3 base64-encoded images can total ~3-5MB.
+  app.post('/kyc/submit', {
+    bodyLimit: KYC_BODY_LIMIT,
+    preHandler: [(app as any).authenticate],
+  }, async (req, reply) => {
+    const parsed = kycSubmitSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
+    }
+    const userId = ((req as any).user.sub) as string
+    try {
+      const submission = await submitKyc(userId, parsed.data)
+      return reply.send({ ok: true, submission })
+    } catch (err: any) {
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
   })
 
   // Disable: requires a valid code so a stolen session can't kill 2FA.
