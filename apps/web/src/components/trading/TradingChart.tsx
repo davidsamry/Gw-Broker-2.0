@@ -213,9 +213,10 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
     if (!chartRef.current) return
     chartRef.current.applyOptions({
       kineticScroll: { touch: !performanceMode, mouse: !performanceMode },
-      // Always lock price axis (Quotex-style). performanceMode only gates time-axis dragging.
+      // Allow dragging both axes — price axis drag pauses autoScale so user
+      // can pan vertically; double-click on axis restores autoScale.
       handleScale: {
-        axisPressedMouseMove: { time: !performanceMode, price: false },
+        axisPressedMouseMove: { time: !performanceMode, price: true },
       },
     })
   }, [performanceMode])
@@ -264,17 +265,18 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
           barSpacing: 8,
           lockVisibleTimeRangeOnResize: true,
         },
-        // Quotex-style: only horizontal pan + zoom. No vertical drag.
+        // Horizontal pan + zoom always, plus vertical pan (touch + price-axis
+        // drag). Double-click the price axis to re-enable autoScale.
         handleScroll: {
           mouseWheel: true,
           pressedMouseMove: true,   // horizontal drag with mouse
           horzTouchDrag: true,
-          vertTouchDrag: false,      // disable vertical touch pan
+          vertTouchDrag: true,       // allow vertical touch pan
         },
         handleScale: {
           mouseWheel: true,
           pinch: true,
-          axisPressedMouseMove: { time: true, price: false }, // can't drag price axis
+          axisPressedMouseMove: { time: true, price: true }, // drag price axis to pan vertically
           axisDoubleClickReset: true,
         },
         width: chartContainerRef.current.clientWidth,
