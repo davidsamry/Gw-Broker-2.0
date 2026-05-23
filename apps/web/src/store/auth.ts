@@ -11,11 +11,14 @@ export interface Account {
   currency: string
 }
 
+export type UserRole = 'USER' | 'ADMIN'
+
 export interface User {
   id:         string
   name:       string
   email:      string
   kycStatus:  string
+  role:       UserRole
   accounts:   Account[]
   // Optional profile fields populated by the Minha Conta form.
   nickname?:  string | null
@@ -49,7 +52,10 @@ interface AuthState {
 // immediately (0 RTT) instead of waiting for /auth/me. Server is still the
 // source of truth — init() fires /auth/me in the background to revalidate.
 
-const USER_CACHE_KEY = 'vx_user_cache'
+// Bump the cache key whenever the User shape changes so existing clients
+// don't read a stale cached object missing new fields. Current schema
+// version: v2 (added role).
+const USER_CACHE_KEY = 'vx_user_cache_v2'
 const USER_CACHE_TTL = 5 * 60 * 1000 // 5 min — short enough that stale balance corrects quickly
 
 interface UserCache { user: User; savedAt: number }

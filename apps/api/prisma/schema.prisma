@@ -43,6 +43,11 @@ enum KycStatus {
   REJECTED
 }
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
 enum WithdrawalStatus {
   PENDING     // Awaiting admin / processor review
   APPROVED    // Approved, sent to payment provider
@@ -73,6 +78,7 @@ model User {
   country      String?
   address      String?
   kycStatus    KycStatus  @default(PENDING)
+  role         UserRole   @default(USER)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 

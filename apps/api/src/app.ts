@@ -8,6 +8,8 @@ import { accountRoutes } from './accounts/routes.js'
 import { marketRoutes } from './market/routes.js'
 import { withdrawalRoutes } from './withdrawals/routes.js'
 import { transactionRoutes } from './transactions/routes.js'
+import { adminRoutes } from './admin/routes.js'
+import { prisma } from './prisma.js'
 
 export async function buildApp() {
   const app = Fastify({ logger: { level: process.env.NODE_ENV === 'production' ? 'info' : 'debug' } })
@@ -44,12 +46,34 @@ export async function buildApp() {
     cookie: { cookieName: 'refresh_token', signed: false },
   })
 
-  // ── Auth decorator ─────────────────────────────────────────────────────────
+  // ── Auth decorators ───────────────────────────────────────────────────────
+  // authenticate: verifies the JWT and exposes payload at req.user.
   app.decorate('authenticate', async (req: any, reply: any) => {
     try {
       await req.jwtVerify()
     } catch {
       reply.status(401).send({ error: 'UNAUTHORIZED' })
+    }
+  })
+
+  // requireAdmin: authenticate + then load the user from DB and check that
+  // role === ADMIN. We query the DB instead of stuffing the role into the
+  // JWT so admin grants/revocations take effect immediately without waiting
+  // for the access token to expire (15min).
+  app.decorate('requireAdmin', async (req: any, reply: any) => {
+    try {
+      await req.jwtVerify()
+    } catch {
+      return reply.status(401).send({ error: 'UNAUTHORIZED' })
+    }
+    const userId = req.user?.sub as string | undefined
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' })
+    const user = await prisma.user.findUnique({
+      where:  { id: userId },
+      select: { role: true },
+    })
+    if (!user || user.role !== 'ADMIN') {
+      return reply.status(403).send({ error: 'FORBIDDEN' })
     }
   })
 
@@ -63,6 +87,7 @@ export async function buildApp() {
   await app.register(marketRoutes,      { prefix: '/market' })
   await app.register(withdrawalRoutes,  { prefix: '/withdrawals' })
   await app.register(transactionRoutes, { prefix: '/transactions' })
+  await app.register(adminRoutes,       { prefix: '/admin' })
 
   return app
 }
