@@ -2,14 +2,11 @@ import { useEffect, useState } from 'react'
 import { api } from './api'
 import type { Candle } from './marketTypes'
 
-// Feature flag. Off by default — set NEXT_PUBLIC_OTC_LIVE_STREAM=1 in the
-// frontend env to flip the chart and trade panel onto the authoritative
-// server-side OTC stream. When false, everything falls back to the legacy
-// per-browser random walk in TradingChart and the static asset.price in
-// the trade panels.
-const FLAG = process.env.NEXT_PUBLIC_OTC_LIVE_STREAM
-export const isOtcStreamEnabled =
-  typeof FLAG === 'string' && (FLAG === '1' || FLAG.toLowerCase() === 'true')
+// Feature flag was retired after the OTC server-side stream proved itself
+// in production. Streaming is now the default and only path for non-Binance
+// assets. The constant stays exported as `true` so any third-party code
+// importing it keeps compiling, but nothing in this repo checks it anymore.
+export const isOtcStreamEnabled = true
 
 // EventSource doesn't go through axios so we need the raw base URL.
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
@@ -101,14 +98,14 @@ export function subscribeOtcTicks(assetId: string, onTick: TickCallback): () => 
 }
 
 // Hook API — used by the trade panels where the visible price needs to
-// trigger a re-render. Returns null when flag is off, the assetId is
-// null, or before the first tick lands (the panel can fall back to
-// asset.price in those cases).
+// trigger a re-render. Returns null when assetId is null OR before the
+// first tick lands (the panel can fall back to asset.price meanwhile).
+// Pass null for Binance assets — they have their own external feed.
 export function useOtcLivePrice(assetId: string | null): number | null {
   const [price, setPrice] = useState<number | null>(null)
 
   useEffect(() => {
-    if (!isOtcStreamEnabled || !assetId) {
+    if (!assetId) {
       setPrice(null)
       return
     }

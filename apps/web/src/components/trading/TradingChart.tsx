@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Pencil, ZoomIn, ZoomOut, Crosshair, ChevronDown, Eye, X, Activity } from 'lucide-react'
 import { generateMockCandles, type Asset, type Candle, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { fetchBinanceCandles } from '@/lib/marketApi'
-import { fetchOtcCandles, isOtcStreamEnabled, subscribeOtcTicks } from '@/lib/otcMarket'
+import { fetchOtcCandles, subscribeOtcTicks } from '@/lib/otcMarket'
 import { cn } from '@/lib/utils'
 import { DrawingsPanel } from './DrawingsPanel'
 import { IndicadoresPanel } from './IndicadoresPanel'
@@ -264,10 +264,8 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
   // just this asset's id). Writes the latest price into otcLastTickRef,
   // which the chart's 1Hz draw loop reads. Reset to null on switch so the
   // previous asset's stale price doesn't bleed into the new chart.
-  // Skipped entirely when the flag is off OR the asset is BINANCE — the
-  // legacy code paths stay intact in those cases.
+  // Skipped for BINANCE — those have their own external WS feed.
   useEffect(() => {
-    if (!isOtcStreamEnabled) return
     if (asset.source === 'BINANCE') return
     otcLastTickRef.current = null
     const unsubscribe = subscribeOtcTicks(asset.id, (tick) => {
@@ -419,12 +417,12 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         } catch {
           candles = generateMockCandles(displayPrice, 150, selectedTf.seconds)
         }
-      } else if (isOtcStreamEnabled && asset.source !== 'BINANCE') {
+      } else if (asset.source !== 'BINANCE') {
         // OTC live feed: pull derived candles from the server. The endpoint
         // returns epoch seconds in UTC; the chart axis runs on BRT so we
         // shift here, mirroring what the Binance branch does.
         // If the server has no ticks yet (fresh deploy, asset just enabled),
-        // fall back to a mock series so the chart isn't blank — the next
+        // fall back to the mock series so the chart isn't blank — the next
         // SSE tick will start mutating it.
         try {
           const remoteCandles = await fetchOtcCandles(asset.id, selectedTf.seconds, 150)
@@ -590,24 +588,14 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
 
         if (asset.source === 'BINANCE') {
           price = fmt5(nextPrice)
-        } else if (isOtcStreamEnabled) {
+        } else {
           // OTC live stream: read the latest SSE-pushed tick. If we haven't
           // received one yet (cold start / network blip), hold the last
-          // known price — better than a blanked chart and the next tick
+          // known price — better than a blanked chart, and the next tick
           // catches up within ~1s.
           if (otcLastTickRef.current != null) {
             price = fmt5(otcLastTickRef.current)
           }
-        } else {
-          // Legacy: per-browser random walk. Kept as a safety net when
-          // the feature flag is off OR (defensively) if the SSE never
-          // connects for some reason.
-          const reversion = (liveDisplayPrice - price) * 0.0008
-          const vol = liveDisplayPrice * 0.00012
-          const noise = (Math.random() - 0.5) * vol * 2.2
-          const tick = ((Math.random() - 0.5) * 0.5) * vol + reversion + noise
-          price = fmt5(price + tick)
-          if (price <= 0) price = fmt5(liveDisplayPrice * 0.95)
         }
 
         candleHigh = Math.max(candleHigh, price)
