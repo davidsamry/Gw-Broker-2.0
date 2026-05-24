@@ -5,6 +5,7 @@ import { Pencil, ZoomIn, ZoomOut, Crosshair, ChevronDown, Eye, X, Activity } fro
 import { generateMockCandles, type Asset, type Candle, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { fetchBinanceCandles } from '@/lib/marketApi'
 import { fetchOtcCandles, subscribeOtcTicks } from '@/lib/otcMarket'
+import { getCachedCandles, setCachedCandles } from '@/lib/candleCache'
 import { cn } from '@/lib/utils'
 import { DrawingsPanel } from './DrawingsPanel'
 import { IndicadoresPanel } from './IndicadoresPanel'
@@ -407,15 +408,27 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
 
       let candles = generateMockCandles(displayPrice, 150, selectedTf.seconds)
       if (asset.source === 'BINANCE' && asset.marketSymbol) {
-        try {
-          const remoteCandles = await fetchBinanceCandles(asset.marketSymbol, BINANCE_INTERVAL_BY_TIMEFRAME[selectedTf.seconds] ?? '1m', 1000)
-          if (disposed) return
-          candles = remoteCandles.map((candle) => ({
-            ...candle,
-            time: candle.time + BRT_OFFSET,
-          }))
-        } catch {
-          candles = generateMockCandles(displayPrice, 150, selectedTf.seconds)
+        const interval = BINANCE_INTERVAL_BY_TIMEFRAME[selectedTf.seconds] ?? '1m'
+        // Cache lookup first — within the 60s TTL the previous fetch is
+        // reused with zero wait, making switch-between-tabs feel instant.
+        // The live interval picks up from the cached last close and
+        // mutates from there; up to 1 candle of staleness is invisible
+        // visually (the current 1m bar just extends a bit longer).
+        const cached = getCachedCandles(asset.marketSymbol, interval)
+        if (cached) {
+          candles = cached
+        } else {
+          try {
+            const remoteCandles = await fetchBinanceCandles(asset.marketSymbol, interval, 1000)
+            if (disposed) return
+            candles = remoteCandles.map((candle) => ({
+              ...candle,
+              time: candle.time + BRT_OFFSET,
+            }))
+            setCachedCandles(asset.marketSymbol, interval, candles)
+          } catch {
+            candles = generateMockCandles(displayPrice, 150, selectedTf.seconds)
+          }
         }
       } else if (asset.source !== 'BINANCE') {
         // OTC live feed: pull derived candles from the server. The endpoint
