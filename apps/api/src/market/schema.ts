@@ -3,7 +3,9 @@ import { z } from 'zod'
 export const binanceCandlesQuerySchema = z.object({
   symbol: z.string().min(1),
   interval: z.string().min(1).default('1m'),
-  limit: z.coerce.number().int().min(1).max(500).default(120),
+  // Cap matches Binance's own /api/v3/klines max of 1000 candles per
+  // request. Anything beyond that needs pagination via endTime.
+  limit: z.coerce.number().int().min(1).max(1000).default(1000),
 })
 
 export const binanceTickerQuerySchema = z.object({

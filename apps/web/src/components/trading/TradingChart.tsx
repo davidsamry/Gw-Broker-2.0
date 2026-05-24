@@ -408,7 +408,7 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       let candles = generateMockCandles(displayPrice, 150, selectedTf.seconds)
       if (asset.source === 'BINANCE' && asset.marketSymbol) {
         try {
-          const remoteCandles = await fetchBinanceCandles(asset.marketSymbol, BINANCE_INTERVAL_BY_TIMEFRAME[selectedTf.seconds] ?? '1m', 150)
+          const remoteCandles = await fetchBinanceCandles(asset.marketSymbol, BINANCE_INTERVAL_BY_TIMEFRAME[selectedTf.seconds] ?? '1m', 1000)
           if (disposed) return
           candles = remoteCandles.map((candle) => ({
             ...candle,
