@@ -149,7 +149,7 @@ export function TradingCompactCard({
           <span className="text-sm font-bold text-green-400 flex-shrink-0">{asset.payout}%</span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-[10px] font-bold text-blue-400">+R$ {profit}</span>
+          <span className="text-[10px] font-bold text-green-400">+R$ {profit}</span>
           <ChevronDown size={14} className="text-[#8b8f9a]" />
         </div>
       </button>
