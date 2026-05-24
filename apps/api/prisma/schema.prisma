@@ -93,6 +93,12 @@ enum TicketPriority {
   HIGH
 }
 
+enum AssetCategory {
+  OPEN_MARKET   // Forex pairs that follow real market hours
+  OTC           // OTC pairs that trade 24/7 with synthetic pricing
+  CRYPTO        // Crypto spot pairs
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -245,6 +251,33 @@ model Withdrawal {
   @@index([accountId, status])
   @@index([status, createdAt])
   @@map("withdrawals")
+}
+
+// Tradable instrument the admin can enable / disable and price (payout %).
+// Source of truth lives here so admins can tune odds per asset without a
+// code change. The trading frontend still uses a static catalog today —
+// migration to consume this table is a follow-up.
+model Asset {
+  id            String        @id @default(cuid())
+  symbol        String        @unique  // "EURUSD"
+  name          String                 // "Euro / Dólar"
+  category      AssetCategory
+  payout        Int           @default(85)  // % — 1..100
+  enabled       Boolean       @default(true)
+  // Flag codes (flagcdn.com) for the leading/trailing currency. CRYPTO rows
+  // may pass "crypto:btc" etc. to render a coin icon instead of a flag.
+  code1         String?
+  code2         String?
+  // Optional Binance market symbol for live pricing on crypto / forex.
+  marketSymbol  String?
+  // Manual sort key — admin can drag-reorder later; for now we seed in the
+  // order we want them to display.
+  displayOrder  Int           @default(0)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([category, displayOrder])
+  @@map("assets")
 }
 
 // Support ticket opened by a user. The first message body lives in TicketMessage
