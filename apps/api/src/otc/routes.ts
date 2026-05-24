@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../prisma.js'
+import { otcBus, type OtcTickEvent } from './events.js'
 
 // Public OTC pricing endpoints — chart bootstraps from /candles, then
 // keeps fresh via /stream (Etapa 3). Auth is intentionally absent: pricing
@@ -15,6 +16,12 @@ type AllowedTf = typeof ALLOWED_TFS[number]
 const candlesQuery = z.object({
   tf:    z.coerce.number().int().refine((v): v is AllowedTf => ALLOWED_TFS.includes(v as AllowedTf), 'Timeframe inválido.').default(60),
   limit: z.coerce.number().int().min(1).max(500).default(150),
+})
+
+// Optional comma-separated allowlist of asset ids — pass ?assets=eur-chf-otc,btc-otc
+// to limit the stream to a subset. Empty/missing means "all OTC ticks".
+const streamQuery = z.object({
+  assets: z.string().trim().min(1).optional(),
 })
 
 export async function otcRoutes(app: FastifyInstance) {
@@ -102,5 +109,64 @@ export async function otcRoutes(app: FastifyInstance) {
         close: c.close,
       })),
     })
+  })
+
+  // ── Live tick stream (Server-Sent Events) ────────────────────────────────
+  // Subscribes to the in-process OTC bus and forwards every tick to the
+  // client as `event: tick / data: {assetId,price,time}`. Optional
+  // ?assets=a,b,c restricts the stream to those ids.
+  //
+  // Why SSE not WebSocket: one-way (server→client), runs over plain HTTP/1.1,
+  // crosses proxies cleanly, browser auto-reconnects via EventSource, no
+  // extra deps. Trade-off is no client→server messaging — fine here since
+  // chart only reads.
+  //
+  // Heartbeat: SSE comment line every 25s keeps the connection alive across
+  // load balancers / corporate proxies that idle-kill at 60s.
+  app.get('/stream', async (req, reply) => {
+    const q = streamQuery.safeParse(req.query)
+    if (!q.success) return reply.status(400).send({ error: 'VALIDATION_ERROR' })
+
+    const allow = q.data.assets
+      ? new Set(q.data.assets.split(',').map((s) => s.trim()).filter(Boolean))
+      : null
+
+    // Take over the raw response so Fastify doesn't try to serialize after.
+    reply.raw.setHeader('Content-Type',  'text/event-stream')
+    reply.raw.setHeader('Cache-Control', 'no-cache, no-transform')
+    reply.raw.setHeader('Connection',    'keep-alive')
+    // Disable Nginx/proxy buffering — without this the first event can be
+    // held for seconds while a buffer fills.
+    reply.raw.setHeader('X-Accel-Buffering', 'no')
+    reply.raw.flushHeaders?.()
+
+    // Initial comment so the browser commits to the response immediately
+    // instead of waiting on the first event.
+    reply.raw.write(': connected\n\n')
+
+    const onTick = (e: OtcTickEvent) => {
+      if (allow && !allow.has(e.assetId)) return
+      // Don't block the worker if write fails (client gone). Best-effort.
+      try {
+        reply.raw.write(`event: tick\ndata: ${JSON.stringify(e)}\n\n`)
+      } catch {
+        cleanup()
+      }
+    }
+
+    const heartbeat = setInterval(() => {
+      try { reply.raw.write(': ping\n\n') } catch { cleanup() }
+    }, 25_000)
+
+    function cleanup() {
+      clearInterval(heartbeat)
+      otcBus.off('tick', onTick)
+      try { reply.raw.end() } catch { /* already ended */ }
+    }
+
+    otcBus.on('tick', onTick)
+    // Browser closed tab / network drop — release listener + heartbeat.
+    req.raw.on('close', cleanup)
+    req.raw.on('error', cleanup)
   })
 }

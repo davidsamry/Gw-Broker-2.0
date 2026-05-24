@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
+import { publishTick } from './events.js'
 
 // Server-side OTC price worker. Replaces the per-browser random walk that
 // today fabricates a different chart in every client. Single setInterval per
@@ -89,20 +90,28 @@ async function bootstrap() {
 
 // Compute next price for every cached asset then batch-INSERT all of them
 // in one round-trip. With ~50 assets, this is one insert per second —
-// trivial for Postgres.
+// trivial for Postgres. Each tick is also published to the in-process bus
+// so /otc/stream subscribers (chart, etc.) get pushed without polling.
 async function tick() {
   if (isTicking || cache.size === 0) return
   isTicking = true
   try {
     const values: Prisma.Sql[] = []
+    const events: Array<{ assetId: string; price: number }> = []
     for (const [assetId, state] of cache) {
       state.price = round5(step(state.price, state.seedPrice, state.volatility))
       values.push(Prisma.sql`(${assetId}, ${state.price})`)
+      events.push({ assetId, price: state.price })
     }
     await prisma.$executeRaw`
       INSERT INTO asset_price_ticks ("assetId", price)
       VALUES ${Prisma.join(values, ', ')}
     `
+    // Publish after the INSERT succeeds — clients receiving a tick can
+    // trust the same row is also in the DB (matters for the operation
+    // resolver which reads from DB at expiry).
+    const time = Math.floor(Date.now() / 1000)
+    for (const e of events) publishTick({ assetId: e.assetId, price: e.price, time })
   } catch (err) {
     console.error('[otc] tick failed', err)
   } finally {
