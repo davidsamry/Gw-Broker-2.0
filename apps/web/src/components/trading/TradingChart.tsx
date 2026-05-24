@@ -686,12 +686,19 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           setCandleTimerPulse(secsLeft <= 5 ? secsLeft % 2 === 0 : false)
         }
 
-        const y = mainSeries.priceToCoordinate(price)
-        if (y != null) setCandleTimerY(y)
-        if (chartRef.current) {
-          const x = chartRef.current.timeScale().timeToCoordinate(candleStart + tfSec)
-          if (x != null) setCandleTimerX(x)
+        // Timer position: compute from wall-clock + last known price, NOT
+        // from `candleStart` (which only advances on SSE/WS events). With
+        // the old code, if SSE was delayed/stalled or `price` hadn't been
+        // hydrated yet, x/y came back null and the chip vanished. Now the
+        // timer tracks the current slot regardless of feed health.
+        const slotEnd = (Math.floor(now / tfSec) + 1) * tfSec
+        const yPrice  = price || candles[candles.length - 1]?.close
+        if (yPrice) {
+          const y = mainSeries.priceToCoordinate(yPrice)
+          if (y != null) setCandleTimerY(y)
         }
+        const x = chartRef.current.timeScale().timeToCoordinate(slotEnd)
+        if (x != null) setCandleTimerX(x)
       }, 1000)
 
       // ── Binance kline WebSocket — real OHLC, no synthesis ──────────────
