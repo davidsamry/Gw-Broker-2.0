@@ -29,6 +29,12 @@ const BOOT_SPIKE_GRACE_MS          = 10_000
 // etc.). Cheap when there's nothing to fill (one COUNT query per
 // asset/tf, returns immediately).
 const GAP_SWEEP_INTERVAL_MS        = 30_000
+// Periodic prune — caps DB growth. Without this, otc_ticks alone
+// accumulates ~4.3M rows/day (5 assets × 10Hz × 86400s) and the table
+// would hit GB-scale within a week. Retention windows are sized to
+// stay well above the chart's 3000-candle cap per timeframe so users
+// never run out of scrollback history.
+const PRUNE_INTERVAL_MS            = 5 * 60_000
 
 // ── In-memory state ────────────────────────────────────────────────────
 const assetStates = new Map<string, OtcAssetState>()
@@ -47,6 +53,7 @@ let flushInterval:      ReturnType<typeof setInterval> | null = null
 let liquidityInterval:  ReturnType<typeof setInterval> | null = null
 let stateFlushInterval: ReturnType<typeof setInterval> | null = null
 let gapSweepInterval:   ReturnType<typeof setInterval> | null = null
+let pruneInterval:      ReturnType<typeof setInterval> | null = null
 let isRunning = false
 let bootedAt = 0
 
@@ -161,6 +168,11 @@ export async function startOtcV2Worker(): Promise<void> {
     // and backfills them. Catches gaps that opened up between deploys
     // (e.g., from older code that didn't have boot-time backfill).
     gapSweepInterval = setInterval(() => { void sweepAllGaps() }, GAP_SWEEP_INTERVAL_MS)
+    // Periodic prune — caps unbounded growth of otc_ticks and old
+    // otc_candles. Runs immediately on boot too so a long-running
+    // deploy doesn't wait 5 min before the first cleanup.
+    void pruneOldData()
+    pruneInterval = setInterval(() => { void pruneOldData() }, PRUNE_INTERVAL_MS)
 
     console.log(`[otc-v2] running with ${assetStates.size}/${configs.length} assets, ${OTC_TIMEFRAMES.length} timeframes`)
   } catch (err) {
@@ -187,6 +199,7 @@ export function stopOtcV2Worker(): void {
   if (liquidityInterval)  { clearInterval(liquidityInterval);  liquidityInterval  = null }
   if (stateFlushInterval) { clearInterval(stateFlushInterval); stateFlushInterval = null }
   if (gapSweepInterval)   { clearInterval(gapSweepInterval);   gapSweepInterval   = null }
+  if (pruneInterval)      { clearInterval(pruneInterval);      pruneInterval      = null }
   // Final flush of both candle-level data AND runtime state, so a
   // graceful shutdown loses zero context for the next boot.
   void flushPending()
@@ -655,6 +668,60 @@ async function flushRuntimeState(): Promise<void> {
     } catch (err) {
       console.error(`[otc-v2] flushRuntimeState failed for ${s.config.id}`, err)
     }
+  }
+}
+
+// Periodic cleanup: caps storage growth without sacrificing usefulness.
+//
+// Retention sizing (all numbers > the chart's CANDLES_PER_TF = 3000
+// cap, so users always have full scrollback history):
+//   5s   → 6 hours   = ~4,320  candles per asset
+//   15s  → 1 day     = ~5,760
+//   30s  → 2 days    = ~5,760
+//   60s  → 7 days    = ~10,080
+//   300s → 30 days   = ~8,640
+//   ticks → 1 hour                          (ops resolve in seconds-
+//                                            minutes; nothing needs
+//                                            tick-level data older)
+//   admin/engine logs → 30 days             (audit retention)
+//
+// One DELETE per (table, timeframe) — Postgres handles each in a
+// single index-backed scan, no full-table walks.
+async function pruneOldData(): Promise<void> {
+  try {
+    const t = Date.now()
+
+    // Ticks: keep last 1h only. Resolution-side never reads older.
+    await prisma.$executeRaw`
+      DELETE FROM otc_ticks
+      WHERE "recordedAt" < NOW() - INTERVAL '1 hour'
+    `
+
+    // Candles per timeframe — single statement using a CASE-driven
+    // retention boundary. The (timeframe, openTime) index supports
+    // this scan efficiently.
+    await prisma.$executeRaw`
+      DELETE FROM otc_candles
+      WHERE
+        (timeframe = 5    AND "openTime" < NOW() - INTERVAL '6 hours')  OR
+        (timeframe = 15   AND "openTime" < NOW() - INTERVAL '1 day')    OR
+        (timeframe = 30   AND "openTime" < NOW() - INTERVAL '2 days')   OR
+        (timeframe = 60   AND "openTime" < NOW() - INTERVAL '7 days')   OR
+        (timeframe = 300  AND "openTime" < NOW() - INTERVAL '30 days')
+    `
+
+    // Audit + engine logs — generous 30d window.
+    await prisma.$executeRaw`
+      DELETE FROM otc_admin_logs WHERE "createdAt" < NOW() - INTERVAL '30 days'
+    `
+    await prisma.$executeRaw`
+      DELETE FROM otc_engine_logs WHERE "createdAt" < NOW() - INTERVAL '30 days'
+    `
+
+    const ms = Date.now() - t
+    if (ms > 1000) console.log(`[otc-v2] prune cycle finished in ${ms}ms`)
+  } catch (err) {
+    console.error('[otc-v2] pruneOldData failed', err)
   }
 }
 
