@@ -588,7 +588,6 @@ function RetiradaTab() {
 
         {/* Left — Conta (real balance from authStore) */}
         <div className="w-full md:w-[260px] md:flex-shrink-0 px-4 md:px-6 py-4 md:py-6 border-b md:border-b-0 md:border-r border-[#2a2e3b]">
-          <p className="text-sm font-semibold text-white mb-4 md:mb-5">Conta:</p>
           <div className="grid grid-cols-2 md:grid-cols-1 gap-4">
             <div>
               <div className="text-[11px] md:text-xs text-[#8b8f9a] mb-1">Na conta:</div>
