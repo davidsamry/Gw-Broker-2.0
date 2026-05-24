@@ -193,13 +193,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // Mutate a single account's balance in place — used after a trade resolves
   // so the UI updates instantly without paying a /accounts RTT. Server stays
   // the source of truth (next /auth/me revalidate reconciles any drift).
+  //
+  // Honest math: NO clamp to zero. If the optimistic debit drives balance
+  // negative (rare cross-tab race), the next refund must end at the right
+  // value. A clamp here would silently swallow the debit, then the refund
+  // would add the stake back over the un-debited zero — making the visible
+  // balance grow when it should stay the same.
   applyBalanceDelta: (accountId, delta) => {
     const user = get().user
     if (!user) return
     const accounts = user.accounts.map((a) => {
       if (a.id !== accountId) return a
       const current = parseFloat(a.balance) || 0
-      const next    = Math.max(0, current + delta)
+      const next    = current + delta
       return { ...a, balance: next.toFixed(2) }
     })
     const nextUser = { ...user, accounts }

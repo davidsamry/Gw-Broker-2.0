@@ -218,6 +218,17 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
   async function placeTrade(direction: 'CALL' | 'PUT') {
     if (!accountId) return
     setTradeError('')
+
+    // ── Pre-check balance ───────────────────────────────────────────────────
+    // Avoid the optimistic-debit / refund bounce when the server is going to
+    // refuse anyway. Show the error immediately, don't even POST.
+    const myAccount = useAuthStore.getState().user?.accounts.find((a) => a.id === accountId)
+    const balance   = parseFloat(myAccount?.balance ?? '0')
+    if (balance < investment) {
+      setTradeError('Saldo insuficiente.')
+      return
+    }
+
     setPlacing(true)
 
     // ── Optimistic UI ────────────────────────────────────────────────────────
