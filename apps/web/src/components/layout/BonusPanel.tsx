@@ -35,7 +35,9 @@ export function BonusPanel({ onClose }: BonusPanelProps) {
   }
 
   return (
-    <div className="flex flex-col bg-[#1a1e2e] border-r border-[#2a2e3b] flex-shrink-0" style={{ width: 320 }}>
+    // Width: 320px on desktop (side panel beside chart). Full width + height
+    // on mobile, where page.tsx renders this as the sole content of BONUS.
+    <div className="flex flex-col bg-[#1a1e2e] md:border-r border-[#2a2e3b] flex-shrink-0 w-full h-full md:w-[320px]">
       {/* Header tabs + close */}
       <div className="flex items-center border-b border-[#2a2e3b] pr-2">
         <div className="flex flex-1">

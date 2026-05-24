@@ -185,20 +185,26 @@ export default function TradingPage() {
         </div>
       )
     }
-    if (sidebarTab === 'RANKING')   return (
-      <div className={cn('flex flex-1 min-h-0 overflow-hidden', isMobile && 'flex-col')}>
-        {!isMobile && <RankingPanel onClose={() => setSidebarTab('TRADE')} userName={authStore.user?.name} userCode="br" />}
-        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        {isMobile && <RankingPanel onClose={() => setSidebarTab('TRADE')} userName={authStore.user?.name} userCode="br" />}
-      </div>
-    )
-    if (sidebarTab === 'BONUS') return (
-      <div className={cn('flex flex-1 min-h-0 overflow-hidden', isMobile && 'flex-col')}>
-        {!isMobile && <BonusPanel onClose={() => setSidebarTab('TRADE')} />}
-        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        {isMobile && <BonusPanel onClose={() => setSidebarTab('TRADE')} />}
-      </div>
-    )
+    if (sidebarTab === 'RANKING') {
+      // Same mobile-vs-desktop split as HISTORICO / SUPORTE: on mobile show
+      // only the panel, on desktop pair it with the chart.
+      if (isMobile) return <RankingPanel onClose={() => setSidebarTab('TRADE')} userName={authStore.user?.name} userCode="br" />
+      return (
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <RankingPanel onClose={() => setSidebarTab('TRADE')} userName={authStore.user?.name} userCode="br" />
+          <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
+        </div>
+      )
+    }
+    if (sidebarTab === 'BONUS') {
+      if (isMobile) return <BonusPanel onClose={() => setSidebarTab('TRADE')} />
+      return (
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <BonusPanel onClose={() => setSidebarTab('TRADE')} />
+          <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
+        </div>
+      )
+    }
     if (sidebarTab === 'COPY')      return <ComingSoon title="Copy Trading" message="Em breve você poderá copiar automaticamente as melhores operações de traders profissionais." />
 
     // TRADE (default)
