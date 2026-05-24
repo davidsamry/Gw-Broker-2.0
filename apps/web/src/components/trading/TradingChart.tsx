@@ -88,6 +88,12 @@ const CHART_TYPES: { key: ChartType; label: string; icon: React.ReactNode }[] = 
 interface TradingChartProps {
   asset: Asset
   marketPrice?: number
+  // True when marketPrice comes from the live Binance WebSocket; false when
+  // it's the static asset.price fallback (WS hasn't connected yet for this
+  // asset). The chart uses this to decide whether to sync the freshly-loaded
+  // candle to the live price immediately (no visible "candle disappears and
+  // reappears at another price" jump) or wait for the WS.
+  hasFreshTicker?: boolean
   onInfoClick: () => void
   theme?: ChartTheme
   autoScroll?: boolean
@@ -120,12 +126,17 @@ function toHeikenAshi(candles: Candle[]): Candle[] {
   return ha
 }
 
-export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite', autoScroll = true, performanceMode = true, activeTrades = [], chartTradeEvents = [] }: TradingChartProps) {
+export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInfoClick, theme = 'noite', autoScroll = true, performanceMode = true, activeTrades = [], chartTradeEvents = [] }: TradingChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<any>(null)
   const seriesRef = useRef<any>(null)
   const autoScrollRef = useRef(autoScroll)
   const displayPriceRef = useRef(marketPrice ?? asset.price)
+  // Latest hasFreshTicker value, read by the chart effect when its async
+  // fetch resumes (the effect's closure captured the value from when the
+  // effect started, so without a ref it would always see the asset-switch-
+  // moment value, never the "WS just arrived" updates).
+  const hasFreshTickerRef = useRef(hasFreshTicker)
   // Latest price pushed by /otc/stream — written by the SSE listener,
   // read by the 1Hz tick interval. Null until the first tick arrives;
   // the interval holds the last known price meanwhile so the chart
@@ -259,6 +270,10 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
   useEffect(() => {
     displayPriceRef.current = displayPrice
   }, [displayPrice])
+
+  useEffect(() => {
+    hasFreshTickerRef.current = hasFreshTicker
+  }, [hasFreshTicker])
 
   // ── OTC live-tick subscription ───────────────────────────────────────────
   // Opens a single SSE connection per asset switch (filtered server-side to
@@ -606,14 +621,60 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       // be (which would create a visible wick at the gap boundary).
       let lastTickPrice = price
 
-      // Re-anchor displayPriceRef to the freshly-fetched close. Without this,
-      // an asset switch (e.g., BTC → SOL) leaves the ref holding the previous
-      // asset's price (useBinanceTicker doesn't reset its state on symbol
-      // change — old ticker survives until the new WS delivers its first
-      // message ~200-500ms later). The first interval tick would then
-      // draw the new chart's current candle at the OLD asset's price.
+      // ── Initial price sync ────────────────────────────────────────────────
+      // The bug: after setData paints the chart at fetched close, the first
+      // interval tick (+1s later) may push the candle to a different price,
+      // making it look like the current candle "disappeared and appeared at
+      // another price". Two flavours:
+      //   (a) Stale cached candles + fresh WS price → real delta, but jumps
+      //       1s after the chart appears.
+      //   (b) Fresh fetch + stale displayPriceRef (from previous asset or
+      //       static fallback) → wrong price gets painted, then corrected.
+      //
+      // Fix: at load time, decide what to trust.
+      //   • hasFreshTicker=true AND value is plausibly within range of the
+      //     fetched close (0.5..2): WS data is fresh, sync the current
+      //     candle to it IMMEDIATELY. User sees ONE price (the right one)
+      //     instead of a jump.
+      //   • Otherwise: anchor displayPriceRef to the fetched close. The
+      //     first interval tick won't see a different value, so no jump.
+      //     When the real WS arrives, the next tick picks it up naturally.
       if (latestCandleTime != null) {
-        displayPriceRef.current = price
+        const liveDisplay = displayPriceRef.current
+        const ratio = liveDisplay > 0 ? liveDisplay / price : 0
+        const liveLooksReal = hasFreshTickerRef.current && ratio > 0.5 && ratio < 2
+
+        if (liveLooksReal) {
+          // Sync current candle to live WS price. Tiny visible move (sub-1%
+          // typically) — much less jarring than the 1s-later jump.
+          const last = candles[candles.length - 1]
+          if (chartType === 'area') {
+            mainSeries.update({ time: last.time, value: liveDisplay })
+          } else if (chartType === 'heiken-ashi') {
+            // Heiken-Ashi recomputes close as (o+h+l+c)/4 — let it derive.
+            const haClose = parseFloat(((last.open + Math.max(last.high, liveDisplay) + Math.min(last.low, liveDisplay) + liveDisplay) / 4).toFixed(5))
+            mainSeries.update({
+              time: last.time, open: last.open,
+              high: Math.max(last.high, liveDisplay),
+              low:  Math.min(last.low,  liveDisplay),
+              close: haClose,
+            })
+          } else {
+            mainSeries.update({
+              time: last.time, open: last.open,
+              high: Math.max(last.high, liveDisplay),
+              low:  Math.min(last.low,  liveDisplay),
+              close: liveDisplay,
+            })
+          }
+          price        = liveDisplay
+          candleHigh   = Math.max(candleHigh, liveDisplay)
+          candleLow    = Math.min(candleLow,  liveDisplay)
+          lastTickPrice = liveDisplay
+        } else {
+          // Anchor — first interval tick will see this value, no jump.
+          displayPriceRef.current = price
+        }
       }
 
       priceInterval = setInterval(() => {
