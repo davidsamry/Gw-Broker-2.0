@@ -9,6 +9,28 @@ export async function createOperation(userId: string, input: CreateOperationInpu
   const expiresAt     = new Date(Date.now() + input.expiresInSeconds * 1000)
   const description   = `Operação aberta: ${input.assetSymbol} ${input.direction}`
 
+  // ── Authoritative entryPrice for OTC ───────────────────────────────────
+  // For OTC assets (marketSymbol null) the client-sent entryPrice can't be
+  // trusted — they could send anything. Override with the latest server-
+  // owned tick from asset_price_ticks; if there isn't one yet (asset just
+  // enabled, worker not warmed up), fall through to the client value so
+  // we don't break trading on a cold start.
+  // For BINANCE assets we keep the client-sent price — chart is driven by
+  // the same live feed and Etapa 6 already reconciles via the public
+  // ticker at expiry, so the small drift here is acceptable.
+  let entryPrice = input.entryPrice
+  if (!input.marketSymbol) {
+    const ticks = await prisma.$queryRaw<Array<{ price: Prisma.Decimal }>>`
+      SELECT price FROM asset_price_ticks
+      WHERE "assetId" = ${input.assetId}
+      ORDER BY "recordedAt" DESC
+      LIMIT 1
+    `
+    if (ticks.length > 0) {
+      entryPrice = Number(ticks[0].price)
+    }
+  }
+
   const rows = await prisma.$queryRaw<Array<Record<string, unknown>>>`
     WITH
       valid AS (
@@ -23,7 +45,7 @@ export async function createOperation(userId: string, input: CreateOperationInpu
         SELECT
           ${operationId}, id, ${input.assetId}, ${input.assetSymbol}, ${input.marketSymbol ?? null},
           ${input.direction}::"Direction", ${new Prisma.Decimal(input.amount)},
-          ${input.payout}, ${new Prisma.Decimal(input.entryPrice)},
+          ${input.payout}, ${new Prisma.Decimal(entryPrice)},
           ${expiresAt}, 'OPEN'::"OperationStatus", NOW()
         FROM valid
         RETURNING *

@@ -8,6 +8,7 @@ import { FlagPair } from '@/components/ui/FlagPair'
 import { api } from '@/lib/api'
 import { useOperationsStore, type ApiOperation } from '@/store/operations'
 import { useAuthStore } from '@/store/auth'
+import { useOtcLivePrice } from '@/lib/otcMarket'
 
 interface TradingPanelProps {
   asset: Asset
@@ -205,9 +206,13 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
     [storeOperations],
   )
 
-  const livePrice = marketPrice ?? asset.price
-  const payout  = asset.payout / 100
-  const payment = Math.round(investment + investment * payout)
+  // OTC live tick (null when flag off, asset is BINANCE, or before first
+  // tick lands). When set, it feeds entryPrice so the optimistic marker
+  // matches what the server will actually record.
+  const otcLivePrice = useOtcLivePrice(asset.source === 'BINANCE' ? null : asset.id)
+  const livePrice    = marketPrice ?? otcLivePrice ?? asset.price
+  const payout       = asset.payout / 100
+  const payment      = Math.round(investment + investment * payout)
 
   function commitInvestment(raw: string) {
     const num = parseFloat(raw.replace(/[^0-9.]/g, ''))
@@ -240,7 +245,11 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
     const expiresInSec  = TIME_OPTIONS[timeIndex]
     const entryTime     = Math.floor(Date.now() / 1000) + BRT_OFFSET
     const expiryTime    = entryTime + expiresInSec
-    const entryPrice    = asset.source === 'BINANCE' ? livePrice : asset.price
+    // entryPrice: BINANCE → livePrice (from external feed); OTC → live SSE
+    // tick when available, falling back to static asset.price. The server
+    // also re-derives the OTC entry from its own latest tick, so this is
+    // the optimistic-UI mirror — usually agrees within one tick.
+    const entryPrice    = asset.source === 'BINANCE' ? livePrice : (otcLivePrice ?? asset.price)
     const clientTradeId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
     const newTrade: OpenTrade = {

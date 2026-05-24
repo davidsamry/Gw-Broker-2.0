@@ -8,6 +8,7 @@ import { TradingInputsCompact } from './TradingInputsCompact'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
+import { useOtcLivePrice } from '@/lib/otcMarket'
 
 const TIME_OPTIONS = [
   { label: '01:00', value: 60   },
@@ -33,9 +34,13 @@ export function TradingCompactCard({
   const [placing, setPlacing]       = useState(false)
   const [tradeError, setTradeError] = useState('')
 
-  const livePrice = marketPrice ?? asset.price
-  const payout    = asset.payout / 100
-  const profit    = (investment * payout).toFixed(2).replace('.', ',')
+  // OTC live tick (null when flag off, asset is BINANCE, or before first
+  // tick arrives). When set, it overrides asset.price below so the entry
+  // marker matches what the server will record.
+  const otcLivePrice = useOtcLivePrice(asset.source === 'BINANCE' ? null : asset.id)
+  const livePrice    = marketPrice ?? otcLivePrice ?? asset.price
+  const payout       = asset.payout / 100
+  const profit       = (investment * payout).toFixed(2).replace('.', ',')
 
   function adjustInvestment(delta: number) {
     setInvestment((v) => Math.max(MIN_INVESTMENT, v + delta))
@@ -66,7 +71,10 @@ export function TradingCompactCard({
     const clientTradeId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const entryTime     = Math.floor(Date.now() / 1000) + BRT_OFFSET
     const expiryTime    = entryTime + timeSec
-    const entryPrice    = asset.source === 'BINANCE' ? livePrice : asset.price
+    // entryPrice: for BINANCE use livePrice; for OTC prefer the live SSE
+    // tick (so client marker == server-recorded entry), fall back to the
+    // static asset.price when the stream isn't available.
+    const entryPrice    = asset.source === 'BINANCE' ? livePrice : (otcLivePrice ?? asset.price)
 
     // Optimistically debit the stake — server already does this atomically
     // in the create-operation CTE; we just mirror it client-side to avoid a
