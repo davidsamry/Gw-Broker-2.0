@@ -42,12 +42,15 @@ interface RegimeParams {
 // Quick mental math: drift_per_minute ≈ driftPerTick × 600.
 export const REGIME_PARAMS: Record<OtcRegime, RegimeParams> = {
   LATERAL: {
+    // LATERAL should still feel alive — same volMultiplier as a WEAK
+    // trend, just no directional drift. Duration trimmed so the engine
+    // doesn't sit in a calm period for 4 minutes at a time.
     driftPerTick: 0,
-    volMultiplier: 0.8,
-    durMinMs:  60_000, durMaxMs: 240_000,
+    volMultiplier: 1.0,
+    durMinMs:  30_000, durMaxMs: 90_000,
     transitions: {
-      LATERAL: 40, TREND_UP_WEAK: 15, TREND_DOWN_WEAK: 15,
-      HIGH_VOL: 4,  LOW_VOL: 12, COMPRESSION: 8, EXPANSION: 6,
+      LATERAL: 20, TREND_UP_WEAK: 22, TREND_DOWN_WEAK: 22,
+      HIGH_VOL: 8,  LOW_VOL: 8, COMPRESSION: 8, EXPANSION: 12,
     },
   },
   TREND_UP_WEAK: {

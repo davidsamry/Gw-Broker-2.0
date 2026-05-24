@@ -34,6 +34,14 @@ interface HistoricalCandleRow {
 /**
  * Generate up to N candles backwards. Returns array sorted ascending
  * by openTime (oldest first).
+ *
+ * Random-walk character is calibrated to MATCH the live engine so
+ * historical bootstrap candles and live candles look continuous on
+ * the chart. The live engine ticks at 10Hz with per-tick std =
+ * volatilityBase, so per-candle cumulative std = volatilityBase ×
+ * √(timeframe × 10). We sample gaussian (not uniform — uniform was
+ * the old formula and produced too-narrow bodies, ~4 pips for EUR/USD
+ * vs ~30 pips live).
  */
 function generateHistorical(
   asset:     OtcAssetConfig,
@@ -46,23 +54,28 @@ function generateHistorical(
 
   const rows: HistoricalCandleRow[] = []
   let price = asset.seedPrice
-  // Stronger reversion for the historical fill so the walk doesn't
-  // drift catastrophically over thousands of candles.
-  const reversionStrength = 0.01
+  // Per-candle cumulative volatility under the live engine's 10Hz tick rate.
+  const candleStd = asset.volatilityBase * Math.sqrt(timeframe * 10)
+  // Mean-reversion per candle — softer than live (-0.0002/tick = -0.12/candle)
+  // because we're stepping per-candle here. Keeps the 3000-bar walk anchored
+  // near seed without snapping every candle.
+  const reversionStrength = 0.05
 
   for (let i = 0; i < count; i++) {
     const openTime = new Date(startSlotMs + i * tfMs)
     const open = price
 
-    // Random walk over the candle, scaled by tf seconds (longer
-    // timeframes get bigger candle ranges, like real markets).
-    const intraVol  = asset.volatilityBase * Math.sqrt(timeframe)
-    const drift     = (Math.random() - 0.5) * 0.0003
-    const close     = price * (1 + drift + (Math.random() - 0.5) * intraVol)
-    const hiExt     = Math.abs(Math.random()) * intraVol * 0.5
-    const loExt     = Math.abs(Math.random()) * intraVol * 0.5
-    const high      = Math.max(open, close) * (1 + hiExt)
-    const low       = Math.min(open, close) * (1 - loExt)
+    // Body: gaussian shock — matches the live engine's per-tick accumulation.
+    const bodyShock = gaussian() * candleStd
+    const close     = price * (1 + bodyShock)
+
+    // Wicks: half-magnitude shocks on either side, positive-only so they
+    // always extend BEYOND the body. Gives the random-walk feel without
+    // letting wicks dominate.
+    const hiExt = Math.abs(gaussian()) * candleStd * 0.5
+    const loExt = Math.abs(gaussian()) * candleStd * 0.5
+    const high  = Math.max(open, close) * (1 + hiExt)
+    const low   = Math.min(open, close) * (1 - loExt)
 
     rows.push({
       assetId:    asset.id,
@@ -72,16 +85,24 @@ function generateHistorical(
       highPrice:  round5(high),
       lowPrice:   round5(low),
       closePrice: round5(close),
-      // ~2 ticks/sec gives a believable count for any timeframe
-      tickCount:  Math.max(1, timeframe * 2),
+      // Match live tick rate (10Hz) for the count.
+      tickCount:  Math.max(1, timeframe * 10),
       finalizedAt: openTime,
     })
 
-    // Step + mean-revert pull toward seed
+    // Step + mean-revert pull toward seed.
     price = close + (asset.seedPrice - close) * reversionStrength
   }
 
   return rows
+}
+
+// Box-Muller — same impl as pricingEngine.gaussian but local to keep this
+// module self-contained.
+function gaussian(): number {
+  const u = 1 - Math.random()
+  const v = Math.random()
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v)
 }
 
 /**

@@ -383,11 +383,11 @@ async function selfHealSeed(): Promise<void> {
        "seedPrice", "volatilityBase", "speedMultiplier",
        "displayOrder", "createdAt", "updatedAt")
     VALUES
-      ('eur-usd-otc', 'EUR/USD', 'EUR/USD (OTC)', 'FOREX'::"OtcCategory",       TRUE, FALSE, 85,     1.08500, 0.00010, 1.0, 1, NOW(), NOW()),
-      ('gbp-jpy-otc', 'GBP/JPY', 'GBP/JPY (OTC)', 'FOREX'::"OtcCategory",       TRUE, FALSE, 87,   198.50000, 0.00015, 1.0, 2, NOW(), NOW()),
-      ('btc-usd-otc', 'BTC/USD', 'BTC/USD (OTC)', 'CRYPTO'::"OtcCategory",      TRUE, FALSE, 82, 68000.00000, 0.00040, 1.0, 3, NOW(), NOW()),
-      ('gold-otc',    'GOLD',    'GOLD (OTC)',    'COMMODITIES'::"OtcCategory", TRUE, FALSE, 80,  2350.00000, 0.00012, 1.0, 4, NOW(), NOW()),
-      ('nasdaq-otc',  'NASDAQ',  'NASDAQ (OTC)',  'INDICES'::"OtcCategory",     TRUE, FALSE, 78, 18450.00000, 0.00010, 1.0, 5, NOW(), NOW())
+      ('eur-usd-otc', 'EUR/USD', 'EUR/USD (OTC)', 'FOREX'::"OtcCategory",       TRUE, FALSE, 85,     1.08500, 0.00020, 1.0, 1, NOW(), NOW()),
+      ('gbp-jpy-otc', 'GBP/JPY', 'GBP/JPY (OTC)', 'FOREX'::"OtcCategory",       TRUE, FALSE, 87,   198.50000, 0.00030, 1.0, 2, NOW(), NOW()),
+      ('btc-usd-otc', 'BTC/USD', 'BTC/USD (OTC)', 'CRYPTO'::"OtcCategory",      TRUE, FALSE, 82, 68000.00000, 0.00080, 1.0, 3, NOW(), NOW()),
+      ('gold-otc',    'GOLD',    'GOLD (OTC)',    'COMMODITIES'::"OtcCategory", TRUE, FALSE, 80,  2350.00000, 0.00025, 1.0, 4, NOW(), NOW()),
+      ('nasdaq-otc',  'NASDAQ',  'NASDAQ (OTC)',  'INDICES'::"OtcCategory",     TRUE, FALSE, 78, 18450.00000, 0.00022, 1.0, 5, NOW(), NOW())
     ON CONFLICT (id) DO NOTHING
   `
   await prisma.$executeRaw`
