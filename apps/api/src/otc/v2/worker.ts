@@ -23,6 +23,12 @@ const STATE_FLUSH_INTERVAL_MS      = 5_000
 // restart doesn't accidentally introduce a discontinuity that the user
 // would read as "the engine snapped to a new price on deploy".
 const BOOT_SPIKE_GRACE_MS          = 10_000
+// Periodic gap sweep — re-runs backfill against the live DB to catch
+// any slot gaps that opened up since the last sweep (boot restart that
+// didn't have the backfill code yet, transient outage between deploys,
+// etc.). Cheap when there's nothing to fill (one COUNT query per
+// asset/tf, returns immediately).
+const GAP_SWEEP_INTERVAL_MS        = 30_000
 
 // ── In-memory state ────────────────────────────────────────────────────
 const assetStates = new Map<string, OtcAssetState>()
@@ -40,6 +46,7 @@ let tickIntervals:      Array<ReturnType<typeof setInterval>> = []
 let flushInterval:      ReturnType<typeof setInterval> | null = null
 let liquidityInterval:  ReturnType<typeof setInterval> | null = null
 let stateFlushInterval: ReturnType<typeof setInterval> | null = null
+let gapSweepInterval:   ReturnType<typeof setInterval> | null = null
 let isRunning = false
 let bootedAt = 0
 
@@ -150,6 +157,10 @@ export async function startOtcV2Worker(): Promise<void> {
     // resume without resetting momentum. Survives `prisma migrate
     // deploy` because we never truncate these tables.
     stateFlushInterval = setInterval(flushRuntimeState, STATE_FLUSH_INTERVAL_MS)
+    // Periodic gap sweep — checks each asset/tf for missing slots
+    // and backfills them. Catches gaps that opened up between deploys
+    // (e.g., from older code that didn't have boot-time backfill).
+    gapSweepInterval = setInterval(() => { void sweepAllGaps() }, GAP_SWEEP_INTERVAL_MS)
 
     console.log(`[otc-v2] running with ${assetStates.size}/${configs.length} assets, ${OTC_TIMEFRAMES.length} timeframes`)
   } catch (err) {
@@ -175,6 +186,7 @@ export function stopOtcV2Worker(): void {
   if (flushInterval)      { clearInterval(flushInterval);      flushInterval      = null }
   if (liquidityInterval)  { clearInterval(liquidityInterval);  liquidityInterval  = null }
   if (stateFlushInterval) { clearInterval(stateFlushInterval); stateFlushInterval = null }
+  if (gapSweepInterval)   { clearInterval(gapSweepInterval);   gapSweepInterval   = null }
   // Final flush of both candle-level data AND runtime state, so a
   // graceful shutdown loses zero context for the next boot.
   void flushPending()
@@ -642,6 +654,35 @@ async function flushRuntimeState(): Promise<void> {
       `
     } catch (err) {
       console.error(`[otc-v2] flushRuntimeState failed for ${s.config.id}`, err)
+    }
+  }
+}
+
+// Periodic sweep: walks every loaded asset and re-checks for gap.
+// This is the safety net for the boot-time backfill — if the engine
+// booted before the backfill code was in production (or boot backfill
+// silently failed), the next sweep within 30s heals the gap.
+async function sweepAllGaps(): Promise<void> {
+  for (const s of assetStates.values()) {
+    try {
+      // sweepAllGaps doesn't depend on the cached last60 from boot —
+      // it re-queries the DB each time, so it always sees the latest
+      // state. Passing a stub `last60` only because backfillMissingCandles
+      // uses it as a final fallback when the DB query returns nothing.
+      const stub: OtcCandle = {
+        assetId:     s.config.id,
+        timeframe:   60,
+        openTime:    new Date(),
+        open:        s.smoothedPrice,
+        high:        s.smoothedPrice,
+        low:         s.smoothedPrice,
+        close:       s.smoothedPrice,
+        tickCount:   0,
+        finalizedAt: null,
+      }
+      await backfillMissingCandles(s.config, stub)
+    } catch (err) {
+      console.error(`[otc-v2] gap sweep failed for ${s.config.id}`, err)
     }
   }
 }
