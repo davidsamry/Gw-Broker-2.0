@@ -160,13 +160,18 @@ export default function TradingPage() {
   // ─── Shared content renderers ──────────────────────────────────────────────
 
   function renderMainContent(isMobile = false) {
-    if (sidebarTab === 'SUPORTE') return (
-      <div className={cn('flex flex-1 min-h-0 overflow-hidden', isMobile && 'flex-col')}>
-        {!isMobile && <SupportPanel onClose={() => setSidebarTab('TRADE')} />}
-        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        {isMobile && <SupportPanel onClose={() => setSidebarTab('TRADE')} />}
-      </div>
-    )
+    if (sidebarTab === 'SUPORTE') {
+      // On mobile the user opens Suporte to read tickets and type replies —
+      // the chart is irrelevant there and would only steal vertical space.
+      // Show the panel full-screen, same UX pattern as CONTA.
+      if (isMobile) return <SupportPanel onClose={() => setSidebarTab('TRADE')} />
+      return (
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <SupportPanel onClose={() => setSidebarTab('TRADE')} />
+          <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
+        </div>
+      )
+    }
     if (sidebarTab === 'CONTA')     return <ContaPage key={contaInitialTab} initialTab={contaInitialTab} />
     if (sidebarTab === 'HISTORICO') return (
       <div className={cn('flex flex-1 min-h-0 overflow-hidden', isMobile && 'flex-col')}>

@@ -69,7 +69,12 @@ export function SupportPanel({ onClose }: SupportPanelProps) {
 
   return (
     <>
-      <div className="flex flex-col bg-[#1a1e2e] border-r border-[#2a2e3b] flex-shrink-0" style={{ width: 320 }}>
+      {/*
+        Width: 320px on desktop (side-panel beside the chart). Full width on
+        mobile, where page.tsx renders us as the sole content of the SUPORTE
+        tab — no chart competing for vertical space.
+      */}
+      <div className="flex flex-col bg-[#1a1e2e] md:border-r border-[#2a2e3b] flex-shrink-0 w-full h-full md:w-[320px]">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[#2a2e3b]">
           <div className="flex items-center gap-2.5 min-w-0">
