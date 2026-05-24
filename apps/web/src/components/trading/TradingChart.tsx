@@ -6,6 +6,7 @@ import { generateMockCandles, type Asset, type Candle, type ActiveTrade, type Ch
 import { fetchBinanceCandles } from '@/lib/marketApi'
 import { fetchOtcCandles, subscribeOtcTicks } from '@/lib/otcMarket'
 import { getCachedCandles, setCachedCandles } from '@/lib/candleCache'
+import { subscribeKline } from '@/lib/binanceKline'
 import { cn } from '@/lib/utils'
 import { DrawingsPanel } from './DrawingsPanel'
 import { IndicadoresPanel } from './IndicadoresPanel'
@@ -368,6 +369,7 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
     let chart: any = null
     let disposed = false
     let priceInterval: ReturnType<typeof setInterval> | undefined
+    let klineUnsub: (() => void) | undefined
 
     async function initChart() {
       if (!chartContainerRef.current || disposed) return
@@ -680,99 +682,63 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
       priceInterval = setInterval(() => {
         if (disposed || !chartRef.current) return
         const now = nowSec()
-        const liveDisplayPrice = displayPriceRef.current
-        const decimals = liveDisplayPrice > 10 ? 3 : 5
-        const fmt5 = (v: number) => parseFloat(v.toFixed(decimals))
-        const nextPrice = asset.source === 'BINANCE' ? liveDisplayPrice : price
 
-        if (asset.source === 'BINANCE') {
-          // Guard against stale ticker values. When the user switches asset
-          // (e.g., BTC → SOL), useBinanceTicker takes 200-500ms to close the
-          // old WS and receive the first tick on the new one. In that window
-          // displayPriceRef.current can still hold the previous asset's
-          // price, which would draw a wick out of scale on the new chart.
-          //
-          // If the reported live price is more than 50% off from the chart's
-          // last known good `price`, skip this tick — the next valid update
-          // from the WS will correct within ~1s. 50% is generous enough for
-          // any real intraday move but tight enough to catch cross-asset
-          // contamination (SOL ~86, BTC ~77000, ETH ~3500 etc.).
-          if (price > 0 && nextPrice > 0) {
-            const ratio = nextPrice / price
-            if (ratio > 0.5 && ratio < 2) {
-              price = fmt5(nextPrice)
-            }
-            // else: keep `price` as-is, wait for the next sane tick
-          } else {
-            price = fmt5(nextPrice)
-          }
-        } else {
-          // OTC live stream: read the latest SSE-pushed tick. If we haven't
-          // received one yet (cold start / network blip), hold the last
-          // known price — better than a blanked chart, and the next tick
-          // catches up within ~1s.
+        // ── PRICE / CANDLE UPDATE ─────────────────────────────────────────
+        // For BINANCE assets, the kline WebSocket (subscribed below) pushes
+        // the FULL official OHLC of the current candle on every trade —
+        // there's nothing for the interval to synthesise. It just bookkeeps
+        // the countdown timer + overlay coordinates further down.
+        //
+        // For OTC assets, the local interval is still the price engine:
+        // reads the SSE-pushed tick, advances candleStart period-by-period
+        // (gap-fill at prevClose for visual continuity), mutates the
+        // current candle.
+        if (asset.source !== 'BINANCE') {
+          const decimals = price > 10 ? 3 : 5
+          const fmt5 = (v: number) => parseFloat(v.toFixed(decimals))
+
           if (otcLastTickRef.current != null) {
             price = fmt5(otcLastTickRef.current)
           }
-        }
 
-        // Gap-fill: when a tick lands more than one tfSec past the current
-        // candleStart (asset switch / tab throttle / slow fetch), advance
-        // period by period instead of jumping straight to alignedStart(now).
-        //
-        // Key detail — each intermediate flat candle is drawn at
-        // `prevClose` (the close of the candle that was just visible),
-        // NOT at the new live `price`. Using the live price would create
-        // a visible vertical drop/spike at the gap boundary (the very wick
-        // the user kept seeing). At `prevClose` the series stays a flat
-        // line until the current period, where the live tick takes over.
-        //
-        // Cap fill at 5 periods — defensive against pathologically large
-        // gaps (browser tab paused for hours). Beyond that we jump like
-        // the old code did; a 5-bar flat tail at a stale price is fine,
-        // 60+ would look ridiculous.
-        if (now >= candleStart + tfSec) {
-          const prevClose = lastTickPrice  // close of the just-finished candle
-          let fills = 0
-          while (now >= candleStart + tfSec && fills < 5) {
-            candleStart += tfSec
-            if (now >= candleStart + tfSec) {
-              if (chartType === 'area') {
-                mainSeries.update({ time: candleStart, value: prevClose })
-              } else {
-                mainSeries.update({ time: candleStart, open: prevClose, high: prevClose, low: prevClose, close: prevClose })
-              }
-              fills++
-            }
-          }
-          // If we hit the cap, snap to current period without further fills.
           if (now >= candleStart + tfSec) {
-            candleStart = alignedStart(now)
+            const prevClose = lastTickPrice  // close of the just-finished candle
+            let fills = 0
+            while (now >= candleStart + tfSec && fills < 5) {
+              candleStart += tfSec
+              if (now >= candleStart + tfSec) {
+                if (chartType === 'area') {
+                  mainSeries.update({ time: candleStart, value: prevClose })
+                } else {
+                  mainSeries.update({ time: candleStart, open: prevClose, high: prevClose, low: prevClose, close: prevClose })
+                }
+                fills++
+              }
+            }
+            if (now >= candleStart + tfSec) {
+              candleStart = alignedStart(now)
+            }
+            candleOpen = prevClose
+            candleHigh = prevClose
+            candleLow  = prevClose
           }
-          // Open the new current candle at prevClose so the live tick
-          // transitions smoothly into the real movement.
-          candleOpen = prevClose
-          candleHigh = prevClose
-          candleLow  = prevClose
+
+          candleHigh = Math.max(candleHigh, price)
+          candleLow  = Math.min(candleLow,  price)
+          lastTickPrice = price
+
+          const candle = { time: candleStart, open: candleOpen, high: candleHigh, low: candleLow, close: price }
+          if (chartType === 'area') {
+            mainSeries.update({ time: candleStart, value: price })
+          } else if (chartType === 'heiken-ashi') {
+            const haClose = fmt5((candleOpen + candleHigh + candleLow + price) / 4)
+            mainSeries.update({ ...candle, close: haClose })
+          } else {
+            mainSeries.update(candle)
+          }
         }
 
-        // Now extend high/low for the current (post-rollover or unchanged)
-        // candle with the latest price.
-        candleHigh = Math.max(candleHigh, price)
-        candleLow  = Math.min(candleLow,  price)
-        lastTickPrice = price
-
-        const candle = { time: candleStart, open: candleOpen, high: candleHigh, low: candleLow, close: price }
-
-        if (chartType === 'area') {
-          mainSeries.update({ time: candleStart, value: price })
-        } else if (chartType === 'heiken-ashi') {
-          const haClose = fmt5((candleOpen + candleHigh + candleLow + price) / 4)
-          mainSeries.update({ ...candle, close: haClose })
-        } else {
-          mainSeries.update(candle)
-        }
-
+        // ── COMMON: auto-scroll, countdown timer, overlay coords ─────────
         if (autoScrollRef.current && chartRef.current) {
           chartRef.current.timeScale().scrollToRealTime()
         }
@@ -791,6 +757,41 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           if (x != null) setCandleTimerX(x)
         }
       }, 1000)
+
+      // ── Binance kline WebSocket — real OHLC, no synthesis ──────────────
+      // Each kline event delivers the FULL current candle with live OHLC
+      // straight from Binance. mainSeries.update() handles both cases:
+      //   • same time as the latest bar → mutate it in place
+      //   • greater time (minute rollover) → append a new bar
+      // No gap-fill, no price guard, no displayPriceRef sync needed for
+      // BINANCE — this is the live source. Closure-scoped `price`,
+      // `candleStart`, etc. are kept in sync so the interval's timer
+      // overlay still positions correctly.
+      if (asset.source === 'BINANCE' && asset.marketSymbol) {
+        const interval = BINANCE_INTERVAL_BY_TIMEFRAME[selectedTf.seconds] ?? '1m'
+        klineUnsub = subscribeKline(asset.marketSymbol, interval, (k) => {
+          if (disposed) return
+          const time = k.time + BRT_OFFSET
+          price        = k.close
+          candleStart  = time
+          candleOpen   = k.open
+          candleHigh   = k.high
+          candleLow    = k.low
+          lastTickPrice = k.close
+
+          if (chartType === 'area') {
+            mainSeries.update({ time, value: k.close })
+          } else if (chartType === 'heiken-ashi') {
+            // Live Heiken-Ashi: simplified — full re-derivation would need
+            // every prior bar's haOpen/haClose. The current bar's
+            // approximation is acceptable visually.
+            const haClose = parseFloat(((k.open + k.high + k.low + k.close) / 4).toFixed(5))
+            mainSeries.update({ time, open: k.open, high: k.high, low: k.low, close: haClose })
+          } else {
+            mainSeries.update({ time, open: k.open, high: k.high, low: k.low, close: k.close })
+          }
+        })
+      }
     }
 
     initChart()
@@ -808,6 +809,7 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
     return () => {
       disposed = true
       if (priceInterval) clearInterval(priceInterval)
+      if (klineUnsub) klineUnsub()
       resizeObserver.disconnect()
       seriesRef.current = null
       setChartReady(false)
