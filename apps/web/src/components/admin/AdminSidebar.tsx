@@ -6,7 +6,7 @@ import {
   LayoutGrid, Users, Wallet, Activity, ShieldCheck,
   ArrowDownToLine, ArrowUpFromLine, MessageSquare, Network,
   Copy, Layers, Gift, Zap, TrendingUp, Clock, FileSpreadsheet,
-  Trophy, Image as ImageIcon, FileText, Mail, CreditCard,
+  Trophy, Image as ImageIcon, FileText, Mail, CreditCard, Radio,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -32,6 +32,7 @@ const MENU: MenuItem[] = [
   { href: '/admin/bonus',          label: 'Bônus',           icon: <Gift size={15} /> },
   { href: '/admin/boosters',       label: 'Boosters',        icon: <Zap size={15} /> },
   { href: '/admin/ativos',         label: 'Ativos',          icon: <TrendingUp size={15} /> },
+  { href: '/admin/otc',            label: 'Motor OTC',       icon: <Radio size={15} /> },
   { href: '/admin/horario-mercado',label: 'Horário Mercado', icon: <Clock size={15} /> },
   { href: '/admin/cadastro-otc',   label: 'Cadastro OTC',    icon: <FileSpreadsheet size={15} /> },
   { href: '/admin/ranking',        label: 'Ranking',         icon: <Trophy size={15} /> },

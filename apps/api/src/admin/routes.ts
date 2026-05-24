@@ -7,6 +7,7 @@ import { depositsAdminRoutes } from './deposits/routes.js'
 import { withdrawalsAdminRoutes } from './withdrawals/routes.js'
 import { ticketsAdminRoutes } from './tickets/routes.js'
 import { assetsAdminRoutes } from './assets/routes.js'
+import { otcAdminRoutes } from './otc/routes.js'
 
 // All routes in this module sit behind requireAdmin, so the JWT must be valid
 // AND the user.role must be ADMIN (live-checked against the DB per request).
@@ -32,4 +33,5 @@ export async function adminRoutes(app: FastifyInstance) {
   await app.register(withdrawalsAdminRoutes, { prefix: '/withdrawals' })
   await app.register(ticketsAdminRoutes,     { prefix: '/tickets'     })
   await app.register(assetsAdminRoutes,      { prefix: '/assets'      })
+  await app.register(otcAdminRoutes,         { prefix: '/otc'         })
 }
