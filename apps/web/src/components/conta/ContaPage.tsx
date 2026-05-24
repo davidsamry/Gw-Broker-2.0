@@ -467,11 +467,11 @@ function NovaRetiradaModal({
               inputMode="decimal"
               value={amount}
               onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ''))}
-              placeholder="50,00"
+              placeholder="60,00"
               className="w-full bg-[#252a3a] border border-[#2a2e3b] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/60"
             />
             <p className="text-[10px] text-[#8b8f9a] mt-1">
-              Mínimo R$ 50,00 · Disponível R$ {formatBRL(maxAmount)}
+              Mínimo R$ 60,00 · Disponível R$ {formatBRL(maxAmount)}
             </p>
           </div>
 
@@ -613,9 +613,9 @@ function RetiradaTab() {
             <p className="text-sm font-semibold text-white">Retirada:</p>
             <button
               onClick={() => setCreateOpen(true)}
-              disabled={balance < 50}
+              disabled={balance < 60}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title={balance < 50 ? 'Saldo insuficiente (mínimo R$50)' : 'Solicitar nova retirada'}
+              title={balance < 60 ? 'Saldo insuficiente (mínimo R$60)' : 'Solicitar nova retirada'}
             >
               <Plus size={13} />
               Solicitar retirada
@@ -736,11 +736,11 @@ function RetiradaTab() {
           <div className="mt-6 md:mt-auto pt-4 md:pt-6 flex flex-col gap-1.5">
             <div className="flex items-center gap-2">
               <Landmark size={13} className="text-green-400 flex-shrink-0" />
-              <span className="text-xs text-[#8b8f9a]">Valor mínimo do depósito: <span className="text-green-400 font-semibold">R$50</span></span>
+              <span className="text-xs text-[#8b8f9a]">Valor mínimo do depósito: <span className="text-green-400 font-semibold">R$60</span></span>
             </div>
             <div className="flex items-center gap-2">
               <Landmark size={13} className="text-green-400 flex-shrink-0" />
-              <span className="text-xs text-[#8b8f9a]">Valor mínimo de retirada: <span className="text-green-400 font-semibold">R$50</span></span>
+              <span className="text-xs text-[#8b8f9a]">Valor mínimo de retirada: <span className="text-green-400 font-semibold">R$60</span></span>
             </div>
             <div className="flex items-center gap-2">
               <Zap size={13} className="text-orange-400 flex-shrink-0" />

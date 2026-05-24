@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const WITHDRAWAL_METHODS = ['PIX', 'USDT_TRC20', 'BANK_TRANSFER'] as const
-export const MIN_WITHDRAWAL = 50  // R$ — keep in sync with UI footer text
+export const MIN_WITHDRAWAL = 60  // R$ — keep in sync with UI footer text
 
 export const createWithdrawalSchema = z.object({
   accountId:   z.string().cuid(),
