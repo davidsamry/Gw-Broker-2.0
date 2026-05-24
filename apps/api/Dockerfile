@@ -23,9 +23,11 @@ COPY --from=builder /app/prisma ./prisma
 
 EXPOSE 3001
 
-# Run pending migrations BEFORE starting the API. Without this step,
-# `prisma migrate dev` files added to the repo never reach production —
-# the schema and code drift apart silently. `migrate deploy` is the
-# production-safe variant: applies pending migrations idempotently and
-# never prompts.
-CMD sh -c "npx prisma migrate deploy && npm run start"
+# Try to apply pending migrations on boot, but DO NOT block the API
+# from starting if migrate fails. Without the `|| true` fallback, a
+# single broken migration (or a fresh DB that wasn't initialized via
+# Prisma in the first place) hangs the API forever — the previous
+# deploy ended up with the worker holding zero assets in memory because
+# migrate deploy errored and `&&` short-circuited `npm run start`.
+# Output is captured for the EasyPanel log even on failure.
+CMD sh -c "npx prisma migrate deploy 2>&1 || echo '[boot] migrate deploy failed; starting API anyway' ; npm run start"

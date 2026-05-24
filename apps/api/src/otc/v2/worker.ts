@@ -33,43 +33,80 @@ let liquidityInterval:  ReturnType<typeof setInterval> | null = null
 let isRunning = false
 
 // ── Boot ───────────────────────────────────────────────────────────────
+// Boots the engine. If it can't load assets on first try (e.g., DB
+// not ready yet, or transient connection issue), it backs off and
+// retries up to 5 times before giving up — previously a single boot
+// failure left the worker permanently dead until the next deploy.
 export async function startOtcV2Worker(): Promise<void> {
   if (isRunning) return
   isRunning = true
 
   console.log('[otc-v2] booting…')
-  try {
-    const configs = await loadAssetConfigs()
-    if (configs.length === 0) {
-      console.warn('[otc-v2] no assets in otc_assets — nothing to drive')
-      isRunning = false
-      return
-    }
 
-    // 1. Bootstrap historical candles (first deploy only — idempotent)
+  let configs: OtcAssetConfig[] = []
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      configs = await loadAssetConfigs()
+      if (configs.length > 0) break
+      console.warn(`[otc-v2] attempt ${attempt}: otc_assets returned 0 rows`)
+
+      // First time we see an empty table, try to self-heal by inserting
+      // the canonical 5 launch assets. This decouples the engine from
+      // the migrate-deploy pipeline — if migrations never ran (e.g.,
+      // schema initialized via `db push`, no _prisma_migrations table),
+      // the worker will still come up on its own. Idempotent via
+      // ON CONFLICT DO NOTHING.
+      if (attempt === 1) {
+        try {
+          await selfHealSeed()
+          console.warn('[otc-v2] inline seed attempted — will retry loadAssetConfigs')
+        } catch (err) {
+          console.error('[otc-v2] inline seed failed:', err)
+        }
+      }
+    } catch (err) {
+      console.error(`[otc-v2] attempt ${attempt}: loadAssetConfigs failed`, err)
+    }
+    await new Promise(r => setTimeout(r, attempt * 2_000))
+  }
+
+  if (configs.length === 0) {
+    console.error('[otc-v2] BOOT GAVE UP — no assets loaded after 5 attempts. Routes will return ASSET_NOT_FOUND until next restart.')
+    isRunning = false
+    return
+  }
+
+  try {
+    // 1. Bootstrap historical candles (first deploy only — idempotent
+    //    via per-(asset, tf) try/catch + ON CONFLICT DO NOTHING).
     await bootstrapHistoricalCandles(configs)
 
-    // 2. Hydrate in-memory state from DB
+    // 2. Hydrate in-memory state from DB. Per-asset try/catch so a
+    //    bad row for one asset doesn't strand the other four.
     const latestCandles = await loadLatestCandlePerTimeframe(configs.map(c => c.id))
     for (const cfg of configs) {
-      assetStates.set(cfg.id, buildInitialState(cfg, latestCandles))
+      try {
+        assetStates.set(cfg.id, buildInitialState(cfg, latestCandles))
 
-      // Build candle builders + seed from last candle
-      const cbs: CandleBuilder[] = []
-      for (const tf of OTC_TIMEFRAMES) {
-        const cb = new CandleBuilder(cfg.id, tf)
-        cb.seedFromCandle(latestCandles.get(`${cfg.id}:${tf}`) ?? null)
-        cbs.push(cb)
+        const cbs: CandleBuilder[] = []
+        for (const tf of OTC_TIMEFRAMES) {
+          const cb = new CandleBuilder(cfg.id, tf)
+          cb.seedFromCandle(latestCandles.get(`${cfg.id}:${tf}`) ?? null)
+          cbs.push(cb)
+        }
+        builders.set(cfg.id, cbs)
+
+        await primeCandleCache(cfg.id)
+      } catch (err) {
+        console.error(`[otc-v2] hydrate failed for ${cfg.id} — skipping`, err)
+        assetStates.delete(cfg.id)
+        builders.delete(cfg.id)
       }
-      builders.set(cfg.id, cbs)
-
-      // Preload last CANDLES_PER_TF rows into the cache for fast reads
-      await primeCandleCache(cfg.id)
     }
 
-    // 3. Start one tick interval per asset (own cadence via speedMultiplier)
+    // 3. Start one tick interval per successfully hydrated asset.
     for (const cfg of configs) {
-      startAssetLoop(cfg.id)
+      if (assetStates.has(cfg.id)) startAssetLoop(cfg.id)
     }
 
     // 4. Start the periodic flush + liquidity loops
@@ -81,9 +118,9 @@ export async function startOtcV2Worker(): Promise<void> {
       }
     }, LIQUIDITY_UPDATE_INTERVAL_MS)
 
-    console.log(`[otc-v2] running with ${configs.length} assets, ${OTC_TIMEFRAMES.length} timeframes`)
+    console.log(`[otc-v2] running with ${assetStates.size}/${configs.length} assets, ${OTC_TIMEFRAMES.length} timeframes`)
   } catch (err) {
-    console.error('[otc-v2] boot failed', err)
+    console.error('[otc-v2] post-config boot failed', err)
     isRunning = false
   }
 }
@@ -333,6 +370,44 @@ export function resetAssetState(assetId: string): boolean {
 }
 
 // ── Internals ──────────────────────────────────────────────────────────
+
+// Inserts the canonical 5 launch OTC assets if otc_assets is empty.
+// Mirrors migration 20260524155500_otc_v2_seed but runs inline at
+// engine boot so we don't depend on `prisma migrate deploy` succeeding
+// in production. Volatility values match the calibrated post-deploy
+// settings (migration 20260524182500), not the original wild defaults.
+async function selfHealSeed(): Promise<void> {
+  await prisma.$executeRaw`
+    INSERT INTO otc_assets
+      (id, symbol, name, category, enabled, paused, payout,
+       "seedPrice", "volatilityBase", "speedMultiplier",
+       "displayOrder", "createdAt", "updatedAt")
+    VALUES
+      ('eur-usd-otc', 'EUR/USD', 'EUR/USD (OTC)', 'FOREX'::"OtcCategory",       TRUE, FALSE, 85,     1.08500, 0.00010, 1.0, 1, NOW(), NOW()),
+      ('gbp-jpy-otc', 'GBP/JPY', 'GBP/JPY (OTC)', 'FOREX'::"OtcCategory",       TRUE, FALSE, 87,   198.50000, 0.00015, 1.0, 2, NOW(), NOW()),
+      ('btc-usd-otc', 'BTC/USD', 'BTC/USD (OTC)', 'CRYPTO'::"OtcCategory",      TRUE, FALSE, 82, 68000.00000, 0.00040, 1.0, 3, NOW(), NOW()),
+      ('gold-otc',    'GOLD',    'GOLD (OTC)',    'COMMODITIES'::"OtcCategory", TRUE, FALSE, 80,  2350.00000, 0.00012, 1.0, 4, NOW(), NOW()),
+      ('nasdaq-otc',  'NASDAQ',  'NASDAQ (OTC)',  'INDICES'::"OtcCategory",     TRUE, FALSE, 78, 18450.00000, 0.00010, 1.0, 5, NOW(), NOW())
+    ON CONFLICT (id) DO NOTHING
+  `
+  await prisma.$executeRaw`
+    INSERT INTO otc_market_state
+      ("assetId", "currentRegime", "regimeStartedAt", "regimeDurationS", "currentDrift", "currentVol", "trendBias", "updatedAt")
+    SELECT id, 'LATERAL'::"OtcRegime", NOW(), 60, 0, "volatilityBase", 0, NOW()
+    FROM otc_assets
+    WHERE id IN ('eur-usd-otc','gbp-jpy-otc','btc-usd-otc','gold-otc','nasdaq-otc')
+    ON CONFLICT ("assetId") DO NOTHING
+  `
+  await prisma.$executeRaw`
+    INSERT INTO otc_liquidity_state
+      ("assetId", spread, "buyPressure", "sellPressure", volume, depth, speed, "updatedAt")
+    SELECT id, 0.0001, 0.5, 0.5, 1.0, 1.0, 1.0, NOW()
+    FROM otc_assets
+    WHERE id IN ('eur-usd-otc','gbp-jpy-otc','btc-usd-otc','gold-otc','nasdaq-otc')
+    ON CONFLICT ("assetId") DO NOTHING
+  `
+}
+
 async function loadAssetConfigs(): Promise<OtcAssetConfig[]> {
   const rows = await prisma.$queryRaw<Array<{
     id: string; seedPrice: string; volatilityBase: number;
