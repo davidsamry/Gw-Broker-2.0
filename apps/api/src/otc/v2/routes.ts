@@ -81,6 +81,18 @@ export async function otcV2Routes(app: FastifyInstance) {
       : null
     const onlyTf = q.data.tf ?? null
 
+    // CORS — the SSE route writes directly to reply.raw, which bypasses
+    // Fastify's response pipeline (and therefore @fastify/cors's hook).
+    // We have to mirror the relevant headers manually or the browser's
+    // EventSource silently fails with a cross-origin error and the chart
+    // never sees a single tick (REST /candles still works on refresh,
+    // which is exactly the "carrega novas velas só ao atualizar" symptom).
+    const origin = (req.headers.origin as string | undefined) ?? ''
+    if (origin) {
+      reply.raw.setHeader('Access-Control-Allow-Origin', origin)
+      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true')
+      reply.raw.setHeader('Vary', 'Origin')
+    }
     reply.raw.setHeader('Content-Type',     'text/event-stream')
     reply.raw.setHeader('Cache-Control',    'no-cache, no-transform')
     reply.raw.setHeader('Connection',       'keep-alive')
