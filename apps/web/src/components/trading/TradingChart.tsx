@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Pencil, ZoomIn, ZoomOut, Crosshair, ChevronDown, Eye, X, Activity } from 'lucide-react'
 import { generateMockCandles, type Asset, type Candle, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { fetchBinanceCandles } from '@/lib/marketApi'
-import { fetchOtcCandles, subscribeOtcTicks } from '@/lib/otcMarket'
+import { fetchOtcCandles, subscribeOtcCandles } from '@/lib/otcMarket'
 import { getCachedCandles, setCachedCandles } from '@/lib/candleCache'
 import { subscribeKline } from '@/lib/binanceKline'
 import { cn } from '@/lib/utils'
@@ -138,11 +138,10 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
   // effect started, so without a ref it would always see the asset-switch-
   // moment value, never the "WS just arrived" updates).
   const hasFreshTickerRef = useRef(hasFreshTicker)
-  // Latest price pushed by /otc/stream — written by the SSE listener,
-  // read by the 1Hz tick interval. Null until the first tick arrives;
-  // the interval holds the last known price meanwhile so the chart
-  // doesn't blank on slow connects.
-  const otcLastTickRef = useRef<number | null>(null)
+  // (OTC v2 candle WS replaces the old per-tick ref — server pushes the
+  // full OHLC of the current bar so the chart no longer needs to track
+  // a scalar live price for OTC; the candle subscription mutates the
+  // series directly, mirroring the Binance kline path.)
 
   const [timestamp, setTimestamp] = useState('')
   const [tfIndex, setTfIndex] = useState(0)  // 1m default
@@ -276,24 +275,6 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
     hasFreshTickerRef.current = hasFreshTicker
   }, [hasFreshTicker])
 
-  // ── OTC live-tick subscription ───────────────────────────────────────────
-  // Opens a single SSE connection per asset switch (filtered server-side to
-  // just this asset's id). Writes the latest price into otcLastTickRef,
-  // which the chart's 1Hz draw loop reads. Reset to null on switch so the
-  // previous asset's stale price doesn't bleed into the new chart.
-  // Skipped for BINANCE — those have their own external WS feed.
-  useEffect(() => {
-    if (asset.source === 'BINANCE') return
-    otcLastTickRef.current = null
-    const unsubscribe = subscribeOtcTicks(asset.id, (tick) => {
-      otcLastTickRef.current = tick.price
-    })
-    return () => {
-      unsubscribe()
-      otcLastTickRef.current = null
-    }
-  }, [asset.id, asset.source])
-
   useEffect(() => {
     const updateTimestamp = () => {
       // UTC-3 fixo (horário de Brasília), independente do timezone do sistema
@@ -370,6 +351,7 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
     let disposed = false
     let priceInterval: ReturnType<typeof setInterval> | undefined
     let klineUnsub: (() => void) | undefined
+    let otcCandleUnsub: (() => void) | undefined
 
     async function initChart() {
       if (!chartContainerRef.current || disposed) return
@@ -448,14 +430,12 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           }
         }
       } else if (asset.source !== 'BINANCE') {
-        // OTC live feed: pull derived candles from the server. The endpoint
-        // returns epoch seconds in UTC; the chart axis runs on BRT so we
-        // shift here, mirroring what the Binance branch does.
-        // If the server has no ticks yet (fresh deploy, asset just enabled),
-        // fall back to the mock series so the chart isn't blank — the next
-        // SSE tick will start mutating it.
+        // OTC v2 engine: server owns the candle history. Fetch the last
+        // 3000 bars from the in-memory ring buffer (no DB hit on the API
+        // side either). Mock fallback kept only for the rare case the
+        // engine isn't up yet — once running it always has 3000 bars.
         try {
-          const remoteCandles = await fetchOtcCandles(asset.id, selectedTf.seconds, 150)
+          const remoteCandles = await fetchOtcCandles(asset.id, selectedTf.seconds, 3000)
           if (disposed) return
           if (remoteCandles.length > 0) {
             candles = remoteCandles.map((c) => ({ ...c, time: c.time + BRT_OFFSET }))
@@ -689,54 +669,9 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
         // there's nothing for the interval to synthesise. It just bookkeeps
         // the countdown timer + overlay coordinates further down.
         //
-        // For OTC assets, the local interval is still the price engine:
-        // reads the SSE-pushed tick, advances candleStart period-by-period
-        // (gap-fill at prevClose for visual continuity), mutates the
-        // current candle.
-        if (asset.source !== 'BINANCE') {
-          const decimals = price > 10 ? 3 : 5
-          const fmt5 = (v: number) => parseFloat(v.toFixed(decimals))
-
-          if (otcLastTickRef.current != null) {
-            price = fmt5(otcLastTickRef.current)
-          }
-
-          if (now >= candleStart + tfSec) {
-            const prevClose = lastTickPrice  // close of the just-finished candle
-            let fills = 0
-            while (now >= candleStart + tfSec && fills < 5) {
-              candleStart += tfSec
-              if (now >= candleStart + tfSec) {
-                if (chartType === 'area') {
-                  mainSeries.update({ time: candleStart, value: prevClose })
-                } else {
-                  mainSeries.update({ time: candleStart, open: prevClose, high: prevClose, low: prevClose, close: prevClose })
-                }
-                fills++
-              }
-            }
-            if (now >= candleStart + tfSec) {
-              candleStart = alignedStart(now)
-            }
-            candleOpen = prevClose
-            candleHigh = prevClose
-            candleLow  = prevClose
-          }
-
-          candleHigh = Math.max(candleHigh, price)
-          candleLow  = Math.min(candleLow,  price)
-          lastTickPrice = price
-
-          const candle = { time: candleStart, open: candleOpen, high: candleHigh, low: candleLow, close: price }
-          if (chartType === 'area') {
-            mainSeries.update({ time: candleStart, value: price })
-          } else if (chartType === 'heiken-ashi') {
-            const haClose = fmt5((candleOpen + candleHigh + candleLow + price) / 4)
-            mainSeries.update({ ...candle, close: haClose })
-          } else {
-            mainSeries.update(candle)
-          }
-        }
+        // OTC v2 mirrors the Binance path: the server's candle stream
+        // (subscribed below) pushes full OHLC updates. Nothing for the
+        // interval to do for OTC either.
 
         // ── COMMON: auto-scroll, countdown timer, overlay coords ─────────
         if (autoScrollRef.current && chartRef.current) {
@@ -792,6 +727,32 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           }
         })
       }
+
+      // ── OTC v2 candle stream — real server OHLC, no synthesis ──────────
+      // For the 5 OTC assets, the API engine pushes the full current bar
+      // plus every rollover via SSE. Same shape as the Binance kline
+      // handler, just different source.
+      if (asset.source !== 'BINANCE') {
+        otcCandleUnsub = subscribeOtcCandles(asset.id, selectedTf.seconds, (c) => {
+          if (disposed) return
+          const time = Math.floor(c.openTime / 1000) + BRT_OFFSET
+          price        = c.close
+          candleStart  = time
+          candleOpen   = c.open
+          candleHigh   = c.high
+          candleLow    = c.low
+          lastTickPrice = c.close
+
+          if (chartType === 'area') {
+            mainSeries.update({ time, value: c.close })
+          } else if (chartType === 'heiken-ashi') {
+            const haClose = parseFloat(((c.open + c.high + c.low + c.close) / 4).toFixed(5))
+            mainSeries.update({ time, open: c.open, high: c.high, low: c.low, close: haClose })
+          } else {
+            mainSeries.update({ time, open: c.open, high: c.high, low: c.low, close: c.close })
+          }
+        })
+      }
     }
 
     initChart()
@@ -810,6 +771,7 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
       disposed = true
       if (priceInterval) clearInterval(priceInterval)
       if (klineUnsub) klineUnsub()
+      if (otcCandleUnsub) otcCandleUnsub()
       resizeObserver.disconnect()
       seriesRef.current = null
       setChartReady(false)
