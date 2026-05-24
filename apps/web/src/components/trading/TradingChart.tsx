@@ -431,11 +431,12 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
         }
       } else if (asset.source !== 'BINANCE') {
         // OTC v2 engine: server owns the candle history. Fetch the last
-        // 3000 bars from the in-memory ring buffer (no DB hit on the API
-        // side either). Mock fallback kept only for the rare case the
-        // engine isn't up yet — once running it always has 3000 bars.
+        // 1000 bars from the in-memory ring buffer (no DB hit on the API
+        // side either). Keeps the initial payload small (~80KB) so the
+        // chart paints fast even on mobile data. Server keeps 3000 in
+        // cache for ops resolution and future scrollback expansion.
         try {
-          const remoteCandles = await fetchOtcCandles(asset.id, selectedTf.seconds, 3000)
+          const remoteCandles = await fetchOtcCandles(asset.id, selectedTf.seconds, 1000)
           if (disposed) return
           if (remoteCandles.length > 0) {
             candles = remoteCandles.map((c) => ({ ...c, time: c.time + BRT_OFFSET }))

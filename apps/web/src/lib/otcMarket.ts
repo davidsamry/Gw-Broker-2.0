@@ -25,7 +25,11 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 export async function fetchOtcCandles(
   assetId: string,
   tf: number,
-  limit = 3000,
+  // 1000 keeps the initial payload around 80KB (vs 240KB for 3000) —
+  // enough scrollback for chart analysis without blocking first paint.
+  // Server cap stays at 3000 so we can bump this back later without
+  // redeploying the engine.
+  limit = 1000,
 ): Promise<Candle[]> {
   const { data } = await api.get<{ candles: Candle[] }>(`/otc/v2/candles/${assetId}`, {
     params: { tf, limit },
