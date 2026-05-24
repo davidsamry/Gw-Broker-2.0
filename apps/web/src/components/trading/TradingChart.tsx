@@ -597,7 +597,26 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         const nextPrice = asset.source === 'BINANCE' ? liveDisplayPrice : price
 
         if (asset.source === 'BINANCE') {
-          price = fmt5(nextPrice)
+          // Guard against stale ticker values. When the user switches asset
+          // (e.g., BTC → SOL), useBinanceTicker takes 200-500ms to close the
+          // old WS and receive the first tick on the new one. In that window
+          // displayPriceRef.current can still hold the previous asset's
+          // price, which would draw a wick out of scale on the new chart.
+          //
+          // If the reported live price is more than 50% off from the chart's
+          // last known good `price`, skip this tick — the next valid update
+          // from the WS will correct within ~1s. 50% is generous enough for
+          // any real intraday move but tight enough to catch cross-asset
+          // contamination (SOL ~86, BTC ~77000, ETH ~3500 etc.).
+          if (price > 0 && nextPrice > 0) {
+            const ratio = nextPrice / price
+            if (ratio > 0.5 && ratio < 2) {
+              price = fmt5(nextPrice)
+            }
+            // else: keep `price` as-is, wait for the next sane tick
+          } else {
+            price = fmt5(nextPrice)
+          }
         } else {
           // OTC live stream: read the latest SSE-pushed tick. If we haven't
           // received one yet (cold start / network blip), hold the last
