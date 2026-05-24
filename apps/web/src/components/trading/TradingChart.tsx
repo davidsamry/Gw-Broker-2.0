@@ -600,6 +600,11 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       let candleHigh = price
       let candleLow = price
       let lastSecsLeft = -1
+      // Tracks the previous tick's price — used by the gap-fill loop to keep
+      // emitted "flat" candles at the SAME price level as the last visible
+      // close (continuous line), not at whatever the live price happens to
+      // be (which would create a visible wick at the gap boundary).
+      let lastTickPrice = price
 
       // Re-anchor displayPriceRef to the freshly-fetched close. Without this,
       // an asset switch (e.g., BTC → SOL) leaves the ref holding the previous
@@ -650,30 +655,51 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
           }
         }
 
-        candleHigh = Math.max(candleHigh, price)
-        candleLow = Math.min(candleLow, price)
-
-        // Advance candleStart minute-by-minute, NOT in a single jump. The
-        // old `Math.max(candleStart + tfSec, alignedStart(now))` skipped
-        // every intermediate period, leaving a visual gap whenever a tick
-        // landed > 1 tfSec past the last candle (asset switch / tab
-        // throttle / slow fetch). Now we emit a flat placeholder for each
-        // missed period; the next real tick mutates the current one.
-        while (now >= candleStart + tfSec) {
-          candleStart += tfSec
-          candleOpen = price
-          candleHigh = price
-          candleLow = price
-          // If we still have more periods to advance through, persist this
-          // one as a flat candle so the series stays continuous on screen.
-          if (now >= candleStart + tfSec) {
-            if (chartType === 'area') {
-              mainSeries.update({ time: candleStart, value: price })
-            } else {
-              mainSeries.update({ time: candleStart, open: price, high: price, low: price, close: price })
+        // Gap-fill: when a tick lands more than one tfSec past the current
+        // candleStart (asset switch / tab throttle / slow fetch), advance
+        // period by period instead of jumping straight to alignedStart(now).
+        //
+        // Key detail — each intermediate flat candle is drawn at
+        // `prevClose` (the close of the candle that was just visible),
+        // NOT at the new live `price`. Using the live price would create
+        // a visible vertical drop/spike at the gap boundary (the very wick
+        // the user kept seeing). At `prevClose` the series stays a flat
+        // line until the current period, where the live tick takes over.
+        //
+        // Cap fill at 5 periods — defensive against pathologically large
+        // gaps (browser tab paused for hours). Beyond that we jump like
+        // the old code did; a 5-bar flat tail at a stale price is fine,
+        // 60+ would look ridiculous.
+        if (now >= candleStart + tfSec) {
+          const prevClose = lastTickPrice  // close of the just-finished candle
+          let fills = 0
+          while (now >= candleStart + tfSec && fills < 5) {
+            candleStart += tfSec
+            if (now >= candleStart + tfSec) {
+              if (chartType === 'area') {
+                mainSeries.update({ time: candleStart, value: prevClose })
+              } else {
+                mainSeries.update({ time: candleStart, open: prevClose, high: prevClose, low: prevClose, close: prevClose })
+              }
+              fills++
             }
           }
+          // If we hit the cap, snap to current period without further fills.
+          if (now >= candleStart + tfSec) {
+            candleStart = alignedStart(now)
+          }
+          // Open the new current candle at prevClose so the live tick
+          // transitions smoothly into the real movement.
+          candleOpen = prevClose
+          candleHigh = prevClose
+          candleLow  = prevClose
         }
+
+        // Now extend high/low for the current (post-rollover or unchanged)
+        // candle with the latest price.
+        candleHigh = Math.max(candleHigh, price)
+        candleLow  = Math.min(candleLow,  price)
+        lastTickPrice = price
 
         const candle = { time: candleStart, open: candleOpen, high: candleHigh, low: candleLow, close: price }
 
