@@ -14,6 +14,15 @@ import { publishCandle, publishTick } from './events.js'
 
 const TICK_FLUSH_INTERVAL_MS      = 1_000   // batched tick INSERTs
 const LIQUIDITY_UPDATE_INTERVAL_MS = 10_000
+// How often the in-memory regime + liquidity + trendBias get persisted
+// to otc_market_state / otc_liquidity_state. The interval is short
+// enough that a deploy loses < 5 seconds of evolution; long enough that
+// we don't hammer the DB with redundant writes.
+const STATE_FLUSH_INTERVAL_MS      = 5_000
+// How long to suppress random spikes after boot so the first tick post-
+// restart doesn't accidentally introduce a discontinuity that the user
+// would read as "the engine snapped to a new price on deploy".
+const BOOT_SPIKE_GRACE_MS          = 10_000
 
 // ── In-memory state ────────────────────────────────────────────────────
 const assetStates = new Map<string, OtcAssetState>()
@@ -30,7 +39,9 @@ const pendingCandles: OtcCandle[] = []
 let tickIntervals:      Array<ReturnType<typeof setInterval>> = []
 let flushInterval:      ReturnType<typeof setInterval> | null = null
 let liquidityInterval:  ReturnType<typeof setInterval> | null = null
+let stateFlushInterval: ReturnType<typeof setInterval> | null = null
 let isRunning = false
+let bootedAt = 0
 
 // ── Boot ───────────────────────────────────────────────────────────────
 // Boots the engine. If it can't load assets on first try (e.g., DB
@@ -82,11 +93,28 @@ export async function startOtcV2Worker(): Promise<void> {
     await bootstrapHistoricalCandles(configs)
 
     // 2. Hydrate in-memory state from DB. Per-asset try/catch so a
-    //    bad row for one asset doesn't strand the other four.
+    //    bad row for one asset doesn't strand the other four. ALSO
+    //    backfills any candle slots that elapsed during the downtime
+    //    so the chart resumes without a time gap.
     const latestCandles = await loadLatestCandlePerTimeframe(configs.map(c => c.id))
+    const persistedStates = await loadPersistedRuntimeStates(configs.map(c => c.id))
     for (const cfg of configs) {
       try {
-        assetStates.set(cfg.id, buildInitialState(cfg, latestCandles))
+        // Backfill missing candles BEFORE seeding builders, so they
+        // pick up the freshly-inserted "downtime" slot as their state.
+        const last60 = latestCandles.get(`${cfg.id}:60`)
+        if (last60) {
+          await backfillMissingCandles(cfg, last60)
+          // Re-read latest after backfill so builder seeds match DB.
+          const refreshed = await loadLatestCandlePerTimeframe([cfg.id])
+          for (const tf of OTC_TIMEFRAMES) {
+            const k = `${cfg.id}:${tf}`
+            const c = refreshed.get(k)
+            if (c) latestCandles.set(k, c)
+          }
+        }
+
+        assetStates.set(cfg.id, buildInitialState(cfg, latestCandles, persistedStates.get(cfg.id)))
 
         const cbs: CandleBuilder[] = []
         for (const tf of OTC_TIMEFRAMES) {
@@ -110,6 +138,7 @@ export async function startOtcV2Worker(): Promise<void> {
     }
 
     // 4. Start the periodic flush + liquidity loops
+    bootedAt = Date.now()
     flushInterval = setInterval(flushPending, TICK_FLUSH_INTERVAL_MS)
     liquidityInterval = setInterval(() => {
       for (const state of assetStates.values()) {
@@ -117,6 +146,10 @@ export async function startOtcV2Worker(): Promise<void> {
         stepLiquidity(state)
       }
     }, LIQUIDITY_UPDATE_INTERVAL_MS)
+    // Persist regime + liquidity + trendBias so the next boot can
+    // resume without resetting momentum. Survives `prisma migrate
+    // deploy` because we never truncate these tables.
+    stateFlushInterval = setInterval(flushRuntimeState, STATE_FLUSH_INTERVAL_MS)
 
     console.log(`[otc-v2] running with ${assetStates.size}/${configs.length} assets, ${OTC_TIMEFRAMES.length} timeframes`)
   } catch (err) {
@@ -125,13 +158,27 @@ export async function startOtcV2Worker(): Promise<void> {
   }
 }
 
+// Returns ms since boot — used by stepPrice() to suppress spikes during
+// the grace window so the first ticks after restart can't introduce a
+// visible discontinuity in the chart.
+export function msSinceBoot(): number {
+  return bootedAt === 0 ? Number.MAX_SAFE_INTEGER : Date.now() - bootedAt
+}
+
+export function isWithinBootGrace(): boolean {
+  return msSinceBoot() < BOOT_SPIKE_GRACE_MS
+}
+
 export function stopOtcV2Worker(): void {
   for (const it of tickIntervals) clearInterval(it)
   tickIntervals = []
-  if (flushInterval)     { clearInterval(flushInterval);     flushInterval = null     }
-  if (liquidityInterval) { clearInterval(liquidityInterval); liquidityInterval = null }
-  // Flush remaining writes on shutdown
+  if (flushInterval)      { clearInterval(flushInterval);      flushInterval      = null }
+  if (liquidityInterval)  { clearInterval(liquidityInterval);  liquidityInterval  = null }
+  if (stateFlushInterval) { clearInterval(stateFlushInterval); stateFlushInterval = null }
+  // Final flush of both candle-level data AND runtime state, so a
+  // graceful shutdown loses zero context for the next boot.
   void flushPending()
+  void flushRuntimeState()
   isRunning = false
 }
 
@@ -146,6 +193,10 @@ function startAssetLoop(assetId: string): void {
     if (!s || !s.config.enabled || s.config.paused) return
 
     const now = Date.now()
+    // Tag the boot grace window — stepPrice reads s.bootGrace to skip
+    // its random-spike branch during the first BOOT_SPIKE_GRACE_MS so
+    // the first post-restart candle never introduces a fake jump.
+    s.bootGrace = isWithinBootGrace()
     maybeTransitionRegime(s, now)
 
     const price = stepPrice(s)
@@ -428,26 +479,249 @@ async function loadAssetConfigs(): Promise<OtcAssetConfig[]> {
   }))
 }
 
-function buildInitialState(cfg: OtcAssetConfig, latestCandles: Map<string, OtcCandle | null>): OtcAssetState {
-  // Resume from the latest candle's close so a restart doesn't snap
-  // back to seedPrice (and create a discontinuity for users).
+// Stateful resume: prefers the persisted runtime state (regime,
+// liquidity, trendBias) over default values so a restart picks up
+// exactly where the previous engine left off. Falls back to defaults
+// only when there's no row in otc_market_state / otc_liquidity_state
+// (first boot ever for this asset, or fresh DB).
+function buildInitialState(
+  cfg:             OtcAssetConfig,
+  latestCandles:   Map<string, OtcCandle | null>,
+  persisted?:      PersistedRuntimeState,
+): OtcAssetState {
+  // Resume price from the latest candle's close — same as before.
   const lastTfCandle = latestCandles.get(`${cfg.id}:60`) ?? null
   const startPrice = lastTfCandle ? lastTfCandle.close : cfg.seedPrice
-  const initialRegime: OtcRegime = 'LATERAL'
+
+  // Regime — if we have a persisted regime and it hasn't run out of
+  // duration during the downtime, keep it. Otherwise enter LATERAL
+  // (the FSM will transition naturally).
+  let regime: OtcRegime = 'LATERAL'
+  let regimeStartedAt   = Date.now()
+  let regimeDurationMs  = pickRegimeDurationMs(regime)
+  if (persisted?.regime && persisted.regimeStartedAt) {
+    const elapsed = Date.now() - persisted.regimeStartedAt.getTime()
+    const remaining = (persisted.regimeDurationS ?? 60) * 1000 - elapsed
+    if (remaining > 5_000) {
+      // Regime still has > 5s left — resume it with the remaining time.
+      regime           = persisted.regime
+      regimeStartedAt  = persisted.regimeStartedAt.getTime()
+      regimeDurationMs = (persisted.regimeDurationS ?? 60) * 1000
+    }
+  }
+
   return {
     config:           cfg,
     price:            startPrice,
     smoothedPrice:    startPrice,
-    regime:           initialRegime,
-    regimeStartedAt:  Date.now(),
-    regimeDurationMs: pickRegimeDurationMs(initialRegime),
-    spread:           0.0001,
-    buyPressure:      0.5,
-    sellPressure:     0.5,
-    volume:           1.0,
-    depth:            1.0,
-    speed:            1.0,
-    trendBias:        0,
+    regime,
+    regimeStartedAt,
+    regimeDurationMs,
+    spread:           persisted?.spread       ?? 0.0001,
+    buyPressure:      persisted?.buyPressure  ?? 0.5,
+    sellPressure:     persisted?.sellPressure ?? 0.5,
+    volume:           persisted?.volume       ?? 1.0,
+    depth:            persisted?.depth        ?? 1.0,
+    speed:            persisted?.speed        ?? 1.0,
+    trendBias:        persisted?.trendBias    ?? 0,
+  }
+}
+
+// What we read out of otc_market_state + otc_liquidity_state at boot.
+// All fields optional because either table might be missing rows for a
+// brand-new asset.
+interface PersistedRuntimeState {
+  regime?:          OtcRegime
+  regimeStartedAt?: Date
+  regimeDurationS?: number
+  trendBias?:       number
+  spread?:          number
+  buyPressure?:     number
+  sellPressure?:    number
+  volume?:          number
+  depth?:           number
+  speed?:           number
+}
+
+async function loadPersistedRuntimeStates(assetIds: string[]): Promise<Map<string, PersistedRuntimeState>> {
+  const out = new Map<string, PersistedRuntimeState>()
+  if (assetIds.length === 0) return out
+  try {
+    const ms = await prisma.$queryRaw<Array<{
+      assetId: string; currentRegime: OtcRegime;
+      regimeStartedAt: Date; regimeDurationS: number;
+      trendBias: number;
+    }>>`
+      SELECT "assetId", "currentRegime", "regimeStartedAt",
+             "regimeDurationS", "trendBias"
+      FROM otc_market_state
+      WHERE "assetId" = ANY(${assetIds}::text[])
+    `
+    for (const r of ms) {
+      out.set(r.assetId, {
+        regime:          r.currentRegime,
+        regimeStartedAt: r.regimeStartedAt,
+        regimeDurationS: r.regimeDurationS,
+        trendBias:       r.trendBias,
+      })
+    }
+    const ls = await prisma.$queryRaw<Array<{
+      assetId: string; spread: number; buyPressure: number; sellPressure: number;
+      volume: number; depth: number; speed: number;
+    }>>`
+      SELECT "assetId", spread, "buyPressure", "sellPressure",
+             volume, depth, speed
+      FROM otc_liquidity_state
+      WHERE "assetId" = ANY(${assetIds}::text[])
+    `
+    for (const r of ls) {
+      const existing = out.get(r.assetId) ?? {}
+      out.set(r.assetId, {
+        ...existing,
+        spread:       r.spread,
+        buyPressure:  r.buyPressure,
+        sellPressure: r.sellPressure,
+        volume:       r.volume,
+        depth:        r.depth,
+        speed:        r.speed,
+      })
+    }
+  } catch (err) {
+    console.error('[otc-v2] loadPersistedRuntimeStates failed — defaults will be used', err)
+  }
+  return out
+}
+
+// Periodic snapshot of every asset's regime + liquidity + trendBias.
+// Runs every STATE_FLUSH_INTERVAL_MS; cheap (one row per table per
+// asset, UPSERTed). Survives `prisma migrate deploy` because nothing
+// truncates these tables.
+async function flushRuntimeState(): Promise<void> {
+  for (const s of assetStates.values()) {
+    try {
+      await prisma.$executeRaw`
+        INSERT INTO otc_market_state
+          ("assetId", "currentRegime", "regimeStartedAt", "regimeDurationS",
+           "currentDrift", "currentVol", "trendBias", "updatedAt")
+        VALUES (
+          ${s.config.id},
+          ${s.regime}::"OtcRegime",
+          ${new Date(s.regimeStartedAt)},
+          ${Math.floor(s.regimeDurationMs / 1000)},
+          0,
+          ${s.config.volatilityBase},
+          ${s.trendBias},
+          NOW()
+        )
+        ON CONFLICT ("assetId") DO UPDATE SET
+          "currentRegime"   = EXCLUDED."currentRegime",
+          "regimeStartedAt" = EXCLUDED."regimeStartedAt",
+          "regimeDurationS" = EXCLUDED."regimeDurationS",
+          "currentVol"      = EXCLUDED."currentVol",
+          "trendBias"       = EXCLUDED."trendBias",
+          "updatedAt"       = NOW()
+      `
+      await prisma.$executeRaw`
+        INSERT INTO otc_liquidity_state
+          ("assetId", spread, "buyPressure", "sellPressure",
+           volume, depth, speed, "updatedAt")
+        VALUES (
+          ${s.config.id},
+          ${s.spread}, ${s.buyPressure}, ${s.sellPressure},
+          ${s.volume}, ${s.depth}, ${s.speed},
+          NOW()
+        )
+        ON CONFLICT ("assetId") DO UPDATE SET
+          spread         = EXCLUDED.spread,
+          "buyPressure"  = EXCLUDED."buyPressure",
+          "sellPressure" = EXCLUDED."sellPressure",
+          volume         = EXCLUDED.volume,
+          depth          = EXCLUDED.depth,
+          speed          = EXCLUDED.speed,
+          "updatedAt"    = NOW()
+      `
+    } catch (err) {
+      console.error(`[otc-v2] flushRuntimeState failed for ${s.config.id}`, err)
+    }
+  }
+}
+
+// After downtime, generate placeholder candles for the slots that
+// elapsed between `lastCandle.openTime` and the current slot, walking
+// gently from `lastCandle.close`. Without this, the chart shows an
+// empty gap (visible blank space between left and right candle
+// clusters) for the entire downtime duration.
+//
+// Bounded to MAX_BACKFILL_SLOTS per timeframe so a long outage (hours)
+// doesn't choke the boot with tens of thousands of inserts. Beyond the
+// cap, we just leave the gap — the user can scroll past it.
+const MAX_BACKFILL_SLOTS = 600   // ~10 min for tf=1s, ~10h for tf=60s
+async function backfillMissingCandles(asset: OtcAssetConfig, last60: OtcCandle): Promise<void> {
+  for (const tf of OTC_TIMEFRAMES) {
+    try {
+      const tfMs = tf * 1000
+      const nowSlot = Math.floor(Date.now() / tfMs) * tfMs
+
+      // Find the latest stored candle for this specific tf, not just tf=60.
+      const rows = await prisma.$queryRaw<Array<{ openTime: Date; closePrice: string }>>`
+        SELECT "openTime", "closePrice"::text
+        FROM otc_candles
+        WHERE "assetId" = ${asset.id} AND timeframe = ${tf}
+        ORDER BY "openTime" DESC
+        LIMIT 1
+      `
+      const lastOpen = rows[0]?.openTime?.getTime() ?? (last60.openTime.getTime())
+      const lastClose = rows[0] ? Number(rows[0].closePrice) : last60.close
+
+      const gapMs = nowSlot - lastOpen - tfMs
+      if (gapMs <= 0) continue
+      const missingSlots = Math.min(MAX_BACKFILL_SLOTS, Math.floor(gapMs / tfMs))
+      if (missingSlots <= 0) continue
+
+      // Walk softly from lastClose — very small per-candle variance so
+      // the downtime stretch looks like a calm holding pattern, not a
+      // rally. Bounded by ±0.5% of seed over the whole backfill.
+      const maxStep = asset.volatilityBase * 0.5
+      let price = lastClose
+      const rowsToInsert: Array<{
+        openTime: Date; openPrice: number; highPrice: number;
+        lowPrice: number; closePrice: number;
+      }> = []
+      for (let i = 1; i <= missingSlots; i++) {
+        const openTime = new Date(lastOpen + i * tfMs)
+        const open = price
+        const change = (Math.random() - 0.5) * 2 * maxStep
+        const close = price * (1 + change)
+        const high  = Math.max(open, close) * (1 + Math.abs(Math.random()) * maxStep * 0.5)
+        const low   = Math.min(open, close) * (1 - Math.abs(Math.random()) * maxStep * 0.5)
+        rowsToInsert.push({ openTime, openPrice: open, highPrice: high, lowPrice: low, closePrice: close })
+        price = close
+      }
+
+      // Batched insert (500/batch — same cap as bootstrap).
+      const BATCH = 500
+      for (let i = 0; i < rowsToInsert.length; i += BATCH) {
+        const chunk  = rowsToInsert.slice(i, i + BATCH)
+        const values = chunk.map(r => Prisma.sql`(
+          ${asset.id}, ${tf}, ${r.openTime},
+          ${round5(r.openPrice)}, ${round5(r.highPrice)},
+          ${round5(r.lowPrice)},  ${round5(r.closePrice)},
+          ${Math.max(1, tf * 10)}, ${r.openTime}
+        )`)
+        await prisma.$executeRaw`
+          INSERT INTO otc_candles
+            ("assetId", timeframe, "openTime", "openPrice", "highPrice",
+             "lowPrice", "closePrice", "tickCount", "finalizedAt")
+          VALUES ${Prisma.join(values, ', ')}
+          ON CONFLICT ("assetId", timeframe, "openTime") DO NOTHING
+        `
+      }
+      if (rowsToInsert.length > 0) {
+        console.log(`[otc-v2] backfilled ${asset.id} tf=${tf}: ${rowsToInsert.length} slots`)
+      }
+    } catch (err) {
+      console.error(`[otc-v2] backfillMissingCandles failed for ${asset.id} tf=${tf}`, err)
+    }
   }
 }
 

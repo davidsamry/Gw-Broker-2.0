@@ -190,8 +190,12 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
   const liquidityBias = 0.5 * (s.buyPressure - s.sellPressure) * effectiveVol
   // Spike: rare news-event-style discontinuity. Frequency cut in half
   // (0.001 → 0.0005) and magnitude halved (3× → 1.5×) so spikes are
-  // visible but no longer dominate the chart.
-  const spike        = rand() < 0.0005 ? (rand() > 0.5 ? 1 : -1) * 1.5 * effectiveVol : 0
+  // visible but no longer dominate the chart. Disabled during the
+  // boot grace window so the first ticks after restart never introduce
+  // a discontinuity that would look like a deploy-time gap to the user.
+  const spike        = !s.bootGrace && rand() < 0.0005
+    ? (rand() > 0.5 ? 1 : -1) * 1.5 * effectiveVol
+    : 0
 
   const rawNext = s.price * (1 + drift + reversion + shock + liquidityBias + spike)
   // Catastrophic protection — never wander beyond half/double the seed.

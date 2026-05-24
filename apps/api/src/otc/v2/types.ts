@@ -43,6 +43,11 @@ export interface OtcAssetState {
   speed:           number    // multiplies tick rate
   // Admin overrides (set via /admin/otc endpoints in Etapa 6)
   trendBias:       number    // -1..+1, added to drift
+  // True for the first few seconds after engine boot — stepPrice() uses
+  // it to suppress the random spike branch so the first post-restart
+  // candles can't introduce a visible discontinuity. Flipped to false
+  // by the worker once BOOT_SPIKE_GRACE_MS elapses.
+  bootGrace?:      boolean
 }
 
 // Output of one engine step. Worker feeds this into candle builders +
