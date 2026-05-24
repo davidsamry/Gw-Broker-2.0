@@ -6,7 +6,6 @@ import {
   ChevronRight, Landmark, Zap, ChevronLeft, Plus, ArrowDownLeft, ArrowUpRight,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { AnalisePage } from '@/components/analise/AnalisePage'
 import { useAuthStore, type KycSubmission as KycSub } from '@/store/auth'
 import { useWithdrawalsStore, type ApiWithdrawal, type WithdrawalMethod } from '@/store/withdrawals'
 import { useTransactionsStore, type TransactionType } from '@/store/transactions'
@@ -16,16 +15,13 @@ import { api } from '@/lib/api'
 import { TwoFactorSetup } from '@/components/admin/TwoFactorSetup'
 import { KycUploadModal } from '@/components/conta/KycUploadModal'
 
-type ContaTab = 'retirada' | 'transacoes' | 'operacoes' | 'minha-conta' | 'mercado' | 'torneios' | 'analise'
+type ContaTab = 'retirada' | 'transacoes' | 'operacoes' | 'minha-conta'
 
 const CONTA_TABS: { key: ContaTab; label: string }[] = [
   { key: 'retirada', label: 'Retirada' },
   { key: 'transacoes', label: 'Transações' },
   { key: 'operacoes', label: 'Operações' },
   { key: 'minha-conta', label: 'Minha Conta' },
-  { key: 'mercado', label: 'Mercado' },
-  { key: 'torneios', label: 'Torneios' },
-  { key: 'analise', label: 'Análise' },
 ]
 
 const FAQ_RETIRADA = [
@@ -1160,19 +1156,10 @@ export function ContaPage({ initialTab = 'minha-conta', onClose }: { initialTab?
 
 
       {/* Tab content */}
-      {activeTab === 'retirada' && <RetiradaTab />}
-      {activeTab === 'transacoes' && <TransacoesTab />}
-      {activeTab === 'operacoes' && <OperacoesTab />}
-
+      {activeTab === 'retirada'    && <RetiradaTab />}
+      {activeTab === 'transacoes'  && <TransacoesTab />}
+      {activeTab === 'operacoes'   && <OperacoesTab />}
       {activeTab === 'minha-conta' && <MinhaContaTab />}
-
-      {activeTab === 'analise' && <AnalisePage />}
-
-      {activeTab !== 'minha-conta' && activeTab !== 'retirada' && activeTab !== 'transacoes' && activeTab !== 'operacoes' && activeTab !== 'analise' && (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-sm text-[#8b8f9a]">Em breve</p>
-        </div>
-      )}
 
     </div>
   )
