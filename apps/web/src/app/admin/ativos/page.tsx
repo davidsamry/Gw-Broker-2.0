@@ -11,18 +11,22 @@ import { cn } from '@/lib/utils'
 type AssetCategory = 'OPEN_MARKET' | 'OTC' | 'CRYPTO'
 
 interface AssetRow {
-  id:           string
-  symbol:       string
-  name:         string
-  category:     AssetCategory
-  payout:       number
-  enabled:      boolean
-  code1:        string | null
-  code2:        string | null
-  marketSymbol: string | null
-  displayOrder: number
-  createdAt:    string
-  updatedAt:    string
+  id:             string
+  symbol:         string
+  name:           string
+  category:       AssetCategory
+  payout:         number
+  enabled:        boolean
+  code1:          string | null
+  code2:          string | null
+  marketSymbol:   string | null
+  displayOrder:   number
+  // OTC pricing controls (relevant only for OTC assets — marketSymbol null)
+  seedPrice:      string | null
+  volatility:     number
+  tickIntervalMs: number
+  createdAt:      string
+  updatedAt:      string
 }
 
 interface Counts {
@@ -292,6 +296,12 @@ export default function AdminAssetsPage() {
 }
 
 // ── Edit modal ───────────────────────────────────────────────────────────────
+// Always edits name + payout. For OTC assets (no marketSymbol) also exposes
+// the pricing knobs the OTC worker reads: seedPrice (baseline) and
+// volatility (tick size as fraction). After saving an OTC asset, the modal
+// fires POST /admin/assets/otc-reload so the worker re-reads its cache —
+// the change takes effect on the next tick instead of needing a process
+// restart.
 function EditAssetModal({
   asset, onClose, onSaved,
 }: {
@@ -299,22 +309,56 @@ function EditAssetModal({
   onClose: () => void
   onSaved: (a: AssetRow) => void
 }) {
-  const [name, setName]     = useState(asset.name)
-  const [payout, setPayout] = useState(String(asset.payout))
-  const [saving, setSaving] = useState(false)
-  const [error, setError]   = useState('')
+  const isOtc = !asset.marketSymbol
+
+  const [name, setName]             = useState(asset.name)
+  const [payout, setPayout]         = useState(String(asset.payout))
+  const [seedPrice, setSeedPrice]   = useState(asset.seedPrice ?? '')
+  const [volatility, setVolatility] = useState(String(asset.volatility))
+  const [saving, setSaving]         = useState(false)
+  const [error, setError]           = useState('')
 
   async function submit(e: FormEvent) {
     e.preventDefault()
+    if (name.trim().length < 1) { setError('Nome obrigatório.'); return }
+
     const p = Number(payout)
-    if (!Number.isInteger(p) || p < 1 || p > 100) { setError('Payout entre 1 e 100.'); return }
-    if (name.trim().length < 1)                    { setError('Nome obrigatório.');     return }
+    if (!Number.isInteger(p) || p < 1 || p > 100) {
+      setError('Payout entre 1 e 100.'); return
+    }
+
+    // Build PATCH body. seedPrice/volatility only sent if user actually
+    // changed them — keeps validation server-side from rejecting unrelated
+    // edits when an admin clears a field by accident.
+    const body: Record<string, unknown> = { name: name.trim(), payout: p }
+    if (isOtc) {
+      const trimmedSeed = seedPrice.trim()
+      if (trimmedSeed === '') {
+        body.seedPrice = null  // explicit clear → worker skips this asset
+      } else {
+        const sp = Number(trimmedSeed.replace(',', '.'))
+        if (!Number.isFinite(sp) || sp <= 0) {
+          setError('Seed price deve ser um número positivo.'); return
+        }
+        body.seedPrice = sp
+      }
+      const v = Number(volatility.replace(',', '.'))
+      if (!Number.isFinite(v) || v < 0 || v > 0.1) {
+        setError('Volatilidade entre 0 e 0.1 (ex.: 0.0005).'); return
+      }
+      body.volatility = v
+    }
+
     setSaving(true); setError('')
     try {
-      const { data } = await api.patch(`/admin/assets/${asset.id}`, {
-        name:   name.trim(),
-        payout: p,
-      })
+      const { data } = await api.patch(`/admin/assets/${asset.id}`, body)
+      // For OTC, ping the worker so the new seed/vol take effect on next
+      // tick (otherwise the in-memory cache stays stale until restart).
+      // Best-effort — UI doesn't block on this; cache reseeds on next deploy
+      // even if the call fails.
+      if (isOtc) {
+        api.post('/admin/assets/otc-reload').catch(() => {})
+      }
       if (data?.asset) onSaved(data.asset)
       else onClose()
     } catch {
@@ -365,6 +409,44 @@ function EditAssetModal({
               className="w-full bg-[#1a1f2e] border border-[#2a2e3b] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500/40"
             />
           </div>
+
+          {isOtc && (
+            <>
+              <div className="pt-2 border-t border-[#1f232e]">
+                <div className="text-[10px] uppercase tracking-wider text-[#6b7280] font-medium mb-2">
+                  Preço OTC (motor server-side)
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-[#8b8f9a] mb-1 block">
+                    Seed price
+                    <span className="text-[10px] text-[#6b7280] ml-2">baseline do random walk; deixe vazio pra desabilitar</span>
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={seedPrice}
+                    onChange={(e) => setSeedPrice(e.target.value)}
+                    placeholder="ex.: 1.0854"
+                    className="w-full bg-[#1a1f2e] border border-[#2a2e3b] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500/40"
+                  />
+                </div>
+                <div className="mt-3">
+                  <label className="text-[11px] font-medium text-[#8b8f9a] mb-1 block">
+                    Volatilidade
+                    <span className="text-[10px] text-[#6b7280] ml-2">fração do seed por tick (0.0005 ≈ 5bp)</span>
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={volatility}
+                    onChange={(e) => setVolatility(e.target.value)}
+                    placeholder="ex.: 0.0005"
+                    className="w-full bg-[#1a1f2e] border border-[#2a2e3b] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500/40"
+                  />
+                </div>
+              </div>
+            </>
+          )}
 
           {error && (
             <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-400">
