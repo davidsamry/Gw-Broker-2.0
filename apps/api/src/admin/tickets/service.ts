@@ -22,13 +22,14 @@ export interface TicketRow {
 }
 
 export interface TicketMessageRow {
-  id:        string
-  ticketId:  string
-  authorId:  string
-  authorName:string
-  isAdmin:   boolean
-  body:      string
-  createdAt: Date
+  id:            string
+  ticketId:      string
+  authorId:      string
+  authorName:    string
+  isAdmin:       boolean
+  body:          string
+  attachmentUrl: string | null
+  createdAt:     Date
 }
 
 export interface TicketDetailRow extends TicketRow {
@@ -167,7 +168,7 @@ export async function getAdminTicketDetail(ticketId: string): Promise<TicketDeta
     SELECT
       m.id, m."ticketId", m."authorId",
       a.name AS "authorName",
-      m."isAdmin", m.body, m."createdAt"
+      m."isAdmin", m.body, m."attachmentUrl", m."createdAt"
     FROM ticket_messages m
     INNER JOIN users a ON a.id = m."authorId"
     WHERE m."ticketId" = ${ticketId}
@@ -179,13 +180,13 @@ export async function getAdminTicketDetail(ticketId: string): Promise<TicketDeta
 
 // Admin posts a reply. Bumps lastActivityAt and, if the ticket was still OPEN,
 // moves it to IN_PROGRESS (admin took the first response). Atomic CTE.
-export async function replyAsAdmin(adminId: string, ticketId: string, body: string) {
+export async function replyAsAdmin(adminId: string, ticketId: string, body: string, attachmentUrl?: string | null) {
   const messageId = randomUUID()
   const rows = await prisma.$queryRaw<Array<{ id: string }>>`
     WITH
       ins_msg AS (
-        INSERT INTO ticket_messages (id, "ticketId", "authorId", "isAdmin", body, "createdAt")
-        SELECT ${messageId}, ${ticketId}, ${adminId}, TRUE, ${body}, NOW()
+        INSERT INTO ticket_messages (id, "ticketId", "authorId", "isAdmin", body, "attachmentUrl", "createdAt")
+        SELECT ${messageId}, ${ticketId}, ${adminId}, TRUE, ${body}, ${attachmentUrl ?? null}, NOW()
         WHERE EXISTS (SELECT 1 FROM tickets WHERE id = ${ticketId})
         RETURNING id
       ),

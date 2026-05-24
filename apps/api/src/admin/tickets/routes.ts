@@ -7,6 +7,7 @@ import {
   updateTicketPriority,
   updateTicketStatus,
 } from './service.js'
+import { ticketAttachmentSchema, TICKET_BODY_LIMIT } from '../../tickets/schema.js'
 
 const listQuerySchema = z.object({
   page:     z.coerce.number().int().min(1).optional(),
@@ -17,8 +18,12 @@ const listQuerySchema = z.object({
 })
 
 const replySchema = z.object({
-  body: z.string().trim().min(1).max(5000),
-})
+  body:          z.string().trim().max(5000).optional(),
+  attachmentUrl: ticketAttachmentSchema.optional(),
+}).refine(
+  (v) => (v.body && v.body.length > 0) || (v.attachmentUrl && v.attachmentUrl.length > 0),
+  { message: 'Envie um texto ou uma imagem.' },
+)
 
 const statusSchema = z.object({
   status: z.enum(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']),
@@ -55,7 +60,7 @@ export async function ticketsAdminRoutes(app: FastifyInstance) {
     }
   })
 
-  app.post('/:id/reply', async (req, reply) => {
+  app.post('/:id/reply', { bodyLimit: TICKET_BODY_LIMIT }, async (req, reply) => {
     const parsed = replySchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
@@ -63,7 +68,7 @@ export async function ticketsAdminRoutes(app: FastifyInstance) {
     const { id }  = req.params as { id: string }
     const adminId = ((req as any).user.sub) as string
     try {
-      const messageId = await replyAsAdmin(adminId, id, parsed.data.body)
+      const messageId = await replyAsAdmin(adminId, id, parsed.data.body ?? '', parsed.data.attachmentUrl)
       return reply.send({ ok: true, messageId })
     } catch (err: any) {
       if (err.message === 'TICKET_NOT_FOUND') return reply.status(404).send({ error: 'TICKET_NOT_FOUND' })

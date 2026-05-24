@@ -3,6 +3,7 @@ import { api } from '@/lib/api'
 import { useOperationsStore } from './operations'
 import { useWithdrawalsStore } from './withdrawals'
 import { useTransactionsStore } from './transactions'
+import { useTicketsStore } from './tickets'
 
 export interface Account {
   id:       string
@@ -153,6 +154,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     useOperationsStore.getState().reset()
     useWithdrawalsStore.getState().reset()
     useTransactionsStore.getState().reset()
+    useTicketsStore.getState().reset()
   },
 
   init: async () => {
@@ -196,6 +198,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         useOperationsStore.getState().reset()
         useWithdrawalsStore.getState().reset()
         useTransactionsStore.getState().reset()
+        useTicketsStore.getState().reset()
       }
     }
   },

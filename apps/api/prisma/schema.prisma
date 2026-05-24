@@ -275,12 +275,15 @@ model Ticket {
 // rows in `users`, just with role = ADMIN). The first message of a ticket
 // is created together with the ticket itself (atomic in the create handler).
 model TicketMessage {
-  id        String   @id @default(cuid())
-  ticketId  String
-  authorId  String
-  isAdmin   Boolean  @default(false)
-  body      String
-  createdAt DateTime @default(now())
+  id            String   @id @default(cuid())
+  ticketId      String
+  authorId      String
+  isAdmin       Boolean  @default(false)
+  body          String
+  // Optional image attachment, stored as a data URL (data:image/...;base64,...)
+  // Same approach KYC uses — keeps us free of object storage infra for now.
+  attachmentUrl String?
+  createdAt     DateTime @default(now())
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   author User   @relation(fields: [authorId], references: [id], onDelete: Restrict)

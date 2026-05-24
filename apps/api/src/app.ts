@@ -11,6 +11,7 @@ import { transactionRoutes } from './transactions/routes.js'
 import { adminRoutes } from './admin/routes.js'
 import { depositRoutes } from './deposits/routes.js'
 import { bspayWebhookRoutes } from './webhooks/bspay.js'
+import { ticketRoutes } from './tickets/routes.js'
 import { prisma } from './prisma.js'
 
 export async function buildApp() {
@@ -92,6 +93,7 @@ export async function buildApp() {
   await app.register(adminRoutes,        { prefix: '/admin' })
   await app.register(depositRoutes,      { prefix: '/deposits' })
   await app.register(bspayWebhookRoutes, { prefix: '/webhooks' })
+  await app.register(ticketRoutes,       { prefix: '/tickets'  })
 
   return app
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
   MessageSquare, RefreshCw, Search, X, Send, User as UserIcon, Shield,
+  Paperclip, ImageOff,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -25,13 +26,14 @@ interface TicketRow {
 }
 
 interface TicketMessage {
-  id:         string
-  ticketId:   string
-  authorId:   string
-  authorName: string
-  isAdmin:    boolean
-  body:       string
-  createdAt:  string
+  id:            string
+  ticketId:      string
+  authorId:      string
+  authorName:    string
+  isAdmin:       boolean
+  body:          string
+  attachmentUrl: string | null
+  createdAt:     string
 }
 
 interface TicketDetail extends TicketRow {
@@ -299,6 +301,7 @@ function TicketDrawer({
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState('')
   const [reply, setReply]     = useState('')
+  const [attachment, setAttachment]   = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [busy, setBusy]       = useState(false)
 
@@ -319,11 +322,15 @@ function TicketDrawer({
   async function submitReply(e: FormEvent) {
     e.preventDefault()
     const body = reply.trim()
-    if (!body || sending) return
+    if ((!body && !attachment) || sending) return
     setSending(true)
     try {
-      await api.post(`/admin/tickets/${ticketId}/reply`, { body })
+      const payload: { body?: string; attachmentUrl?: string } = {}
+      if (body)       payload.body          = body
+      if (attachment) payload.attachmentUrl = attachment
+      await api.post(`/admin/tickets/${ticketId}/reply`, payload)
       setReply('')
+      setAttachment(null)
       await load()      // refresh thread
       onReply()         // update list row
     } catch {
@@ -331,6 +338,19 @@ function TicketDrawer({
     } finally {
       setSending(false)
     }
+  }
+
+  async function handleFile(file: File | undefined) {
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Imagem maior que 5 MB.')
+      return
+    }
+    setError('')
+    const reader = new FileReader()
+    reader.onload = () => setAttachment(reader.result as string)
+    reader.onerror = () => setError('Falha ao ler a imagem.')
+    reader.readAsDataURL(file)
   }
 
   async function changeStatus(next: TicketStatus) {
@@ -454,28 +474,66 @@ function TicketDrawer({
                 </span>
                 <span className="text-[10px] text-[#8b8f9a] ml-auto">{formatDateTime(m.createdAt)}</span>
               </div>
-              <p className="text-sm text-[#dadce5] whitespace-pre-wrap break-words">{m.body}</p>
+              {m.body && (
+                <p className="text-sm text-[#dadce5] whitespace-pre-wrap break-words">{m.body}</p>
+              )}
+              {m.attachmentUrl && (
+                <a
+                  href={m.attachmentUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block mt-2 rounded-lg overflow-hidden border border-[#2a2e3b] hover:border-emerald-500/40 transition-colors max-w-[280px]"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={m.attachmentUrl} alt="anexo" className="block w-full h-auto" />
+                </a>
+              )}
             </div>
           ))}
         </div>
 
         {/* Reply box */}
-        <form onSubmit={submitReply} className="border-t border-[#1f232e] px-5 py-3 flex gap-2">
-          <textarea
-            value={reply}
-            onChange={(e) => setReply(e.target.value)}
-            placeholder="Escreva sua resposta..."
-            rows={2}
-            className="flex-1 bg-[#1a1f2e] border border-[#2a2e3b] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500/40 resize-none"
-          />
-          <button
-            type="submit"
-            disabled={!reply.trim() || sending}
-            className="px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-          >
-            <Send size={13} />
-            Enviar
-          </button>
+        <form onSubmit={submitReply} className="border-t border-[#1f232e] px-5 py-3 space-y-2">
+          {attachment && (
+            <div className="relative inline-block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={attachment} alt="prévia" className="h-20 rounded-lg border border-[#2a2e3b]" />
+              <button
+                type="button"
+                onClick={() => setAttachment(null)}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 hover:bg-red-400 text-white flex items-center justify-center"
+                title="Remover anexo"
+              >
+                <ImageOff size={10} />
+              </button>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <label className="flex items-center justify-center w-10 h-10 rounded-lg bg-[#1a1f2e] border border-[#2a2e3b] text-[#8b8f9a] hover:text-white hover:border-emerald-500/40 cursor-pointer transition-colors flex-shrink-0">
+              <Paperclip size={15} />
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => handleFile(e.target.files?.[0])}
+              />
+            </label>
+            <textarea
+              value={reply}
+              onChange={(e) => setReply(e.target.value)}
+              placeholder="Escreva sua resposta..."
+              rows={2}
+              className="flex-1 bg-[#1a1f2e] border border-[#2a2e3b] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500/40 resize-none"
+            />
+            <button
+              type="submit"
+              disabled={(!reply.trim() && !attachment) || sending}
+              className="px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+            >
+              <Send size={13} />
+              Enviar
+            </button>
+          </div>
         </form>
       </div>
     </div>
