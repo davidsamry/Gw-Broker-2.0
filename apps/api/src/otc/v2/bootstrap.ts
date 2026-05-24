@@ -93,34 +93,50 @@ function generateHistorical(
  * dupes (we use ON CONFLICT DO NOTHING).
  */
 export async function bootstrapHistoricalCandles(assets: OtcAssetConfig[]): Promise<void> {
+  // Batch size for INSERTs. A single INSERT of 3000 rows × 9 cols hits
+  // 27k Prisma parameters — within PG's 65k limit but flaky through
+  // poolers (Supabase Supavisor in particular). 500 keeps each round-
+  // trip well under any limit.
+  const BATCH = 500
+
   for (const asset of assets) {
     for (const tf of OTC_TIMEFRAMES) {
-      const existing = await prisma.$queryRaw<Array<{ count: bigint }>>`
-        SELECT COUNT(*)::bigint AS count
-        FROM otc_candles
-        WHERE "assetId" = ${asset.id} AND timeframe = ${tf}
-      `
-      const have = Number(existing[0]?.count ?? 0)
-      if (have >= CANDLES_PER_TF) continue
+      try {
+        const existing = await prisma.$queryRaw<Array<{ count: bigint }>>`
+          SELECT COUNT(*)::bigint AS count
+          FROM otc_candles
+          WHERE "assetId" = ${asset.id} AND timeframe = ${tf}
+        `
+        const have = Number(existing[0]?.count ?? 0)
+        if (have >= CANDLES_PER_TF) continue
 
-      const need = CANDLES_PER_TF - have
-      const rows = generateHistorical(asset, tf, need)
+        const need = CANDLES_PER_TF - have
+        const rows = generateHistorical(asset, tf, need)
 
-      // Bulk insert in one round-trip per (asset, tf). With 5 assets × 5
-      // tfs × ~3000 candles, the total boot is ~25 inserts of 3000 rows
-      // each — ~5-15s total on a cold deploy, then never again.
-      const values = rows.map(r => Prisma.sql`(
-        ${r.assetId}, ${r.timeframe}, ${r.openTime},
-        ${r.openPrice}, ${r.highPrice}, ${r.lowPrice}, ${r.closePrice},
-        ${r.tickCount}, ${r.finalizedAt}
-      )`)
-      await prisma.$executeRaw`
-        INSERT INTO otc_candles
-          ("assetId", timeframe, "openTime", "openPrice", "highPrice", "lowPrice", "closePrice", "tickCount", "finalizedAt")
-        VALUES ${Prisma.join(values, ', ')}
-        ON CONFLICT ("assetId", timeframe, "openTime") DO NOTHING
-      `
-      console.log(`[otc-v2] bootstrap: ${asset.id} tf=${tf} inserted ${rows.length} candles`)
+        let inserted = 0
+        for (let i = 0; i < rows.length; i += BATCH) {
+          const chunk  = rows.slice(i, i + BATCH)
+          const values = chunk.map(r => Prisma.sql`(
+            ${r.assetId}, ${r.timeframe}, ${r.openTime},
+            ${r.openPrice}, ${r.highPrice}, ${r.lowPrice}, ${r.closePrice},
+            ${r.tickCount}, ${r.finalizedAt}
+          )`)
+          await prisma.$executeRaw`
+            INSERT INTO otc_candles
+              ("assetId", timeframe, "openTime", "openPrice", "highPrice", "lowPrice", "closePrice", "tickCount", "finalizedAt")
+            VALUES ${Prisma.join(values, ', ')}
+            ON CONFLICT ("assetId", timeframe, "openTime") DO NOTHING
+          `
+          inserted += chunk.length
+        }
+        console.log(`[otc-v2] bootstrap: ${asset.id} tf=${tf} inserted ${inserted}/${need} candles`)
+      } catch (err) {
+        // Surface the failure loudly. A silent bootstrap failure left
+        // production with empty otc_candles for hours after the previous
+        // deploy — the chart still ran (live ticks accumulated via SSE)
+        // but the y-axis exploded as wild reversion candles formed.
+        console.error(`[otc-v2] bootstrap FAILED for ${asset.id} tf=${tf}:`, err)
+      }
     }
   }
 }

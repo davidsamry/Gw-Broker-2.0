@@ -29,86 +29,97 @@ interface RegimeParams {
   transitions:   Partial<Record<OtcRegime, number>>   // weights, not normalized
 }
 
+// Calibration notes (May 2026):
+//   • driftPerTick was 16× too big — TREND_UP_STRONG at 0.00025/tick =
+//     +15%/min, which produced 5-15% candle bodies on prod. New values
+//     target +0.3% per min for WEAK and +0.9% for STRONG.
+//   • Durations bumped for LATERAL/WEAK (longer calm stretches),
+//     trimmed for STRONG/HIGH_VOL (these regimes should be brief
+//     bursts, not sustained moves).
+//   • Transition weights rebalanced toward LATERAL — by far the most
+//     common real-market state.
+//
+// Quick mental math: drift_per_minute ≈ driftPerTick × 600.
 export const REGIME_PARAMS: Record<OtcRegime, RegimeParams> = {
   LATERAL: {
     driftPerTick: 0,
     volMultiplier: 0.8,
-    durMinMs:  30_000, durMaxMs: 120_000,
+    durMinMs:  60_000, durMaxMs: 240_000,
     transitions: {
-      LATERAL: 20, TREND_UP_WEAK: 20, TREND_DOWN_WEAK: 20,
-      HIGH_VOL: 8,  LOW_VOL: 12, COMPRESSION: 10, EXPANSION: 10,
+      LATERAL: 40, TREND_UP_WEAK: 15, TREND_DOWN_WEAK: 15,
+      HIGH_VOL: 4,  LOW_VOL: 12, COMPRESSION: 8, EXPANSION: 6,
     },
   },
   TREND_UP_WEAK: {
-    driftPerTick: 0.00008,
+    driftPerTick: 0.000005,        // ~0.3% per minute
     volMultiplier: 1.0,
-    durMinMs: 20_000, durMaxMs: 80_000,
+    durMinMs: 30_000, durMaxMs: 90_000,
     transitions: {
-      LATERAL: 30, TREND_UP_WEAK: 25, TREND_UP_STRONG: 20,
-      TREND_DOWN_WEAK: 10, HIGH_VOL: 5, COMPRESSION: 10,
+      LATERAL: 45, TREND_UP_WEAK: 20, TREND_UP_STRONG: 10,
+      TREND_DOWN_WEAK: 10, HIGH_VOL: 3, COMPRESSION: 12,
     },
   },
   TREND_UP_STRONG: {
-    driftPerTick: 0.00025,
-    volMultiplier: 1.3,
-    durMinMs: 15_000, durMaxMs: 45_000,
+    driftPerTick: 0.000015,        // ~0.9% per minute
+    volMultiplier: 1.2,
+    durMinMs: 10_000, durMaxMs: 30_000,
     transitions: {
-      LATERAL: 20, TREND_UP_WEAK: 35, TREND_UP_STRONG: 15,
-      TREND_DOWN_WEAK: 15, HIGH_VOL: 5, COMPRESSION: 10,
+      LATERAL: 30, TREND_UP_WEAK: 45, TREND_UP_STRONG: 5,
+      TREND_DOWN_WEAK: 10, HIGH_VOL: 3, COMPRESSION: 7,
     },
   },
   TREND_DOWN_WEAK: {
-    driftPerTick: -0.00008,
+    driftPerTick: -0.000005,
     volMultiplier: 1.0,
-    durMinMs: 20_000, durMaxMs: 80_000,
+    durMinMs: 30_000, durMaxMs: 90_000,
     transitions: {
-      LATERAL: 30, TREND_DOWN_WEAK: 25, TREND_DOWN_STRONG: 20,
-      TREND_UP_WEAK: 10, HIGH_VOL: 5, COMPRESSION: 10,
+      LATERAL: 45, TREND_DOWN_WEAK: 20, TREND_DOWN_STRONG: 10,
+      TREND_UP_WEAK: 10, HIGH_VOL: 3, COMPRESSION: 12,
     },
   },
   TREND_DOWN_STRONG: {
-    driftPerTick: -0.00025,
-    volMultiplier: 1.3,
-    durMinMs: 15_000, durMaxMs: 45_000,
+    driftPerTick: -0.000015,
+    volMultiplier: 1.2,
+    durMinMs: 10_000, durMaxMs: 30_000,
     transitions: {
-      LATERAL: 20, TREND_DOWN_WEAK: 35, TREND_DOWN_STRONG: 15,
-      TREND_UP_WEAK: 15, HIGH_VOL: 5, COMPRESSION: 10,
+      LATERAL: 30, TREND_DOWN_WEAK: 45, TREND_DOWN_STRONG: 5,
+      TREND_UP_WEAK: 10, HIGH_VOL: 3, COMPRESSION: 7,
     },
   },
   HIGH_VOL: {
     driftPerTick: 0,
-    volMultiplier: 1.8,
-    durMinMs: 10_000, durMaxMs: 30_000,
+    volMultiplier: 1.4,
+    durMinMs: 8_000, durMaxMs: 20_000,
     transitions: {
-      LATERAL: 30, EXPANSION: 20, COMPRESSION: 20,
-      TREND_UP_WEAK: 12, TREND_DOWN_WEAK: 12, HIGH_VOL: 6,
+      LATERAL: 50, EXPANSION: 12, COMPRESSION: 18,
+      TREND_UP_WEAK: 8, TREND_DOWN_WEAK: 8, HIGH_VOL: 4,
     },
   },
   LOW_VOL: {
     driftPerTick: 0,
     volMultiplier: 0.5,
-    durMinMs: 30_000, durMaxMs: 120_000,
+    durMinMs: 60_000, durMaxMs: 180_000,
     transitions: {
-      LATERAL: 40, LOW_VOL: 20, COMPRESSION: 20,
-      TREND_UP_WEAK: 10, TREND_DOWN_WEAK: 10,
+      LATERAL: 50, LOW_VOL: 25, COMPRESSION: 15,
+      TREND_UP_WEAK: 5, TREND_DOWN_WEAK: 5,
     },
   },
   COMPRESSION: {
     driftPerTick: 0,
     volMultiplier: 0.6,
-    durMinMs: 20_000, durMaxMs: 60_000,
+    durMinMs: 30_000, durMaxMs: 90_000,
     transitions: {
-      LATERAL: 20, COMPRESSION: 15, EXPANSION: 30,
-      LOW_VOL: 10, TREND_UP_WEAK: 12, TREND_DOWN_WEAK: 13,
+      LATERAL: 35, COMPRESSION: 15, EXPANSION: 20,
+      LOW_VOL: 15, TREND_UP_WEAK: 7, TREND_DOWN_WEAK: 8,
     },
   },
   EXPANSION: {
     driftPerTick: 0,
-    volMultiplier: 1.6,
-    durMinMs: 15_000, durMaxMs: 45_000,
+    volMultiplier: 1.3,
+    durMinMs: 10_000, durMaxMs: 30_000,
     transitions: {
-      LATERAL: 20, EXPANSION: 10, HIGH_VOL: 20,
-      TREND_UP_WEAK: 20, TREND_DOWN_WEAK: 20, COMPRESSION: 10,
+      LATERAL: 35, EXPANSION: 5, HIGH_VOL: 15,
+      TREND_UP_WEAK: 18, TREND_DOWN_WEAK: 18, COMPRESSION: 9,
     },
   },
 }
@@ -162,12 +173,22 @@ export function stepLiquidity(s: OtcAssetState, rand: () => number = Math.random
 export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): number {
   const params = REGIME_PARAMS[s.regime]
 
-  const drift        = params.driftPerTick + s.trendBias * 0.0001
+  // trendBias max ±1 → max ±0.000005 per tick = ±0.3%/min — same
+  // scale as a STRONG regime drift, so a slammed bias has noticeable
+  // but bounded effect, not an instant runaway.
+  const drift        = params.driftPerTick + s.trendBias * 0.000005
   const effectiveVol = s.config.volatilityBase * params.volMultiplier * s.volume
-  const reversion    = -0.0008 * (s.price - s.config.seedPrice) / s.config.seedPrice
+  // Reversion was -0.0008 (strong snap-back). At -0.0002 it still
+  // anchors the price to seed over minutes/hours without producing
+  // the violent reversion candles we saw post-deploy when the engine
+  // restarted far from seed.
+  const reversion    = -0.0002 * (s.price - s.config.seedPrice) / s.config.seedPrice
   const shock        = gaussian(0, effectiveVol, rand)
   const liquidityBias = 0.5 * (s.buyPressure - s.sellPressure) * effectiveVol
-  const spike        = rand() < 0.001 ? (rand() > 0.5 ? 1 : -1) * 3 * effectiveVol : 0
+  // Spike: rare news-event-style discontinuity. Frequency cut in half
+  // (0.001 → 0.0005) and magnitude halved (3× → 1.5×) so spikes are
+  // visible but no longer dominate the chart.
+  const spike        = rand() < 0.0005 ? (rand() > 0.5 ? 1 : -1) * 1.5 * effectiveVol : 0
 
   const rawNext = s.price * (1 + drift + reversion + shock + liquidityBias + spike)
   // Catastrophic protection — never wander beyond half/double the seed.
