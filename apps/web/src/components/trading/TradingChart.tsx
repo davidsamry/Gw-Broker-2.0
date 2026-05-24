@@ -903,12 +903,18 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
       {/* Chart */}
       <div ref={chartContainerRef} className="flex-1 w-full" />
 
-      {/* Candle expiry timer — ao lado da vela atual, na linha tracejada
-          do preço. Updates every second; pulses softly under 5s remaining. */}
-      {candleTimerY != null && candleTimerX != null && (
+      {/* Candle expiry timer — anchored to the RIGHT edge of the chart at
+          the current price line's height. Anchoring by X (`candleTimerX +
+          8`) put the chip past the chart's right edge when the slot end
+          fell into the rightOffset zone — `overflow-hidden` then clipped
+          it. Right-anchoring keeps the chip flush regardless of zoom/pan,
+          and only the Y (price level) follows the live tick. Offset of
+          70px clears the price-axis label column (~60px) without sitting
+          on top of the price labels. Same pattern Quotex uses. */}
+      {candleTimerY != null && (
         <div
           className="absolute z-20 pointer-events-none"
-          style={{ top: candleTimerY, left: candleTimerX + 8, transform: 'translateY(-50%)' }}
+          style={{ top: candleTimerY, right: 70, transform: 'translateY(-50%)' }}
         >
           <div className={cn(
             'bg-[#1d2130]/95 backdrop-blur-sm border border-[#3a3f50] text-white text-[11px] font-mono font-bold px-2 py-0.5 rounded shadow-lg shadow-black/40 transition-opacity duration-150',
