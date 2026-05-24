@@ -23,4 +23,9 @@ COPY --from=builder /app/prisma ./prisma
 
 EXPOSE 3001
 
-CMD ["npm", "run", "start"]
+# Run pending migrations BEFORE starting the API. Without this step,
+# `prisma migrate dev` files added to the repo never reach production —
+# the schema and code drift apart silently. `migrate deploy` is the
+# production-safe variant: applies pending migrations idempotently and
+# never prompts.
+CMD sh -c "npx prisma migrate deploy && npm run start"
