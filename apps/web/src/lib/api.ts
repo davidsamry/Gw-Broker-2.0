@@ -17,7 +17,19 @@ api.interceptors.response.use(
   (res) => res,
   async (err) => {
     const original = err.config
-    if (err.response?.status === 401 && !original._retry) {
+    const url      = (original?.url ?? '') as string
+
+    // Auth-attempt endpoints. Their 401s carry domain errors (INVALID_
+    // CREDENTIALS / REQUIRES_2FA / INVALID_2FA_CODE / INVALID_REFRESH),
+    // NOT "session expired". Routing them through refresh + redirect
+    // wipes the LoginPage's local state and bounces the user back to
+    // the email/password screen mid-2FA — let the form handle them.
+    const isAuthAttempt =
+      url.startsWith('/auth/login')    ||
+      url.startsWith('/auth/register') ||
+      url.startsWith('/auth/refresh')
+
+    if (err.response?.status === 401 && !isAuthAttempt && !original._retry) {
       original._retry = true
       try {
         const { data } = await axios.post(`${API_URL}/auth/refresh`, {}, { withCredentials: true })
