@@ -529,7 +529,17 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         }
       }
 
-      chart.timeScale().fitContent()
+      // Default zoom: show the last ~30 candles (≈ what's visually
+      // comfortable on screen) instead of fitting all 1000 fetched bars.
+      // The candle count is fixed in logical-units, so the visible window
+      // scales the same regardless of timeframe (30 of 1m = 30min,
+      // 30 of 1h = ~1.25 days). +5 to `to` gives breathing room on the
+      // right so the live candle isn't glued to the price axis.
+      const VISIBLE_BARS_DEFAULT = 30
+      chart.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, candles.length - VISIBLE_BARS_DEFAULT),
+        to:   candles.length + 5,
+      })
       chart.timeScale().scrollToRealTime()
 
       // ── Drawing click handler ───────────────────────────────────────────
