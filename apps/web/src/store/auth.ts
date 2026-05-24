@@ -96,14 +96,37 @@ function saveUserCache(user: User | null) {
   } catch { /* quota / private mode — ignore */ }
 }
 
+// ── isDemo preference (localStorage) ──────────────────────────────────────
+// Persist the last-selected account type across page reloads so the user
+// doesn't get bounced back to DEMO every time they refresh. Defaults to
+// DEMO for first-time visitors (safest — no real money at risk).
+const IS_DEMO_KEY = 'vx_is_demo'
+
+function loadIsDemo(): boolean {
+  if (typeof window === 'undefined') return true
+  try {
+    const raw = localStorage.getItem(IS_DEMO_KEY)
+    if (raw === 'false') return false
+    if (raw === 'true')  return true
+    return true  // never set → default DEMO
+  } catch {
+    return true
+  }
+}
+
+function saveIsDemo(v: boolean) {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem(IS_DEMO_KEY, String(v)) } catch { /* ignore */ }
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user:          null,
   token:         null,
-  isDemo:        true,
+  isDemo:        loadIsDemo(),
   loading:       true,
   kycSubmission: null,
 
-  setIsDemo: (v) => set({ isDemo: v }),
+  setIsDemo: (v) => { saveIsDemo(v); set({ isDemo: v }) },
 
   login: async (email, password, code) => {
     const payload: { email: string; password: string; code?: string } = { email, password }
@@ -124,8 +147,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout: async () => {
     await api.post('/auth/logout').catch(() => {})
     localStorage.removeItem('token')
+    localStorage.removeItem(IS_DEMO_KEY)  // next account can be a different user
     saveUserCache(null)
-    set({ user: null, token: null, kycSubmission: null })
+    set({ user: null, token: null, kycSubmission: null, isDemo: true })
     useOperationsStore.getState().reset()
     useWithdrawalsStore.getState().reset()
     useTransactionsStore.getState().reset()
