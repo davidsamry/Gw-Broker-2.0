@@ -2,6 +2,7 @@
 
 import { X, ArrowRight } from 'lucide-react'
 import { type Asset } from '@/lib/mockData'
+import { FlagPair } from '@/components/ui/FlagPair'
 
 interface AssetInfoModalProps {
   asset: Asset
@@ -99,7 +100,10 @@ export function AssetInfoModal({ asset, marketPrice, onClose, onTrade }: AssetIn
             {/* Header */}
             <div className="flex items-start justify-between gap-3 flex-wrap pr-10 md:pr-0">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-2xl">{asset.flag1}{asset.flag2}</span>
+                {/* FlagPair renders PNGs from flagcdn (or crypto icons for
+                    crypto:* codes) — reliable across all OSes, unlike the
+                    raw flag emojis which Windows shows as "AUUS" text. */}
+                <FlagPair code1={asset.code1} code2={asset.code2} size={22} />
                 <span className="text-base font-bold text-white truncate">{asset.label}</span>
                 <span className="text-base font-bold text-orange-400">{asset.payout}%</span>
               </div>
