@@ -20,6 +20,14 @@ export function useBinanceTicker(marketSymbol?: string) {
       return
     }
 
+    // Reset state immediately on symbol change so consumers don't keep
+    // reading the previous asset's price during the ~200-500ms window
+    // before the new WebSocket delivers its first tick. Without this,
+    // switching BTC → SOL leaves displayPrice at BTC's number for the
+    // first interval tick of the new chart, causing an out-of-range
+    // candle spike.
+    setTicker(null)
+
     const symbol = marketSymbol
     let closed = false
     let pollId: ReturnType<typeof setInterval> | null = null

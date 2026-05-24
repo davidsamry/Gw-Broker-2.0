@@ -578,6 +578,16 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
       let candleLow = price
       let lastSecsLeft = -1
 
+      // Re-anchor displayPriceRef to the freshly-fetched close. Without this,
+      // an asset switch (e.g., BTC → SOL) leaves the ref holding the previous
+      // asset's price (useBinanceTicker doesn't reset its state on symbol
+      // change — old ticker survives until the new WS delivers its first
+      // message ~200-500ms later). The first interval tick would then
+      // draw the new chart's current candle at the OLD asset's price.
+      if (latestCandleTime != null) {
+        displayPriceRef.current = price
+      }
+
       priceInterval = setInterval(() => {
         if (disposed || !chartRef.current) return
         const now = nowSec()
@@ -601,11 +611,26 @@ export function TradingChart({ asset, marketPrice, onInfoClick, theme = 'noite',
         candleHigh = Math.max(candleHigh, price)
         candleLow = Math.min(candleLow, price)
 
-        if (now >= candleStart + tfSec) {
-          candleStart = Math.max(candleStart + tfSec, alignedStart(now))
+        // Advance candleStart minute-by-minute, NOT in a single jump. The
+        // old `Math.max(candleStart + tfSec, alignedStart(now))` skipped
+        // every intermediate period, leaving a visual gap whenever a tick
+        // landed > 1 tfSec past the last candle (asset switch / tab
+        // throttle / slow fetch). Now we emit a flat placeholder for each
+        // missed period; the next real tick mutates the current one.
+        while (now >= candleStart + tfSec) {
+          candleStart += tfSec
           candleOpen = price
           candleHigh = price
           candleLow = price
+          // If we still have more periods to advance through, persist this
+          // one as a flat candle so the series stays continuous on screen.
+          if (now >= candleStart + tfSec) {
+            if (chartType === 'area') {
+              mainSeries.update({ time: candleStart, value: price })
+            } else {
+              mainSeries.update({ time: candleStart, open: price, high: price, low: price, close: price })
+            }
+          }
         }
 
         const candle = { time: candleStart, open: candleOpen, high: candleHigh, low: candleLow, close: price }
