@@ -186,12 +186,21 @@ async function flushPending(): Promise<void> {
         ${c.open}, ${c.high}, ${c.low}, ${c.close},
         ${c.tickCount}, ${c.finalizedAt}
       )`)
+      // ON CONFLICT updates ALL OHLC including openPrice. The previous
+      // omit-openPrice strategy was meant to "lock in" the first tick's
+      // open, but it created divergence: a re-seeded CandleBuilder (post-
+      // restart) would update h/l/c via this UPSERT while leaving an
+      // orphan openPrice from a previous run. The result was structurally
+      // broken candles (open > high, open < low). Now the DB always
+      // reflects the worker's current finalized state — single source of
+      // truth, no drift.
       await prisma.$executeRaw`
         INSERT INTO otc_candles
           ("assetId", timeframe, "openTime", "openPrice", "highPrice", "lowPrice", "closePrice", "tickCount", "finalizedAt")
         VALUES ${Prisma.join(values, ', ')}
         ON CONFLICT ("assetId", timeframe, "openTime")
         DO UPDATE SET
+          "openPrice"   = EXCLUDED."openPrice",
           "highPrice"   = EXCLUDED."highPrice",
           "lowPrice"    = EXCLUDED."lowPrice",
           "closePrice"  = EXCLUDED."closePrice",
