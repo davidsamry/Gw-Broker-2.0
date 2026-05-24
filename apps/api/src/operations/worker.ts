@@ -24,10 +24,28 @@ async function fetchBinanceLastPrice(marketSymbol: string): Promise<number | nul
   }
 }
 
-// Latest OTC tick from asset_price_ticks for the given assetId. Same source
-// the chart's SSE delivers to the browser, so user-visible exit and worker-
-// computed exit converge within ~1 tick (worker poll cadence == OTC worker
-// tick cadence == 1s). Replaces the old coin-flip fallback for OTC ops.
+// OTC v2 exit price: the tick recorded AT or just before the op's
+// expiresAt — same row the chart's SSE has just shown to the user.
+// Source of truth for the new 5 OTC assets.
+async function fetchOtcV2ExitPrice(assetId: string, expiresAt: Date): Promise<number | null> {
+  try {
+    const rows = await prisma.$queryRaw<Array<{ price: Prisma.Decimal }>>`
+      SELECT price FROM otc_ticks
+      WHERE "assetId" = ${assetId}
+        AND "recordedAt" <= ${expiresAt}
+      ORDER BY "recordedAt" DESC
+      LIMIT 1
+    `
+    if (rows.length === 0) return null
+    const p = Number(rows[0].price)
+    return Number.isFinite(p) && p > 0 ? p : null
+  } catch {
+    return null
+  }
+}
+
+// Legacy OTC v1 — kept while old OTC assets (if any) drain through. After
+// Etapa 8 cleanup this path can be dropped.
 async function fetchLatestOtcTick(assetId: string): Promise<number | null> {
   try {
     const rows = await prisma.$queryRaw<Array<{ price: Prisma.Decimal }>>`
@@ -51,6 +69,7 @@ async function resolveOperation(op: {
   amount:       Prisma.Decimal
   payout:       number
   entryPrice:   Prisma.Decimal
+  expiresAt:    Date
   direction:    'CALL' | 'PUT'
   marketSymbol: string | null
 }) {
@@ -60,16 +79,19 @@ async function resolveOperation(op: {
 
     // exitPrice resolution order:
     //   1. BINANCE → public ticker (real market close).
-    //   2. OTC     → latest authoritative tick from asset_price_ticks
-    //                (same source the user's chart shows).
-    //   3. Fallback (no marketSymbol AND no tick history yet, or both
-    //      live sources errored) → small random nudge so the op still
-    //      resolves and doesn't hang OPEN forever.
+    //   2. OTC v2  → otc_ticks (most recent ≤ expiresAt) — same source
+    //                the chart's SSE shows to the user.
+    //   3. OTC v1  → legacy asset_price_ticks (drains as old ops finish).
+    //   4. Fallback → small random nudge so the op still resolves and
+    //                doesn't hang OPEN forever.
     let exitPrice: number | null = null
     if (op.marketSymbol) {
       exitPrice = await fetchBinanceLastPrice(op.marketSymbol)
     } else {
-      exitPrice = await fetchLatestOtcTick(op.assetId)
+      exitPrice = await fetchOtcV2ExitPrice(op.assetId, op.expiresAt)
+      if (exitPrice == null) {
+        exitPrice = await fetchLatestOtcTick(op.assetId)
+      }
     }
     if (exitPrice == null) {
       const change = (Math.random() * 0.01) - 0.005
@@ -128,7 +150,7 @@ async function tick() {
       take:    BATCH_SIZE,
       select:  {
         id: true, accountId: true, assetId: true, amount: true, payout: true,
-        entryPrice: true, direction: true, marketSymbol: true,
+        entryPrice: true, expiresAt: true, direction: true, marketSymbol: true,
       },
     })
 
