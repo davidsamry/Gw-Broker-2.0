@@ -1124,28 +1124,39 @@ function MinhaContaTab() {
   )
 }
 
-export function ContaPage({ initialTab = 'minha-conta' }: { initialTab?: ContaTab }) {
+export function ContaPage({ initialTab = 'minha-conta', onClose }: { initialTab?: ContaTab; onClose?: () => void }) {
   const [activeTab, setActiveTab] = useState<ContaTab>(initialTab)
 
   return (
     <div className="flex-1 flex flex-col bg-[#151822] min-h-0 overflow-hidden">
 
-      {/* Top tabs — horizontally scrollable on mobile */}
-      <div className="flex items-center px-3 md:px-6 border-b border-[#2a2e3b] bg-[#1a1e2e] flex-shrink-0 gap-1 overflow-x-auto">
-        {CONTA_TABS.map((t) => (
+      {/* Top bar: tabs (scrollable) + close button (fixed on the right) */}
+      <div className="flex items-stretch border-b border-[#2a2e3b] bg-[#1a1e2e] flex-shrink-0">
+        <div className="flex items-center px-3 md:px-6 flex-1 min-w-0 gap-1 overflow-x-auto">
+          {CONTA_TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              className={cn(
+                'px-3 md:px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap flex-shrink-0',
+                activeTab === t.key
+                  ? 'text-white border-white font-semibold'
+                  : 'text-[#8b8f9a] border-transparent hover:text-white'
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {onClose && (
           <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            className={cn(
-              'px-3 md:px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap flex-shrink-0',
-              activeTab === t.key
-                ? 'text-white border-white font-semibold'
-                : 'text-[#8b8f9a] border-transparent hover:text-white'
-            )}
+            onClick={onClose}
+            className="flex items-center justify-center w-12 flex-shrink-0 text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors border-l border-[#2a2e3b]"
+            title="Fechar"
           >
-            {t.label}
+            <X size={16} />
           </button>
-        ))}
+        )}
       </div>
 
 

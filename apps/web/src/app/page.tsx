@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore, useCurrentAccount } from '@/store/auth'
-import { GraduationCap, Gem, Plus, Bell, ChevronDown } from 'lucide-react'
+import { GraduationCap, Gem, Plus, Bell, ChevronDown, X } from 'lucide-react'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Header } from '@/components/layout/Header'
 import { Logo } from '@/components/layout/Logo'
@@ -172,7 +172,7 @@ export default function TradingPage() {
         </div>
       )
     }
-    if (sidebarTab === 'CONTA')     return <ContaPage key={contaInitialTab} initialTab={contaInitialTab} />
+    if (sidebarTab === 'CONTA')     return <ContaPage key={contaInitialTab} initialTab={contaInitialTab} onClose={() => setSidebarTab('TRADE')} />
     if (sidebarTab === 'HISTORICO') {
       // On mobile the user wants to scan their full history — chart on top
       // would steal vertical space. Show the panel full-screen, matching
@@ -205,7 +205,7 @@ export default function TradingPage() {
         </div>
       )
     }
-    if (sidebarTab === 'COPY')      return <ComingSoon title="Copy Trading" message="Em breve você poderá copiar automaticamente as melhores operações de traders profissionais." />
+    if (sidebarTab === 'COPY')      return <ComingSoon title="Copy Trading" message="Em breve você poderá copiar automaticamente as melhores operações de traders profissionais." onClose={() => setSidebarTab('TRADE')} />
 
     // TRADE (default)
     return (
@@ -360,9 +360,18 @@ export default function TradingPage() {
   )
 }
 
-function ComingSoon({ title, message }: { title: string; message: string }) {
+function ComingSoon({ title, message, onClose }: { title: string; message: string; onClose?: () => void }) {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 text-center bg-[#151822]">
+    <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 text-center bg-[#151822] relative">
+      {onClose && (
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 w-9 h-9 flex items-center justify-center rounded-full text-[#8b8f9a] hover:text-white hover:bg-white/10 transition-colors"
+          title="Fechar"
+        >
+          <X size={16} />
+        </button>
+      )}
       <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-cyan-400/20 border border-blue-500/30 flex items-center justify-center mb-5">
         <span className="text-2xl">🚀</span>
       </div>
