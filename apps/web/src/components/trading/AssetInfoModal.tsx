@@ -71,26 +71,36 @@ export function AssetInfoModal({ asset, marketPrice, onClose, onTrade }: AssetIn
   const buyPct = 37
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-4 bg-black/50">
-      <div className="relative bg-[#1e2235] rounded-2xl border border-[#2a2e3b] shadow-2xl w-full max-w-[820px] overflow-hidden">
+    // Outer overlay: clicking outside the card closes (matches other modals).
+    // Mobile top padding kept small so the card fits the viewport on phones;
+    // desktop pushes it down a bit so it sits below the trading header.
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center px-3 pt-4 md:pt-16 bg-black/50 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative bg-[#1e2235] rounded-2xl border border-[#2a2e3b] shadow-2xl w-full max-w-[820px] my-4 md:my-0"
+      >
 
-        {/* Close button — outside card, top-left */}
+        {/* Close button — outside card, top-left on desktop; floats inside on mobile so it doesn't get cut off */}
         <button
           onClick={onClose}
-          className="absolute -top-3 -left-3 w-8 h-8 bg-[#1e2235] border border-[#2a2e3b] rounded-full flex items-center justify-center text-[#8b8f9a] hover:text-white transition-colors z-10 shadow-lg"
+          className="absolute top-2 right-2 md:-top-3 md:-left-3 md:right-auto w-8 h-8 bg-[#1e2235] border border-[#2a2e3b] rounded-full flex items-center justify-center text-[#8b8f9a] hover:text-white transition-colors z-10 shadow-lg"
         >
           <X size={14} />
         </button>
 
-        <div className="flex min-h-0">
+        {/* Stacks on mobile, two-column on md+. */}
+        <div className="flex flex-col md:flex-row min-h-0">
           {/* Left column — main info */}
-          <div className="flex-1 p-5 flex flex-col gap-4 border-r border-[#2a2e3b]">
+          <div className="flex-1 p-4 md:p-5 flex flex-col gap-4 md:border-r border-b md:border-b-0 border-[#2a2e3b]">
 
             {/* Header */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+            <div className="flex items-start justify-between gap-3 flex-wrap pr-10 md:pr-0">
+              <div className="flex items-center gap-2 min-w-0">
                 <span className="text-2xl">{asset.flag1}{asset.flag2}</span>
-                <span className="text-base font-bold text-white">{asset.label}</span>
+                <span className="text-base font-bold text-white truncate">{asset.label}</span>
                 <span className="text-base font-bold text-orange-400">{asset.payout}%</span>
               </div>
               <div className="text-xs text-[#8b8f9a]">
@@ -99,10 +109,10 @@ export function AssetInfoModal({ asset, marketPrice, onClose, onTrade }: AssetIn
               </div>
             </div>
 
-            <div className="h-px bg-dashed border-t border-dashed border-[#2a2e3b]" />
+            <div className="h-px border-t border-dashed border-[#2a2e3b]" />
 
-            {/* Price + session change + CTA */}
-            <div className="flex items-center gap-8">
+            {/* Price + session change + CTA — stack on mobile, row on md+ */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-8">
               <div>
                 <div className="text-[11px] text-[#8b8f9a] mb-1">Preço agora</div>
                 <div className="text-xl font-bold text-white font-mono">
@@ -113,10 +123,10 @@ export function AssetInfoModal({ asset, marketPrice, onClose, onTrade }: AssetIn
                 <div className="text-[11px] text-[#8b8f9a] mb-1">Alteração de sessão</div>
                 <div className="text-base font-bold text-red-400">-1.39%</div>
               </div>
-              <div className="ml-auto">
+              <div className="sm:ml-auto">
                 <button
                   onClick={onTrade}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 transition-colors rounded-lg text-sm font-bold text-white"
+                  className="flex items-center justify-center gap-2 w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-500 transition-colors rounded-lg text-sm font-bold text-white"
                 >
                   Negocie agora
                   <ArrowRight size={14} />
@@ -149,8 +159,8 @@ export function AssetInfoModal({ asset, marketPrice, onClose, onTrade }: AssetIn
               </div>
             </div>
 
-            {/* Stats grid */}
-            <div className="grid grid-cols-4 gap-4">
+            {/* Stats grid — 2 cols on mobile, 4 on md+ */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
               <div>
                 <div className="text-[11px] text-[#8b8f9a] mb-1">Investimento mínimo</div>
                 <div className="text-sm font-bold text-white">R$5</div>
@@ -169,10 +179,10 @@ export function AssetInfoModal({ asset, marketPrice, onClose, onTrade }: AssetIn
               </div>
             </div>
 
-            {/* Change cards + mini chart */}
-            <div className="flex gap-3">
-              {/* Change cards */}
-              <div className="flex flex-col gap-2 w-[180px] flex-shrink-0">
+            {/* Change cards + mini chart — stack on mobile */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Change cards: column on mobile too (vertical), but full width */}
+              <div className="flex flex-col gap-2 w-full sm:w-[180px] sm:flex-shrink-0">
                 {CHANGES.map((c) => (
                   <div key={c.label} className="bg-[#252a3a] rounded-lg px-3 py-2">
                     <div className="text-[10px] text-[#8b8f9a] leading-tight mb-1">{c.label}</div>
@@ -189,8 +199,8 @@ export function AssetInfoModal({ asset, marketPrice, onClose, onTrade }: AssetIn
               </div>
             </div>
 
-            {/* Bottom stats */}
-            <div className="flex items-center gap-6 pt-1 border-t border-[#2a2e3b]">
+            {/* Bottom stats — wrap on narrow screens */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 md:gap-6 pt-2 border-t border-[#2a2e3b]">
               {BOTTOM_STATS.map((s) => (
                 <div key={s.label} className="flex items-center gap-1.5 text-xs">
                   <span className="text-[#8b8f9a]">{s.label}</span>
@@ -202,8 +212,8 @@ export function AssetInfoModal({ asset, marketPrice, onClose, onTrade }: AssetIn
             </div>
           </div>
 
-          {/* Right column — schedule */}
-          <div className="w-[280px] flex-shrink-0 p-5">
+          {/* Right column — schedule (full width on mobile, fixed 280px on md+) */}
+          <div className="w-full md:w-[280px] md:flex-shrink-0 p-4 md:p-5">
             <div className="text-sm font-bold text-white mb-4">Cronograma de Negociação</div>
 
             <div className="grid grid-cols-3 gap-1 mb-2">
