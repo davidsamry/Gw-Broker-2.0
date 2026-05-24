@@ -95,7 +95,7 @@ export function NovoTicketModal({ onClose, onCreated }: Props) {
               type="text"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              placeholder="Ex.: problema com saque"
+              placeholder="Ex: dúvidas"
               maxLength={200}
               className="w-full bg-[#252a3a] border border-[#2a2e3b] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/60"
             />
