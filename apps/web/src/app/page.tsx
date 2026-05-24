@@ -173,13 +173,18 @@ export default function TradingPage() {
       )
     }
     if (sidebarTab === 'CONTA')     return <ContaPage key={contaInitialTab} initialTab={contaInitialTab} />
-    if (sidebarTab === 'HISTORICO') return (
-      <div className={cn('flex flex-1 min-h-0 overflow-hidden', isMobile && 'flex-col')}>
-        {!isMobile && <HistoricoPanel onClose={() => setSidebarTab('TRADE')} isDemo={authStore.isDemo} />}
-        <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        {isMobile && <HistoricoPanel onClose={() => setSidebarTab('TRADE')} isDemo={authStore.isDemo} />}
-      </div>
-    )
+    if (sidebarTab === 'HISTORICO') {
+      // On mobile the user wants to scan their full history — chart on top
+      // would steal vertical space. Show the panel full-screen, matching
+      // the SUPORTE/CONTA pattern.
+      if (isMobile) return <HistoricoPanel onClose={() => setSidebarTab('TRADE')} isDemo={authStore.isDemo} />
+      return (
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <HistoricoPanel onClose={() => setSidebarTab('TRADE')} isDemo={authStore.isDemo} />
+          <TradingChart asset={selectedAsset} marketPrice={displayPrice} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
+        </div>
+      )
+    }
     if (sidebarTab === 'RANKING')   return (
       <div className={cn('flex flex-1 min-h-0 overflow-hidden', isMobile && 'flex-col')}>
         {!isMobile && <RankingPanel onClose={() => setSidebarTab('TRADE')} userName={authStore.user?.name} userCode="br" />}

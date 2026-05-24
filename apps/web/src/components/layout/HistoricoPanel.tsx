@@ -83,7 +83,9 @@ export function HistoricoPanel({ onClose, isDemo }: HistoricoPanelProps) {
   })
 
   return (
-    <div className="flex flex-col bg-[#1a1e2e] border-r border-[#2a2e3b] flex-shrink-0" style={{ width: 280 }}>
+    // Width: 280px on desktop (side panel beside chart). Full width + height
+    // on mobile, where page.tsx renders this as the sole content of HISTORICO.
+    <div className="flex flex-col bg-[#1a1e2e] md:border-r border-[#2a2e3b] flex-shrink-0 w-full h-full md:w-[280px]">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a2e3b]">
         <h2 className="text-base font-bold text-white">Histórico Trading</h2>
