@@ -13,6 +13,7 @@ import { depositRoutes } from './deposits/routes.js'
 import { bspayWebhookRoutes } from './webhooks/bspay.js'
 import { ticketRoutes } from './tickets/routes.js'
 import { otcRoutes } from './otc/routes.js'
+import { otcV2Routes } from './otc/v2/routes.js'
 import { prisma } from './prisma.js'
 
 export async function buildApp() {
@@ -96,6 +97,7 @@ export async function buildApp() {
   await app.register(bspayWebhookRoutes, { prefix: '/webhooks' })
   await app.register(ticketRoutes,       { prefix: '/tickets'  })
   await app.register(otcRoutes,          { prefix: '/otc'      })
+  await app.register(otcV2Routes,        { prefix: '/otc/v2'   })
 
   return app
 }

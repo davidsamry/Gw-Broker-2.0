@@ -5,6 +5,7 @@ import { CANDLES_PER_TF, ENGINE_TICK_INTERVAL_MS, OTC_TIMEFRAMES } from './types
 import { maybeTransitionRegime, pickRegimeDurationMs, stepLiquidity, stepPrice } from './pricingEngine.js'
 import { CandleBuilder } from './candleBuilder.js'
 import { bootstrapHistoricalCandles, loadLatestCandlePerTimeframe } from './bootstrap.js'
+import { publishCandle, publishTick } from './events.js'
 
 // OTC v2 worker — singleton orchestrator. Runs one tick loop per asset
 // and one liquidity update loop per asset. Persistence is batched to
@@ -114,6 +115,10 @@ function startAssetLoop(assetId: string): void {
     const tick: OtcTick = { assetId: s.config.id, price: round5(price), recordedAt: new Date(now) }
     pendingTicks.push(tick)
 
+    // Publish raw tick to the bus — SSE subscribers throttle as needed
+    // so the engine doesn't have to know per-client cadence.
+    publishTick({ assetId: tick.assetId, price: tick.price, time: now })
+
     // Feed all timeframe builders for this asset
     const cbs = builders.get(assetId) ?? []
     for (const cb of cbs) {
@@ -131,8 +136,24 @@ function startAssetLoop(assetId: string): void {
       }
       candleCache.set(cacheKey, buf)
 
-      // Queue persist on finalized
-      if (finalized) pendingCandles.push(finalized)
+      // Live update for chart subscribers (SSE throttles to ~1Hz/client)
+      publishCandle({
+        assetId, timeframe: cb.timeframe,
+        openTime: current.openTime.getTime(),
+        open: current.open, high: current.high, low: current.low, close: current.close,
+        isClosed: false,
+      })
+
+      // Queue persist on finalized AND emit the closing event for the bar.
+      if (finalized) {
+        pendingCandles.push(finalized)
+        publishCandle({
+          assetId, timeframe: cb.timeframe,
+          openTime: finalized.openTime.getTime(),
+          open: finalized.open, high: finalized.high, low: finalized.low, close: finalized.close,
+          isClosed: true,
+        })
+      }
     }
   }, period)
 
