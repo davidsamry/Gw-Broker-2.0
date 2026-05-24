@@ -15,10 +15,22 @@ interface AssetSelectorModalProps {
 
 type Category = 'Moedas' | 'Cripto' | 'Matérias-Primas' | 'Ações'
 
-const CATEGORIES: Category[] = ['Moedas', 'Cripto', 'Matérias-Primas', 'Ações']
+// Canonical order shown to the user when a tab has at least one asset.
+// We filter this down to "present" categories below so empty tabs don't
+// render — important after the catalogue was trimmed to Binance crypto only.
+const ALL_CATEGORIES: Category[] = ['Moedas', 'Cripto', 'Matérias-Primas', 'Ações']
 
 export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, onClose }: AssetSelectorModalProps) {
-  const [activeCategory, setActiveCategory] = useState<Category>('Moedas')
+  // Only show category tabs that actually have at least one asset in the
+  // current catalogue. Defaults activeCategory to the first present one
+  // so the modal never opens on an empty tab.
+  const categories = useMemo<Category[]>(() => {
+    const present = new Set<Category>()
+    for (const a of assets) present.add(a.category)
+    return ALL_CATEGORIES.filter((c) => present.has(c))
+  }, [assets])
+
+  const [activeCategory, setActiveCategory] = useState<Category>(categories[0] ?? 'Cripto')
   const [search, setSearch] = useState('')
   const [showFavOnly, setShowFavOnly] = useState(false)
   const [favorites, setFavorites] = useState<Set<string>>(new Set(DEFAULT_FAVORITES))
@@ -94,7 +106,7 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
 
       {/* Category tabs */}
       <div className="flex items-center gap-1 px-4 pb-3">
-        {CATEGORIES.map((cat) => (
+        {categories.map((cat) => (
           <button
             key={cat}
             onClick={() => setActiveCategory(cat)}
