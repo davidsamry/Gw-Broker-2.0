@@ -24,9 +24,30 @@ async function fetchBinanceLastPrice(marketSymbol: string): Promise<number | nul
   }
 }
 
+// Latest OTC tick from asset_price_ticks for the given assetId. Same source
+// the chart's SSE delivers to the browser, so user-visible exit and worker-
+// computed exit converge within ~1 tick (worker poll cadence == OTC worker
+// tick cadence == 1s). Replaces the old coin-flip fallback for OTC ops.
+async function fetchLatestOtcTick(assetId: string): Promise<number | null> {
+  try {
+    const rows = await prisma.$queryRaw<Array<{ price: Prisma.Decimal }>>`
+      SELECT price FROM asset_price_ticks
+      WHERE "assetId" = ${assetId}
+      ORDER BY "recordedAt" DESC
+      LIMIT 1
+    `
+    if (rows.length === 0) return null
+    const p = Number(rows[0].price)
+    return Number.isFinite(p) && p > 0 ? p : null
+  } catch {
+    return null
+  }
+}
+
 async function resolveOperation(op: {
   id:           string
   accountId:    string
+  assetId:      string
   amount:       Prisma.Decimal
   payout:       number
   entryPrice:   Prisma.Decimal
@@ -37,10 +58,20 @@ async function resolveOperation(op: {
     const entry = Number(op.entryPrice)
     const amount = Number(op.amount)
 
+    // exitPrice resolution order:
+    //   1. BINANCE → public ticker (real market close).
+    //   2. OTC     → latest authoritative tick from asset_price_ticks
+    //                (same source the user's chart shows).
+    //   3. Fallback (no marketSymbol AND no tick history yet, or both
+    //      live sources errored) → small random nudge so the op still
+    //      resolves and doesn't hang OPEN forever.
     let exitPrice: number | null = null
-    if (op.marketSymbol) exitPrice = await fetchBinanceLastPrice(op.marketSymbol)
+    if (op.marketSymbol) {
+      exitPrice = await fetchBinanceLastPrice(op.marketSymbol)
+    } else {
+      exitPrice = await fetchLatestOtcTick(op.assetId)
+    }
     if (exitPrice == null) {
-      // Fallback for assets without a live market: small random tick.
       const change = (Math.random() * 0.01) - 0.005
       exitPrice = parseFloat((entry * (1 + change)).toFixed(5))
     } else {
@@ -96,7 +127,7 @@ async function tick() {
       orderBy: { expiresAt: 'asc' },
       take:    BATCH_SIZE,
       select:  {
-        id: true, accountId: true, amount: true, payout: true,
+        id: true, accountId: true, assetId: true, amount: true, payout: true,
         entryPrice: true, direction: true, marketSymbol: true,
       },
     })
