@@ -80,6 +80,19 @@ enum WithdrawalMethod {
   BANK_TRANSFER
 }
 
+enum TicketStatus {
+  OPEN          // Aberto — awaiting first admin response
+  IN_PROGRESS   // Em andamento — admin already replied, ball is in user's court / WIP
+  RESOLVED      // Resolvido — admin closed after answering
+  CLOSED        // Fechado — closed without resolution (duplicate / spam / etc.)
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -113,6 +126,8 @@ model User {
 
   accounts        Account[]
   kycSubmission   KycSubmission?
+  tickets         Ticket[]
+  ticketMessages  TicketMessage[]
 
   @@map("users")
 }
@@ -230,4 +245,46 @@ model Withdrawal {
   @@index([accountId, status])
   @@index([status, createdAt])
   @@map("withdrawals")
+}
+
+// Support ticket opened by a user. The first message body lives in TicketMessage
+// (so all replies share one model); the ticket row itself only carries metadata
+// (subject, status, priority). Admin actions: reply, change status, change priority.
+model Ticket {
+  id         String         @id @default(cuid())
+  userId     String
+  subject    String
+  status     TicketStatus   @default(OPEN)
+  priority   TicketPriority @default(MEDIUM)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+  // Last activity timestamp — used for sorting in admin view. Bumped on any
+  // new message OR status/priority change.
+  lastActivityAt DateTime   @default(now())
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  TicketMessage[]
+
+  @@index([status, lastActivityAt])
+  @@index([userId, createdAt])
+  @@map("tickets")
+}
+
+// One message in a ticket thread. authorId is the user OR the admin id.
+// isAdmin distinguishes the two without an extra join (admins are still
+// rows in `users`, just with role = ADMIN). The first message of a ticket
+// is created together with the ticket itself (atomic in the create handler).
+model TicketMessage {
+  id        String   @id @default(cuid())
+  ticketId  String
+  authorId  String
+  isAdmin   Boolean  @default(false)
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_messages")
 }
