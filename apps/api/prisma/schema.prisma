@@ -99,6 +99,45 @@ enum AssetCategory {
   CRYPTO        // Crypto spot pairs
 }
 
+// ── OTC v2 enums (new pricing engine, separate from legacy AssetCategory)
+enum OtcCategory {
+  FOREX
+  CRYPTO
+  COMMODITIES
+  INDICES
+}
+
+enum OtcRegime {
+  LATERAL
+  TREND_UP_WEAK
+  TREND_UP_STRONG
+  TREND_DOWN_WEAK
+  TREND_DOWN_STRONG
+  HIGH_VOL
+  LOW_VOL
+  COMPRESSION
+  EXPANSION
+}
+
+enum OtcEventDirection {
+  UP
+  DOWN
+  NEUTRAL
+}
+
+enum OtcEventStrength {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum OtcEventStatus {
+  SCHEDULED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -355,4 +394,158 @@ model TicketMessage {
 
   @@index([ticketId, createdAt])
   @@map("ticket_messages")
+}
+
+// ─── OTC v2 — server-side pricing engine ──────────────────────────────────
+// Brand new tables (otc_* prefix) kept fully isolated from the legacy
+// `assets` + `asset_price_ticks` pair, which stays put until Etapa 8
+// cleanup. Binance assets are untouched — they live in mockData.ts on the
+// frontend and use Binance's own kline WebSocket. The new engine only
+// drives the 5 OTC assets seeded in migration 20260524_otc_v2_seed.
+
+model OtcAsset {
+  id              String       @id              // 'eur-usd-otc'
+  symbol          String       @unique          // 'EUR/USD'
+  name            String                        // 'EUR/USD OTC'
+  category        OtcCategory
+  enabled         Boolean      @default(true)
+  paused          Boolean      @default(false)  // admin can freeze the engine for this asset
+  payout          Int          @default(85)
+  // Baseline price the random walk mean-reverts toward.
+  seedPrice       Decimal      @db.Decimal(18, 5)
+  // Tick size as a fraction of seedPrice (e.g., 0.0005 = 5 basis points).
+  volatilityBase  Float        @default(0.0005)
+  // Multiplies the engine's tick rate. 1 = base (10Hz); 2 = "fast" asset.
+  speedMultiplier Float        @default(1.0)
+  displayOrder    Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  state           OtcMarketState?
+  liquidity       OtcLiquidityState?
+  ticks           OtcTick[]
+  candles         OtcCandle[]
+  events          OtcScheduledEvent[]
+
+  @@index([category, displayOrder])
+  @@map("otc_assets")
+}
+
+// Append-only tick stream. Engine writes batched (~1s) to keep DB
+// pressure low; retention ~1h via a periodic prune job.
+model OtcTick {
+  id          BigInt   @id @default(autoincrement())
+  assetId     String
+  price       Decimal  @db.Decimal(18, 5)
+  recordedAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  asset       OtcAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId, recordedAt(sort: Desc)])
+  @@map("otc_ticks")
+}
+
+// Aggregated OHLC bars per (asset, timeframe). One row per slot.
+// `finalizedAt` non-null = candle closed (timeframe rolled). Worker reads
+// the candle covering `op.expiresAt` for resolution; never recomputes.
+model OtcCandle {
+  id           BigInt   @id @default(autoincrement())
+  assetId      String
+  timeframe    Int                                       // seconds: 5, 15, 30, 60, 300
+  openTime     DateTime @db.Timestamptz(3)
+  openPrice    Decimal  @db.Decimal(18, 5)
+  highPrice    Decimal  @db.Decimal(18, 5)
+  lowPrice     Decimal  @db.Decimal(18, 5)
+  closePrice   Decimal  @db.Decimal(18, 5)
+  tickCount    Int
+  finalizedAt  DateTime? @db.Timestamptz(3)
+
+  asset        OtcAsset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, timeframe, openTime])
+  @@index([assetId, timeframe, openTime(sort: Desc)])
+  @@map("otc_candles")
+}
+
+// Per-asset market regime FSM state. One row per asset (assetId is PK).
+model OtcMarketState {
+  assetId          String     @id
+  currentRegime    OtcRegime  @default(LATERAL)
+  regimeStartedAt  DateTime   @default(now())
+  regimeDurationS  Int        @default(60)
+  // Effective drift applied per tick (signed). Modulated by regime + events.
+  currentDrift     Float      @default(0)
+  // Effective volatility per tick. Modulated by regime.
+  currentVol       Float      @default(0.0005)
+  // Admin override: long-running bias added to drift. -1..+1.
+  trendBias        Float      @default(0)
+  updatedAt        DateTime   @updatedAt
+
+  asset            OtcAsset   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  @@map("otc_market_state")
+}
+
+// Per-asset liquidity / order-book simulation. Slow-moving (~10s update
+// cadence) compared to ticks.
+model OtcLiquidityState {
+  assetId       String   @id
+  spread        Float    @default(0.0001)
+  buyPressure   Float    @default(0.5)   // 0..1
+  sellPressure  Float    @default(0.5)
+  volume        Float    @default(1.0)   // 0.5..2.0 multiplier
+  depth         Float    @default(1.0)
+  speed         Float    @default(1.0)
+  updatedAt     DateTime @updatedAt
+
+  asset         OtcAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  @@map("otc_liquidity_state")
+}
+
+// Admin-scheduled events that bias the engine for a window.
+model OtcScheduledEvent {
+  id           String              @id @default(cuid())
+  assetId      String
+  startAt      DateTime
+  durationSec  Int
+  direction    OtcEventDirection
+  strength     OtcEventStrength
+  volatility   Float?                              // optional override during the event
+  note         String?
+  status       OtcEventStatus      @default(SCHEDULED)
+  createdBy    String                              // admin userId
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  asset        OtcAsset            @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([status, startAt])
+  @@index([assetId, status])
+  @@map("otc_scheduled_events")
+}
+
+// Engine self-diagnostic log (errors, regime transitions, etc.).
+model OtcEngineLog {
+  id         BigInt   @id @default(autoincrement())
+  level      String                                // 'INFO' | 'WARN' | 'ERROR'
+  message    String
+  context    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@map("otc_engine_logs")
+}
+
+// Audit trail of admin actions on OTC engine.
+model OtcAdminLog {
+  id           BigInt   @id @default(autoincrement())
+  adminId      String
+  action       String                              // 'UPDATE_VOLATILITY', 'PAUSE_ASSET', ...
+  assetId      String?
+  beforeState  Json?
+  afterState   Json?
+  createdAt    DateTime @default(now())
+
+  @@index([assetId, createdAt(sort: Desc)])
+  @@index([adminId, createdAt(sort: Desc)])
+  @@map("otc_admin_logs")
 }

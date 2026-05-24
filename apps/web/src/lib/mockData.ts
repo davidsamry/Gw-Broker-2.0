@@ -28,12 +28,24 @@ export interface ChartTradeEvent {
   profit?: number
 }
 
-// Catalog trimmed to Binance-priced crypto only. The DB mirrors this list
-// (see migration 20260524053000_keep_only_binance_crypto). Re-introducing
-// other categories means adding rows here AND seeding the DB so admin /
-// pricing engine stays in sync.
+// Catalog: 17 Binance-priced crypto + 5 OTC v2 server-priced assets.
+// Binance entries point at marketSymbol so the chart uses the Binance kline
+// WebSocket. OTC entries have no marketSymbol or source — the chart routes
+// these to the new OTC engine via /otc/stream (Etapa 4 onwards).
+// Adding/removing assets here must stay in sync with the DB (otc_assets +
+// Binance catalog) so admin and pricing engine see the same list.
 export const ASSETS: Asset[] = [
-  // Binance crypto
+  // ── OTC v2 — server-priced (Etapa 2 onwards) ────────────────────────────
+  // During Etapa 1 these appear in the asset selector but the chart will
+  // fall back to mock candles since the engine isn't wired yet. Wiring
+  // lands in Etapa 4 (chart consumes new stream).
+  { id: 'eur-usd-otc', symbol: 'EUR/USD', label: 'EUR/USD (OTC)', type: 'OTC', category: 'Moedas',          payout: 85, payout5min: 85, flag1: '🇪🇺', flag2: '🇺🇸', code1: 'eu', code2: 'us', price: 1.08500,  change24h: 0 },
+  { id: 'gbp-jpy-otc', symbol: 'GBP/JPY', label: 'GBP/JPY (OTC)', type: 'OTC', category: 'Moedas',          payout: 87, payout5min: 87, flag1: '🇬🇧', flag2: '🇯🇵', code1: 'gb', code2: 'jp', price: 198.50,   change24h: 0 },
+  { id: 'btc-usd-otc', symbol: 'BTC/USD', label: 'BTC/USD (OTC)', type: 'OTC', category: 'Cripto',          payout: 82, payout5min: 82, flag1: '₿',  flag2: '🇺🇸', code1: 'crypto:btc', code2: 'us', price: 68000, change24h: 0 },
+  { id: 'gold-otc',    symbol: 'GOLD',    label: 'GOLD (OTC)',    type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🥇', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 2350,    change24h: 0 },
+  { id: 'nasdaq-otc',  symbol: 'NASDAQ',  label: 'NASDAQ (OTC)',  type: 'OTC', category: 'Ações',           payout: 78, payout5min: 78, flag1: '📊', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 18450,   change24h: 0 },
+
+  // ── Binance crypto (live kline WS) ──────────────────────────────────────
   { id: 'btc-usdt-binance', symbol: 'BTC/USDT', label: 'Bitcoin / USDT', type: 'Crypto', source: 'BINANCE', marketSymbol: 'BTCUSDT', category: 'Cripto', payout: 95, payout5min: 95, flag1: '₿', flag2: 'USDT', code1: 'crypto:btc', code2: 'us', price: 67420.15, change24h: 1.24 },
   { id: 'eth-usdt-binance', symbol: 'ETH/USDT', label: 'Ethereum / USDT', type: 'Crypto', source: 'BINANCE', marketSymbol: 'ETHUSDT', category: 'Cripto', payout: 95, payout5min: 95, flag1: 'Ξ', flag2: 'USDT', code1: 'crypto:eth', code2: 'us', price: 3521.42, change24h: 0.86 },
   { id: 'bnb-usdt-binance', symbol: 'BNB/USDT', label: 'BNB / USDT', type: 'Crypto', source: 'BINANCE', marketSymbol: 'BNBUSDT', category: 'Cripto', payout: 95, payout5min: 95, flag1: '🪙', flag2: 'USDT', code1: 'crypto:bnb', code2: 'us', price: 612.38, change24h: -0.11 },
