@@ -110,16 +110,24 @@ export async function startOtcV2Worker(): Promise<void> {
     //    bad row for one asset doesn't strand the other four. ALSO
     //    backfills any candle slots that elapsed during the downtime
     //    so the chart resumes without a time gap.
-    const latestCandles = await loadLatestCandlePerTimeframe(configs.map(c => c.id))
+    const latestCandles   = await loadLatestCandlePerTimeframe(configs.map(c => c.id))
     const persistedStates = await loadPersistedRuntimeStates(configs.map(c => c.id))
+    // Fase 2: load latest tick per asset BEFORE buildInitialState so the
+    // "last known price" can come from the freshest source available
+    // (tick is finer-grained than candle close — wins if engine shut
+    // down mid-slot before rollover persisted the in-progress candle).
+    const latestTicks     = await loadLatestTicks(configs.map(c => c.id))
+
     for (const cfg of configs) {
       try {
-        // Backfill missing candles BEFORE seeding builders, so they
-        // pick up the freshly-inserted "downtime" slot as their state.
-        const last60 = latestCandles.get(`${cfg.id}:60`)
-        if (last60) {
-          await backfillMissingCandles(cfg, last60)
-          // Re-read latest after backfill so builder seeds match DB.
+        // Always try backfill (no longer gated on tf=60 existing — the
+        // function handles each tf independently and skips tfs with no
+        // anchor row). Catches the case where only some tfs have data.
+        const backfilled = await backfillMissingCandles(cfg)
+
+        // Re-read latest candles after backfill so builders pick up the
+        // newly-inserted slots as their seed state.
+        if (backfilled > 0) {
           const refreshed = await loadLatestCandlePerTimeframe([cfg.id])
           for (const tf of OTC_TIMEFRAMES) {
             const k = `${cfg.id}:${tf}`
@@ -128,7 +136,17 @@ export async function startOtcV2Worker(): Promise<void> {
           }
         }
 
-        assetStates.set(cfg.id, buildInitialState(cfg, latestCandles, persistedStates.get(cfg.id)))
+        // Fase 2: buildInitialState now uses all 3 sources (tick, multi-
+        // tf candle, seedPrice) and returns the source it picked so we
+        // can log it clearly. Never falls back to seedPrice if ANY
+        // historical data exists for the asset.
+        const result = buildInitialState(
+          cfg,
+          latestCandles,
+          persistedStates.get(cfg.id),
+          latestTicks.get(cfg.id) ?? null,
+        )
+        assetStates.set(cfg.id, result.state)
 
         const cbs: CandleBuilder[] = []
         for (const tf of OTC_TIMEFRAMES) {
@@ -139,6 +157,23 @@ export async function startOtcV2Worker(): Promise<void> {
         builders.set(cfg.id, cbs)
 
         await primeCandleCache(cfg.id)
+
+        // Structured boot log — one line per asset, easy to grep in
+        // EasyPanel. Covers: which source restored the price, how far
+        // behind the latest tick/candle was, how many slots were
+        // backfilled, and whether the regime was resumed from snapshot.
+        const persisted = persistedStates.get(cfg.id)
+        const regimeResumed = persisted?.regime && result.state.regime === persisted.regime
+        console.log(
+          `[otc-boot] asset=${cfg.id}` +
+          ` startPrice=${result.state.price.toFixed(5)}` +
+          ` source=${result.source}` +
+          ` lastTickAt=${result.lastTickAt?.toISOString() ?? '-'}` +
+          ` lastCandleAt=${result.lastCandleAt?.toISOString() ?? '-'}` +
+          ` backfilled=${backfilled}` +
+          ` regime=${result.state.regime}` +
+          ` regimeResumed=${regimeResumed ? 'yes' : 'no'}`,
+        )
       } catch (err) {
         console.error(`[otc-v2] hydrate failed for ${cfg.id} — skipping`, err)
         assetStates.delete(cfg.id)
@@ -352,11 +387,24 @@ export async function reloadOtcV2Assets(): Promise<number> {
     if (existing) {
       existing.config = cfg
     } else {
-      assetStates.set(cfg.id, buildInitialState(cfg, new Map()))
-      const cbs = OTC_TIMEFRAMES.map(tf => new CandleBuilder(cfg.id, tf))
+      // New asset added live — try to hydrate from any existing data
+      // (candles + tick) so it doesn't snap to seedPrice if there's
+      // anything in the DB for it. Same priority chain as boot.
+      const latestCandles = await loadLatestCandlePerTimeframe([cfg.id])
+      const latestTicks   = await loadLatestTicks([cfg.id])
+      const result = buildInitialState(
+        cfg, latestCandles, undefined, latestTicks.get(cfg.id) ?? null,
+      )
+      assetStates.set(cfg.id, result.state)
+      const cbs = OTC_TIMEFRAMES.map(tf => {
+        const cb = new CandleBuilder(cfg.id, tf)
+        cb.seedFromCandle(latestCandles.get(`${cfg.id}:${tf}`) ?? null)
+        return cb
+      })
       builders.set(cfg.id, cbs)
       await primeCandleCache(cfg.id)
       startAssetLoop(cfg.id)
+      console.log(`[otc-reload] asset=${cfg.id} startPrice=${result.state.price.toFixed(5)} source=${result.source}`)
     }
   }
   return configs.length
@@ -507,23 +555,75 @@ async function loadAssetConfigs(): Promise<OtcAssetConfig[]> {
   }))
 }
 
+// Fase 2 — what source the recovered price came from. Used only for
+// structured boot logging; doesn't affect engine behavior.
+type StartPriceSource =
+  | 'tick'                            // latest otc_ticks row (freshest)
+  | 'candle-tf5' | 'candle-tf15'      // most-recent candle across tfs
+  | 'candle-tf30' | 'candle-tf60'
+  | 'candle-tf300'
+  | 'seed'                            // last resort — no history at all
+
+interface InitialStateResult {
+  state:         OtcAssetState
+  source:        StartPriceSource
+  lastTickAt:    Date | null
+  lastCandleAt:  Date | null
+}
+
+// What loadLatestTicks returns per asset.
+interface LatestTickInfo {
+  price:      number
+  recordedAt: Date
+}
+
 // Stateful resume: prefers the persisted runtime state (regime,
 // liquidity, trendBias) over default values so a restart picks up
-// exactly where the previous engine left off. Falls back to defaults
-// only when there's no row in otc_market_state / otc_liquidity_state
-// (first boot ever for this asset, or fresh DB).
+// exactly where the previous engine left off. Price source falls
+// through: latest tick → most recent candle (any tf) → seedPrice.
+// NEVER falls back to seedPrice if any history exists for the asset.
 function buildInitialState(
   cfg:             OtcAssetConfig,
   latestCandles:   Map<string, OtcCandle | null>,
   persisted?:      PersistedRuntimeState,
-): OtcAssetState {
-  // Resume price from the latest candle's close — same as before.
-  const lastTfCandle = latestCandles.get(`${cfg.id}:60`) ?? null
-  const startPrice = lastTfCandle ? lastTfCandle.close : cfg.seedPrice
+  latestTick?:     LatestTickInfo | null,
+): InitialStateResult {
+  // ── Source 1: most recent candle across ALL timeframes ─────────────
+  // Previously we hard-coded tf=60. If the engine ran with only the
+  // shorter tfs ticking (admin-paused longer tfs, fresh asset, etc.)
+  // we'd ignore real history and fall back to seedPrice.
+  let bestCandle: OtcCandle | null = null
+  let bestSource: StartPriceSource = 'seed'
+  for (const tf of OTC_TIMEFRAMES) {
+    const c = latestCandles.get(`${cfg.id}:${tf}`)
+    if (!c) continue
+    if (!bestCandle || c.openTime.getTime() > bestCandle.openTime.getTime()) {
+      bestCandle = c
+      bestSource = `candle-tf${tf}` as StartPriceSource
+    }
+  }
 
-  // Regime — if we have a persisted regime and it hasn't run out of
-  // duration during the downtime, keep it. Otherwise enter LATERAL
-  // (the FSM will transition naturally).
+  // ── Pick start price by freshness ──────────────────────────────────
+  // Tick wins if it's strictly more recent than the best candle's slot
+  // start (typical case: engine shut down mid-slot, ticks for that
+  // slot are persisted but the candle hadn't rolled over yet).
+  let startPrice: number
+  let source: StartPriceSource
+  if (
+    latestTick &&
+    (!bestCandle || latestTick.recordedAt.getTime() > bestCandle.openTime.getTime())
+  ) {
+    startPrice = latestTick.price
+    source     = 'tick'
+  } else if (bestCandle) {
+    startPrice = bestCandle.close
+    source     = bestSource
+  } else {
+    startPrice = cfg.seedPrice
+    source     = 'seed'
+  }
+
+  // ── Regime — resume from snapshot if still has runway ──────────────
   let regime: OtcRegime = 'LATERAL'
   let regimeStartedAt   = Date.now()
   let regimeDurationMs  = pickRegimeDurationMs(regime)
@@ -531,7 +631,6 @@ function buildInitialState(
     const elapsed = Date.now() - persisted.regimeStartedAt.getTime()
     const remaining = (persisted.regimeDurationS ?? 60) * 1000 - elapsed
     if (remaining > 5_000) {
-      // Regime still has > 5s left — resume it with the remaining time.
       regime           = persisted.regime
       regimeStartedAt  = persisted.regimeStartedAt.getTime()
       regimeDurationMs = (persisted.regimeDurationS ?? 60) * 1000
@@ -539,20 +638,51 @@ function buildInitialState(
   }
 
   return {
-    config:           cfg,
-    price:            startPrice,
-    smoothedPrice:    startPrice,
-    regime,
-    regimeStartedAt,
-    regimeDurationMs,
-    spread:           persisted?.spread       ?? 0.0001,
-    buyPressure:      persisted?.buyPressure  ?? 0.5,
-    sellPressure:     persisted?.sellPressure ?? 0.5,
-    volume:           persisted?.volume       ?? 1.0,
-    depth:            persisted?.depth        ?? 1.0,
-    speed:            persisted?.speed        ?? 1.0,
-    trendBias:        persisted?.trendBias    ?? 0,
+    state: {
+      config:           cfg,
+      price:            startPrice,
+      smoothedPrice:    startPrice,
+      regime,
+      regimeStartedAt,
+      regimeDurationMs,
+      spread:           persisted?.spread       ?? 0.0001,
+      buyPressure:      persisted?.buyPressure  ?? 0.5,
+      sellPressure:     persisted?.sellPressure ?? 0.5,
+      volume:           persisted?.volume       ?? 1.0,
+      depth:            persisted?.depth        ?? 1.0,
+      speed:            persisted?.speed        ?? 1.0,
+      trendBias:        persisted?.trendBias    ?? 0,
+    },
+    source,
+    lastTickAt:   latestTick?.recordedAt ?? null,
+    lastCandleAt: bestCandle?.openTime   ?? null,
   }
+}
+
+// Fase 2 — one round-trip to fetch the latest tick per asset, using
+// DISTINCT ON (Postgres) + the index on (assetId, recordedAt DESC).
+// Returns null per asset when otc_ticks has no row for it (fresh asset
+// or post-prune state where ticks were cleaned past the retention).
+async function loadLatestTicks(assetIds: string[]): Promise<Map<string, LatestTickInfo | null>> {
+  const out = new Map<string, LatestTickInfo | null>()
+  for (const id of assetIds) out.set(id, null)
+  if (assetIds.length === 0) return out
+  try {
+    const rows = await prisma.$queryRaw<Array<{
+      assetId: string; price: string; recordedAt: Date;
+    }>>`
+      SELECT DISTINCT ON ("assetId") "assetId", price::text, "recordedAt"
+      FROM otc_ticks
+      WHERE "assetId" = ANY(${assetIds}::text[])
+      ORDER BY "assetId", "recordedAt" DESC
+    `
+    for (const r of rows) {
+      out.set(r.assetId, { price: Number(r.price), recordedAt: r.recordedAt })
+    }
+  } catch (err) {
+    console.error('[otc-v2] loadLatestTicks failed — tick fallback disabled', err)
+  }
+  return out
 }
 
 // What we read out of otc_market_state + otc_liquidity_state at boot.
@@ -914,13 +1044,18 @@ async function detectAndFillGaps(asset: OtcAssetConfig, tf: number): Promise<voi
 // doesn't choke the boot with tens of thousands of inserts. Beyond the
 // cap, we just leave the gap — the user can scroll past it.
 const MAX_BACKFILL_SLOTS = 600   // ~10 min for tf=1s, ~10h for tf=60s
-async function backfillMissingCandles(asset: OtcAssetConfig, last60: OtcCandle): Promise<void> {
+// Fase 2: function no longer requires `last60` param — operates per-tf
+// using each tf's own latest candle as anchor. tfs without any anchor
+// (no rows at all) are skipped silently rather than forcing the call
+// site to gate the entire backfill on tf=60 existing.
+// Returns total slots filled across all tfs (used by boot log).
+async function backfillMissingCandles(asset: OtcAssetConfig): Promise<number> {
+  let totalFilled = 0
   for (const tf of OTC_TIMEFRAMES) {
     try {
       const tfMs = tf * 1000
       const nowSlot = Math.floor(Date.now() / tfMs) * tfMs
 
-      // Find the latest stored candle for this specific tf, not just tf=60.
       const rows = await prisma.$queryRaw<Array<{ openTime: Date; closePrice: string }>>`
         SELECT "openTime", "closePrice"::text
         FROM otc_candles
@@ -928,8 +1063,9 @@ async function backfillMissingCandles(asset: OtcAssetConfig, last60: OtcCandle):
         ORDER BY "openTime" DESC
         LIMIT 1
       `
-      const lastOpen = rows[0]?.openTime?.getTime() ?? (last60.openTime.getTime())
-      const lastClose = rows[0] ? Number(rows[0].closePrice) : last60.close
+      if (rows.length === 0) continue   // no anchor for this tf — skip
+      const lastOpen = rows[0].openTime.getTime()
+      const lastClose = Number(rows[0].closePrice)
 
       const gapMs = nowSlot - lastOpen - tfMs
       if (gapMs <= 0) continue
@@ -938,7 +1074,7 @@ async function backfillMissingCandles(asset: OtcAssetConfig, last60: OtcCandle):
 
       // Walk softly from lastClose — very small per-candle variance so
       // the downtime stretch looks like a calm holding pattern, not a
-      // rally. Bounded by ±0.5% of seed over the whole backfill.
+      // rally. Bounded by ±0.5% of vol over the whole backfill.
       const maxStep = asset.volatilityBase * 0.5
       let price = lastClose
       const rowsToInsert: Array<{
@@ -956,7 +1092,6 @@ async function backfillMissingCandles(asset: OtcAssetConfig, last60: OtcCandle):
         price = close
       }
 
-      // Batched insert (500/batch — same cap as bootstrap).
       const BATCH = 500
       for (let i = 0; i < rowsToInsert.length; i += BATCH) {
         const chunk  = rowsToInsert.slice(i, i + BATCH)
@@ -975,12 +1110,14 @@ async function backfillMissingCandles(asset: OtcAssetConfig, last60: OtcCandle):
         `
       }
       if (rowsToInsert.length > 0) {
+        totalFilled += rowsToInsert.length
         console.log(`[otc-v2] backfilled ${asset.id} tf=${tf}: ${rowsToInsert.length} slots`)
       }
     } catch (err) {
       console.error(`[otc-v2] backfillMissingCandles failed for ${asset.id} tf=${tf}`, err)
     }
   }
+  return totalFilled
 }
 
 async function primeCandleCache(assetId: string): Promise<void> {
