@@ -326,8 +326,10 @@ export default function TradingPage() {
       {/* ── MOBILE layout (< md) ─────────────────────────────────────────── */}
       <div className="flex md:hidden h-full flex-col overflow-hidden">
 
-        {/* Mobile header */}
-        <header className="flex items-center justify-between gap-2 px-4 h-12 bg-[#1d2130] border-b border-[#2a2e3b] flex-shrink-0">
+        {/* Mobile header — taller (h-14 vs the previous h-12) so the
+            balance chip + deposit CTA have proper tap targets and
+            breathing room. */}
+        <header className="flex items-center justify-between gap-2 px-4 h-14 bg-[#1d2130] border-b border-[#2a2e3b] flex-shrink-0">
           {/* Logo */}
           <div className="flex-shrink min-w-0">
             <Logo size="sm" />
@@ -336,25 +338,26 @@ export default function TradingPage() {
 
           {/* Right: balance + deposit */}
           <div className="flex items-center gap-1.5 min-w-0">
-            {/* Balance chip — shrinks if needed */}
+            {/* Balance chip — shrinks if needed; h-10 sets a consistent
+                size with the deposit button alongside it. */}
             <div className="relative min-w-0">
               <button
                 onClick={() => setMobileAccountOpen(v => !v)}
-                className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-[#252a3a] border border-[#2a2e3b] max-w-full"
+                className="flex items-center gap-1.5 h-10 px-2.5 rounded-lg bg-[#252a3a] border border-[#2a2e3b] max-w-full"
               >
                 {isDemo
-                  ? <GraduationCap size={16} className="text-yellow-400 flex-shrink-0" />
-                  : <Gem size={16} className="text-purple-400 flex-shrink-0" />
+                  ? <GraduationCap size={18} className="text-yellow-400 flex-shrink-0" />
+                  : <Gem size={18} className="text-purple-400 flex-shrink-0" />
                 }
                 <div className="text-left min-w-0">
-                  <div className={cn('text-[9px] font-bold leading-tight', isDemo ? 'text-yellow-400' : 'text-green-400')}>
+                  <div className={cn('text-[10px] font-bold leading-tight', isDemo ? 'text-yellow-400' : 'text-green-400')}>
                     {isDemo ? 'DEMO' : 'REAL'}
                   </div>
-                  <div className="text-xs font-bold text-white leading-tight whitespace-nowrap">
+                  <div className="text-sm font-bold text-white leading-tight whitespace-nowrap">
                     R${balance.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                   </div>
                 </div>
-                <ChevronDown size={11} className={cn('text-[#8b8f9a] transition-transform flex-shrink-0', mobileAccountOpen && 'rotate-180')} />
+                <ChevronDown size={12} className={cn('text-[#8b8f9a] transition-transform flex-shrink-0', mobileAccountOpen && 'rotate-180')} />
               </button>
 
               {mobileAccountOpen && (
@@ -380,12 +383,14 @@ export default function TradingPage() {
               )}
             </div>
 
-            {/* Deposit — text hides on very narrow screens (< 380px) */}
+            {/* Deposit — text hides on very narrow screens (< 380px).
+                h-10 matches the balance chip alongside for a consistent
+                row height on the new (taller) mobile header. */}
             <button
               onClick={() => setDepositoOpen(true)}
-              className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-green-500 hover:bg-green-400 text-xs font-bold text-white transition-colors flex-shrink-0"
+              className="flex items-center gap-1.5 h-10 px-3 rounded-lg bg-green-500 hover:bg-green-400 text-sm font-bold text-white transition-colors flex-shrink-0"
             >
-              <Plus size={14} strokeWidth={2.5} />
+              <Plus size={15} strokeWidth={2.5} />
               <span className="hidden min-[380px]:inline">Depósito</span>
             </button>
           </div>
