@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
   getAdminOtcAsset,
+  getStreamStats,
   listAdminOtcAssets,
   listAdminOtcLogs,
   pauseAdminOtcAsset,
@@ -128,6 +129,19 @@ export async function otcAdminRoutes(app: FastifyInstance) {
       const asset = await setAdminOtcAssetTrendBias(adminId, id, parsed.data.bias)
       if (!asset) return reply.status(404).send({ error: 'ASSET_NOT_FOUND' })
       return reply.send({ asset })
+    } catch (err) {
+      app.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Fase 6 — live SSE stream stats. No body params; returns total +
+  // per-asset counts + per-client details (id, age, ticksReceived,
+  // candlesReceived, candlesSkipped). In-memory read, no DB hit.
+  app.get('/stream-stats', async (_req, reply) => {
+    try {
+      const stats = getStreamStats()
+      return reply.send(stats)
     } catch (err) {
       app.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })

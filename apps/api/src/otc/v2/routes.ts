@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { getCachedCandles, getCurrentPrice } from './worker.js'
 import { otcV2Bus, type OtcV2CandleEvent, type OtcV2TickEvent } from './events.js'
+import { registerClient, unregisterClient } from './stream/registry.js'
 import { CANDLES_PER_TF, OTC_TIMEFRAMES, type OtcTimeframe } from './types.js'
 
 // Public OTC v2 endpoints. Auth is intentionally absent — pricing is
@@ -77,16 +78,13 @@ export async function otcV2Routes(app: FastifyInstance) {
     if (!q.success) return reply.status(400).send({ error: 'VALIDATION_ERROR' })
 
     const allowAssets = q.data.assets
-      ? new Set(q.data.assets.split(',').map(s => s.trim()).filter(Boolean))
+      ? q.data.assets.split(',').map(s => s.trim()).filter(Boolean)
       : null
     const onlyTf = q.data.tf ?? null
 
-    // CORS — the SSE route writes directly to reply.raw, which bypasses
-    // Fastify's response pipeline (and therefore @fastify/cors's hook).
-    // We have to mirror the relevant headers manually or the browser's
-    // EventSource silently fails with a cross-origin error and the chart
-    // never sees a single tick (REST /candles still works on refresh,
-    // which is exactly the "carrega novas velas só ao atualizar" symptom).
+    // CORS — see Etapa 8 commit for full explanation. SSE writes
+    // direct to reply.raw, bypassing @fastify/cors's onSend hook, so
+    // we mirror the headers manually.
     const origin = (req.headers.origin as string | undefined) ?? ''
     if (origin) {
       reply.raw.setHeader('Access-Control-Allow-Origin', origin)
@@ -98,62 +96,101 @@ export async function otcV2Routes(app: FastifyInstance) {
     reply.raw.setHeader('Connection',       'keep-alive')
     reply.raw.setHeader('X-Accel-Buffering', 'no')   // disable Nginx buffering
     reply.raw.flushHeaders?.()
-    reply.raw.write(': connected\n\n')
 
-    // ── Per-client throttle state ──────────────────────────────────────
-    // tick: last-emit time per assetId
-    const lastTickEmitMs   = new Map<string, number>()
-    // candleUpdate: last-emit time per `${assetId}:${tf}`
-    const lastCandleEmitMs = new Map<string, number>()
+    // Fase 6: register in the global SSE registry. Per-client throttle
+    // state + stats live in the SseClient struct (was closure vars in
+    // the old handler — registry version is admin-inspectable).
+    const client = registerClient({ assets: allowAssets, timeframe: onlyTf })
+    reply.raw.write(`: connected id=${client.id}\n\n`)
+
     const TICK_THROTTLE_MS   = 200    // ≈ 5Hz
     const CANDLE_THROTTLE_MS = 1000   // 1Hz
 
+    // Fase 6 backpressure: when reply.raw.write returns false the
+    // kernel's TCP send buffer is full. Subsequent writes get queued
+    // in the Node stream's internal buffer (unbounded — memory leak
+    // risk). We track 'drain' state and SKIP non-critical events
+    // until the underlying socket asks for more.
+    //
+    // Finalized candles bypass this skip — losing one creates a
+    // visible chart gap; better to queue them and trust 'drain' to
+    // flush eventually.
+    let drained = true
+    reply.raw.on('drain', () => { drained = true })
+
+    function tryWrite(payload: string): boolean {
+      if (client.closed) return false
+      const ok = reply.raw.write(payload)
+      if (!ok) drained = false
+      return true   // attempted; caller decides whether to count stats
+    }
+
     const onTick = (e: OtcV2TickEvent) => {
-      if (allowAssets && !allowAssets.has(e.assetId)) return
-      const last = lastTickEmitMs.get(e.assetId) ?? 0
+      if (client.closed) return
+      if (client.assets && !client.assets.includes(e.assetId)) return
+      // Backpressure: skip ticks (cheap to drop, freshest tick always
+      // arrives ~200ms later anyway).
+      if (!drained) { client.candlesSkipped++; return }
+      const last = client.lastTickEmitMs.get(e.assetId) ?? 0
       if (e.time - last < TICK_THROTTLE_MS) return
-      lastTickEmitMs.set(e.assetId, e.time)
-      try {
-        reply.raw.write(`event: tick\ndata: ${JSON.stringify(e)}\n\n`)
-      } catch { cleanup() }
+      client.lastTickEmitMs.set(e.assetId, e.time)
+      if (tryWrite(`event: tick\ndata: ${JSON.stringify(e)}\n\n`)) {
+        client.ticksReceived++
+      }
     }
 
     const onCandle = (e: OtcV2CandleEvent) => {
-      if (allowAssets && !allowAssets.has(e.assetId)) return
-      if (onlyTf != null && e.timeframe !== onlyTf) return
+      if (client.closed) return
+      if (client.assets && !client.assets.includes(e.assetId)) return
+      if (client.timeframe != null && e.timeframe !== client.timeframe) return
 
-      // Finalized candle — always pass through (it's the chart's
-      // bar-rollover signal, missing one creates a gap).
+      // Finalized — NEVER throttle, NEVER skip even under backpressure.
+      // A missing rollover event creates a visible gap on the chart;
+      // trust the stream's internal buffer + 'drain' to catch up.
       if (e.isClosed) {
-        try {
-          reply.raw.write(`event: candle\ndata: ${JSON.stringify(e)}\n\n`)
-        } catch { cleanup() }
-        // Reset the throttle counter for this asset:tf so the next
-        // candleUpdate emits promptly instead of waiting up to 1s.
-        lastCandleEmitMs.delete(`${e.assetId}:${e.timeframe}`)
+        if (tryWrite(`event: candle\ndata: ${JSON.stringify(e)}\n\n`)) {
+          client.candlesReceived++
+        }
+        // Reset throttle so the next candleUpdate (new bar) emits
+        // promptly instead of waiting up to 1s.
+        client.lastCandleEmitMs.delete(`${e.assetId}:${e.timeframe}`)
         return
       }
 
+      // In-progress candleUpdate — backpressure-skippable like ticks.
+      if (!drained) { client.candlesSkipped++; return }
       const key = `${e.assetId}:${e.timeframe}`
-      const last = lastCandleEmitMs.get(key) ?? 0
+      const last = client.lastCandleEmitMs.get(key) ?? 0
       const now = Date.now()
       if (now - last < CANDLE_THROTTLE_MS) return
-      lastCandleEmitMs.set(key, now)
-      try {
-        reply.raw.write(`event: candleUpdate\ndata: ${JSON.stringify(e)}\n\n`)
-      } catch { cleanup() }
+      client.lastCandleEmitMs.set(key, now)
+      tryWrite(`event: candleUpdate\ndata: ${JSON.stringify(e)}\n\n`)
     }
 
-    // Keep-alive comment every 25s — survives proxies / Cloudflare's 60s
-    // idle kill without blowing through the actual data path.
+    // Keep-alive comment every 25s — survives proxies / Cloudflare's
+    // 60s idle kill without blowing through the actual data path. If
+    // the write fails, the connection's dead — clean up so we don't
+    // leak the listener.
     const heartbeat = setInterval(() => {
-      try { reply.raw.write(': ping\n\n') } catch { cleanup() }
+      if (client.closed) return
+      try {
+        reply.raw.write(': ping\n\n')
+      } catch {
+        cleanup()
+      }
     }, 25_000)
 
+    // Idempotent cleanup. Fired by 'close', 'error', or write failure.
+    // Guard flag prevents double-removal of bus listeners (which would
+    // be harmless but noisy if it ever happened twice).
+    let cleanedUp = false
     function cleanup() {
+      if (cleanedUp) return
+      cleanedUp = true
       clearInterval(heartbeat)
       otcV2Bus.off('tick',   onTick)
       otcV2Bus.off('candle', onCandle)
+      unregisterClient(client.id)
       try { reply.raw.end() } catch { /* already ended */ }
     }
 

@@ -8,6 +8,7 @@ import {
   setAssetTrendBias,
   type OtcAssetLiveState,
 } from '../../otc/v2/worker.js'
+import { listClients } from '../../otc/v2/stream/registry.js'
 
 // Admin service for the OTC v2 engine. Joins the on-disk config rows
 // (otc_assets) with two live data sources:
@@ -220,6 +221,51 @@ export async function listAdminOtcLogs(
     afterState:  r.afterState,
     createdAt:   r.createdAt,
   }))
+}
+
+// ── Stream stats (Fase 6) ─────────────────────────────────────────────
+// Returns every live /otc/v2/stream client + aggregate counters for the
+// admin panel. Hits the in-process SSE registry — no DB call.
+export interface SseStreamStats {
+  total: number
+  totalByAsset: Record<string, number>     // count per assetId subscribed
+  clients: Array<{
+    id:              string
+    connectedAt:     string                  // ISO
+    ageMs:           number
+    assets:          string[] | null         // null = subscribing to all
+    timeframe:       number | null
+    ticksReceived:   number
+    candlesReceived: number
+    candlesSkipped:  number
+  }>
+}
+
+export function getStreamStats(): SseStreamStats {
+  const all = listClients()
+  const totalByAsset: Record<string, number> = {}
+  for (const c of all) {
+    if (c.assets) {
+      for (const a of c.assets) totalByAsset[a] = (totalByAsset[a] ?? 0) + 1
+    } else {
+      totalByAsset['*'] = (totalByAsset['*'] ?? 0) + 1
+    }
+  }
+  const now = Date.now()
+  return {
+    total: all.length,
+    totalByAsset,
+    clients: all.map(c => ({
+      id:              c.id,
+      connectedAt:     new Date(c.connectedAt).toISOString(),
+      ageMs:           now - c.connectedAt,
+      assets:          c.assets,
+      timeframe:       c.timeframe,
+      ticksReceived:   c.ticksReceived,
+      candlesReceived: c.candlesReceived,
+      candlesSkipped:  c.candlesSkipped,
+    })),
+  }
 }
 
 // ── Internals ─────────────────────────────────────────────────────────

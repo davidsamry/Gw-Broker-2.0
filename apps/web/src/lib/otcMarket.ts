@@ -77,8 +77,22 @@ interface PoolEntry {
 }
 
 const pool = new Map<string, PoolEntry>()
+// Fase 6 — pending closes, indexed by assetId. When the last
+// subscriber unsubscribes we schedule the close for ~500ms later so
+// a fresh subscriber arriving in that window (chart remount during
+// tab switch, asset switch+back, hot-reload) reuses the existing
+// connection instead of paying the full SSE handshake cost again.
+const pendingCloses    = new Map<string, ReturnType<typeof setTimeout>>()
+const CLOSE_DEBOUNCE_MS = 500
 
 function ensureConnection(assetId: string): PoolEntry {
+  // Fase 6: cancel any pending close — we're back, don't kill it.
+  const pending = pendingCloses.get(assetId)
+  if (pending) {
+    clearTimeout(pending)
+    pendingCloses.delete(assetId)
+  }
+
   const existing = pool.get(assetId)
   if (existing) return existing
 
@@ -121,8 +135,25 @@ function releaseIfEmpty(assetId: string) {
   const entry = pool.get(assetId)
   if (!entry) return
   if (entry.tickSubs.size === 0 && entry.candleSubs.size === 0) {
-    try { entry.es.close() } catch { /* already closed */ }
-    pool.delete(assetId)
+    // Fase 6: schedule the close, don't do it immediately. If a new
+    // subscriber arrives in CLOSE_DEBOUNCE_MS (chart remount, tab
+    // switch back, etc.) we reuse the open connection — avoids the
+    // tear-down/handshake/initial-tick-wait cycle that produces a
+    // visible "frozen for half a second" moment on the UI.
+    const existing = pendingCloses.get(assetId)
+    if (existing) clearTimeout(existing)
+    pendingCloses.set(assetId, setTimeout(() => {
+      pendingCloses.delete(assetId)
+      const e = pool.get(assetId)
+      // Re-check — a subscriber might have arrived AND left again in
+      // the debounce window; both paths converge here. Only close if
+      // STILL no subscribers.
+      if (!e) return
+      if (e.tickSubs.size === 0 && e.candleSubs.size === 0) {
+        try { e.es.close() } catch { /* already closed */ }
+        pool.delete(assetId)
+      }
+    }, CLOSE_DEBOUNCE_MS))
   }
 }
 
