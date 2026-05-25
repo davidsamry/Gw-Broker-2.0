@@ -117,6 +117,10 @@ export async function startOtcV2Worker(): Promise<void> {
     // (tick is finer-grained than candle close — wins if engine shut
     // down mid-slot before rollover persisted the in-progress candle).
     const latestTicks     = await loadLatestTicks(configs.map(c => c.id))
+    // Fase 3: deterministic snapshot, the PRIMARY recovery source.
+    // buildInitialState validates each one and falls through to the
+    // Fase 2 chain (tick → candle → seed) on reject.
+    const snapshots       = await loadSnapshots(configs.map(c => c.id))
 
     for (const cfg of configs) {
       try {
@@ -136,15 +140,15 @@ export async function startOtcV2Worker(): Promise<void> {
           }
         }
 
-        // Fase 2: buildInitialState now uses all 3 sources (tick, multi-
-        // tf candle, seedPrice) and returns the source it picked so we
-        // can log it clearly. Never falls back to seedPrice if ANY
-        // historical data exists for the asset.
+        // Fase 2/3: buildInitialState walks the recovery chain:
+        // snapshot → tick → most-recent candle (any tf) → seedPrice.
+        // Returns the chosen source + any snapshot rejection reasons.
         const result = buildInitialState(
           cfg,
           latestCandles,
           persistedStates.get(cfg.id),
           latestTicks.get(cfg.id) ?? null,
+          snapshots.get(cfg.id) ?? null,
         )
         assetStates.set(cfg.id, result.state)
 
@@ -158,12 +162,15 @@ export async function startOtcV2Worker(): Promise<void> {
 
         await primeCandleCache(cfg.id)
 
-        // Structured boot log — one line per asset, easy to grep in
-        // EasyPanel. Covers: which source restored the price, how far
-        // behind the latest tick/candle was, how many slots were
-        // backfilled, and whether the regime was resumed from snapshot.
+        // Structured boot log — one line per asset, grepable in
+        // EasyPanel. Covers source of the restored price, freshness of
+        // latest tick/candle, backfill count, regime, and (Fase 3) any
+        // reason a snapshot got rejected so the fall-through is visible.
         const persisted = persistedStates.get(cfg.id)
         const regimeResumed = persisted?.regime && result.state.regime === persisted.regime
+        const rejectStr = result.snapshotRejectReasons.length > 0
+          ? ` snapshotRejected=${result.snapshotRejectReasons.join(',')}`
+          : ''
         console.log(
           `[otc-boot] asset=${cfg.id}` +
           ` startPrice=${result.state.price.toFixed(5)}` +
@@ -172,7 +179,8 @@ export async function startOtcV2Worker(): Promise<void> {
           ` lastCandleAt=${result.lastCandleAt?.toISOString() ?? '-'}` +
           ` backfilled=${backfilled}` +
           ` regime=${result.state.regime}` +
-          ` regimeResumed=${regimeResumed ? 'yes' : 'no'}`,
+          ` regimeResumed=${regimeResumed ? 'yes' : 'no'}` +
+          rejectStr,
         )
       } catch (err) {
         console.error(`[otc-v2] hydrate failed for ${cfg.id} — skipping`, err)
@@ -198,7 +206,15 @@ export async function startOtcV2Worker(): Promise<void> {
     // Persist regime + liquidity + trendBias so the next boot can
     // resume without resetting momentum. Survives `prisma migrate
     // deploy` because we never truncate these tables.
-    stateFlushInterval = setInterval(flushRuntimeState, STATE_FLUSH_INTERVAL_MS)
+    // Fase 3 chains snapshot save into the same interval — single
+    // round-trip cadence (every 5s) keeps both the deterministic
+    // snapshot and the legacy market_state/liquidity_state tables in
+    // sync. The legacy ones stay populated for back-compat until a
+    // future cleanup phase retires them.
+    stateFlushInterval = setInterval(async () => {
+      await flushRuntimeState()
+      await flushSnapshot()
+    }, STATE_FLUSH_INTERVAL_MS)
     // Periodic gap sweep — checks each asset/tf for missing slots
     // and backfills them. Catches gaps that opened up between deploys
     // (e.g., from older code that didn't have boot-time backfill).
@@ -238,10 +254,13 @@ export function stopOtcV2Worker(): void {
   if (stateFlushInterval) { clearInterval(stateFlushInterval); stateFlushInterval = null }
   if (gapSweepInterval)   { clearInterval(gapSweepInterval);   gapSweepInterval   = null }
   if (pruneInterval)      { clearInterval(pruneInterval);      pruneInterval      = null }
-  // Final flush of both candle-level data AND runtime state, so a
-  // graceful shutdown loses zero context for the next boot.
+  // Final flush of candle-level data, legacy runtime state AND the
+  // Fase 3 snapshot — so a graceful shutdown loses zero context.
+  // Order matters: pending writes first (in case the snapshot's
+  // lastCandleTime references one of them), then state, then snapshot.
   void flushPending()
   void flushRuntimeState()
+  void flushSnapshot()
   isRunning = false
 }
 
@@ -263,6 +282,10 @@ function startAssetLoop(assetId: string): void {
     maybeTransitionRegime(s, now)
 
     const price = stepPrice(s)
+    // Track tick freshness for the Fase 3 snapshot. Cheap (a single
+    // assignment per tick); the snapshot flush copies it out on its
+    // 5-second cadence.
+    s.lastTickAt = now
     const tick: OtcTick = { assetId: s.config.id, price: round5(price), recordedAt: new Date(now) }
     pendingTicks.push(tick)
 
@@ -298,6 +321,14 @@ function startAssetLoop(assetId: string): void {
       // Queue persist on finalized AND emit the closing event for the bar.
       if (finalized) {
         pendingCandles.push(finalized)
+        // Fase 3: track the most recent finalized candle's openTime
+        // for the snapshot. Across all tfs, the largest openTime wins —
+        // tf=5 finalizes 12× more often than tf=60 so it'll usually
+        // dominate.
+        const finOpen = finalized.openTime.getTime()
+        if (!s.lastCandleAt || finOpen > s.lastCandleAt) {
+          s.lastCandleAt = finOpen
+        }
         publishCandle({
           assetId, timeframe: cb.timeframe,
           openTime: finalized.openTime.getTime(),
@@ -555,9 +586,10 @@ async function loadAssetConfigs(): Promise<OtcAssetConfig[]> {
   }))
 }
 
-// Fase 2 — what source the recovered price came from. Used only for
+// Fase 2/3 — what source the recovered price came from. Used only for
 // structured boot logging; doesn't affect engine behavior.
 type StartPriceSource =
+  | 'snapshot'                        // Fase 3 deterministic snapshot (best)
   | 'tick'                            // latest otc_ticks row (freshest)
   | 'candle-tf5' | 'candle-tf15'      // most-recent candle across tfs
   | 'candle-tf30' | 'candle-tf60'
@@ -569,6 +601,10 @@ interface InitialStateResult {
   source:        StartPriceSource
   lastTickAt:    Date | null
   lastCandleAt:  Date | null
+  // Fase 3: when a snapshot was rejected, the reasons. Empty when
+  // snapshot was valid OR not present at all. Logged so an operator
+  // can see why the chain fell through.
+  snapshotRejectReasons: string[]
 }
 
 // What loadLatestTicks returns per asset.
@@ -577,21 +613,96 @@ interface LatestTickInfo {
   recordedAt: Date
 }
 
-// Stateful resume: prefers the persisted runtime state (regime,
-// liquidity, trendBias) over default values so a restart picks up
-// exactly where the previous engine left off. Price source falls
-// through: latest tick → most recent candle (any tf) → seedPrice.
+// Fase 3 — deterministic engine snapshot. Persisted every 5s + on
+// shutdown. Loaded as the PRIMARY recovery source on boot (more
+// accurate than re-deriving from candle/tick because it captures the
+// EMA-smoothed price and the full FSM/liquidity in one atomic write).
+//
+// Validation: snapshotVersion === CURRENT_SNAPSHOT_VERSION + price
+// within seedPrice's clamp envelope + numeric sanity. Anything else
+// is treated as corrupt and ignored (boot falls through to Fase 2's
+// tick → candle → seed chain).
+const CURRENT_SNAPSHOT_VERSION = 1
+// Snapshots older than this are considered stale and ignored. Engine
+// was off too long; tick/candle history is a better source of truth
+// for the post-restart starting price than a regime that's been
+// "running" with no actual ticks for hours.
+const SNAPSHOT_MAX_AGE_MS = 30 * 60_000   // 30 min
+
+interface EngineSnapshot {
+  assetId:          string
+  snapshotVersion:  number
+  currentPrice:     number
+  smoothedPrice:    number
+  regime:           OtcRegime
+  regimeStartedAt:  Date
+  regimeDurationMs: number
+  spread:           number
+  buyPressure:      number
+  sellPressure:     number
+  volume:           number
+  depth:            number
+  speed:            number
+  trendBias:        number
+  lastTickTime:     Date | null
+  lastCandleTime:   Date | null
+  updatedAt:        Date
+}
+
+// Stateful resume: prefers (Fase 3) a valid deterministic snapshot
+// over re-derived state. Fall-through order on snapshot reject:
+//   snapshot → latest tick → most recent candle (any tf) → seedPrice.
 // NEVER falls back to seedPrice if any history exists for the asset.
 function buildInitialState(
   cfg:             OtcAssetConfig,
   latestCandles:   Map<string, OtcCandle | null>,
   persisted?:      PersistedRuntimeState,
   latestTick?:     LatestTickInfo | null,
+  snapshot?:       EngineSnapshot | null,
 ): InitialStateResult {
+  // ── Source 0 (PRIMARY): valid snapshot — atomic restore ────────────
+  // The snapshot captured price + smoothed + regime + liquidity + bias
+  // at the same instant. Use ALL of it if validation passes — that's
+  // the cleanest possible resume because nothing was reconstructed.
+  const snapshotRejectReasons: string[] = []
+  if (snapshot) {
+    const v = isSnapshotValid(snapshot, cfg)
+    if (v.valid) {
+      // Even with valid snapshot, regime might have expired during the
+      // downtime. Trim duration the same way we do for the persisted
+      // state fallback (>5s remaining = resume, else FSM picks fresh).
+      const now = Date.now()
+      const elapsed = now - snapshot.regimeStartedAt.getTime()
+      const remaining = snapshot.regimeDurationMs - elapsed
+      const regimeRunway = remaining > 5_000
+      return {
+        state: {
+          config:           cfg,
+          price:            snapshot.currentPrice,
+          smoothedPrice:    snapshot.smoothedPrice,
+          regime:           regimeRunway ? snapshot.regime : 'LATERAL',
+          regimeStartedAt:  regimeRunway ? snapshot.regimeStartedAt.getTime() : now,
+          regimeDurationMs: regimeRunway ? snapshot.regimeDurationMs : pickRegimeDurationMs('LATERAL'),
+          spread:           snapshot.spread,
+          buyPressure:      snapshot.buyPressure,
+          sellPressure:     snapshot.sellPressure,
+          volume:           snapshot.volume,
+          depth:            snapshot.depth,
+          speed:            snapshot.speed,
+          trendBias:        snapshot.trendBias,
+          lastTickAt:       snapshot.lastTickTime?.getTime(),
+          lastCandleAt:     snapshot.lastCandleTime?.getTime(),
+        },
+        source:                'snapshot',
+        lastTickAt:            snapshot.lastTickTime ?? latestTick?.recordedAt ?? null,
+        lastCandleAt:          snapshot.lastCandleTime ?? null,
+        snapshotRejectReasons: [],
+      }
+    }
+    snapshotRejectReasons.push(...v.reasons)
+  }
+
   // ── Source 1: most recent candle across ALL timeframes ─────────────
-  // Previously we hard-coded tf=60. If the engine ran with only the
-  // shorter tfs ticking (admin-paused longer tfs, fresh asset, etc.)
-  // we'd ignore real history and fall back to seedPrice.
   let bestCandle: OtcCandle | null = null
   let bestSource: StartPriceSource = 'seed'
   for (const tf of OTC_TIMEFRAMES) {
@@ -604,9 +715,6 @@ function buildInitialState(
   }
 
   // ── Pick start price by freshness ──────────────────────────────────
-  // Tick wins if it's strictly more recent than the best candle's slot
-  // start (typical case: engine shut down mid-slot, ticks for that
-  // slot are persisted but the candle hadn't rolled over yet).
   let startPrice: number
   let source: StartPriceSource
   if (
@@ -623,7 +731,7 @@ function buildInitialState(
     source     = 'seed'
   }
 
-  // ── Regime — resume from snapshot if still has runway ──────────────
+  // ── Regime — resume from persisted state if still has runway ───────
   let regime: OtcRegime = 'LATERAL'
   let regimeStartedAt   = Date.now()
   let regimeDurationMs  = pickRegimeDurationMs(regime)
@@ -652,10 +760,158 @@ function buildInitialState(
       depth:            persisted?.depth        ?? 1.0,
       speed:            persisted?.speed        ?? 1.0,
       trendBias:        persisted?.trendBias    ?? 0,
+      lastTickAt:       latestTick?.recordedAt.getTime(),
+      lastCandleAt:     bestCandle?.openTime.getTime(),
     },
     source,
-    lastTickAt:   latestTick?.recordedAt ?? null,
-    lastCandleAt: bestCandle?.openTime   ?? null,
+    lastTickAt:            latestTick?.recordedAt ?? null,
+    lastCandleAt:          bestCandle?.openTime   ?? null,
+    snapshotRejectReasons,
+  }
+}
+
+// Fase 3 — validate a snapshot before trusting it. Rejection reasons
+// are returned so the boot log can show WHY the snapshot was ignored.
+function isSnapshotValid(snap: EngineSnapshot, cfg: OtcAssetConfig): {
+  valid: boolean
+  reasons: string[]
+} {
+  const reasons: string[] = []
+  // Version: a bumped CURRENT_SNAPSHOT_VERSION means the in-memory
+  // shape changed and old rows can't be trusted.
+  if (snap.snapshotVersion !== CURRENT_SNAPSHOT_VERSION) {
+    reasons.push(`version=${snap.snapshotVersion}!=${CURRENT_SNAPSHOT_VERSION}`)
+  }
+  // Age: snapshots that haven't been refreshed in 30+ minutes are
+  // stale enough that ticks/candles likely tell a better story about
+  // the current price.
+  const ageMs = Date.now() - snap.updatedAt.getTime()
+  if (ageMs > SNAPSHOT_MAX_AGE_MS) {
+    reasons.push(`age=${Math.floor(ageMs / 1000)}s>${SNAPSHOT_MAX_AGE_MS / 1000}s`)
+  }
+  // Price envelope: same clamp the engine enforces per tick. Anything
+  // outside means the row was either corrupted or the seedPrice was
+  // changed in admin (in which case we want a fresh start anyway).
+  const minP = cfg.seedPrice * 0.5
+  const maxP = cfg.seedPrice * 2
+  if (!Number.isFinite(snap.currentPrice) || snap.currentPrice < minP || snap.currentPrice > maxP) {
+    reasons.push(`currentPrice=${snap.currentPrice}∉[${minP},${maxP}]`)
+  }
+  if (!Number.isFinite(snap.smoothedPrice) || snap.smoothedPrice < minP || snap.smoothedPrice > maxP) {
+    reasons.push(`smoothedPrice=${snap.smoothedPrice}∉[${minP},${maxP}]`)
+  }
+  // Liquidity sanity.
+  if (snap.buyPressure < 0 || snap.buyPressure > 1) reasons.push(`buyPressure=${snap.buyPressure}`)
+  if (snap.sellPressure < 0 || snap.sellPressure > 1) reasons.push(`sellPressure=${snap.sellPressure}`)
+  if (snap.spread < 0 || snap.spread > 1) reasons.push(`spread=${snap.spread}`)
+  if (snap.trendBias < -1 || snap.trendBias > 1) reasons.push(`trendBias=${snap.trendBias}`)
+  // Regime duration sanity — must be positive and not absurd.
+  if (snap.regimeDurationMs <= 0 || snap.regimeDurationMs > 10 * 60_000) {
+    reasons.push(`regimeDurationMs=${snap.regimeDurationMs}`)
+  }
+  return { valid: reasons.length === 0, reasons }
+}
+
+// Fase 3 — load all snapshots in one round-trip on boot.
+async function loadSnapshots(assetIds: string[]): Promise<Map<string, EngineSnapshot | null>> {
+  const out = new Map<string, EngineSnapshot | null>()
+  for (const id of assetIds) out.set(id, null)
+  if (assetIds.length === 0) return out
+  try {
+    const rows = await prisma.$queryRaw<Array<{
+      assetId: string; snapshotVersion: number;
+      currentPrice: string; smoothedPrice: string;
+      regime: OtcRegime; regimeStartedAt: Date; regimeDurationMs: number;
+      spread: number; buyPressure: number; sellPressure: number;
+      volume: number; depth: number; speed: number; trendBias: number;
+      lastTickTime: Date | null; lastCandleTime: Date | null;
+      updatedAt: Date;
+    }>>`
+      SELECT
+        "assetId", "snapshotVersion",
+        "currentPrice"::text, "smoothedPrice"::text,
+        regime, "regimeStartedAt", "regimeDurationMs",
+        spread, "buyPressure", "sellPressure",
+        volume, depth, speed, "trendBias",
+        "lastTickTime", "lastCandleTime", "updatedAt"
+      FROM otc_engine_snapshot
+      WHERE "assetId" = ANY(${assetIds}::text[])
+    `
+    for (const r of rows) {
+      out.set(r.assetId, {
+        assetId:          r.assetId,
+        snapshotVersion:  r.snapshotVersion,
+        currentPrice:     Number(r.currentPrice),
+        smoothedPrice:    Number(r.smoothedPrice),
+        regime:           r.regime,
+        regimeStartedAt:  r.regimeStartedAt,
+        regimeDurationMs: r.regimeDurationMs,
+        spread:           r.spread,
+        buyPressure:      r.buyPressure,
+        sellPressure:     r.sellPressure,
+        volume:           r.volume,
+        depth:            r.depth,
+        speed:            r.speed,
+        trendBias:        r.trendBias,
+        lastTickTime:     r.lastTickTime,
+        lastCandleTime:   r.lastCandleTime,
+        updatedAt:        r.updatedAt,
+      })
+    }
+  } catch (err) {
+    // Table missing (migration didn't run) is the most likely reason
+    // we'd hit this. The fall-through chain handles absence gracefully
+    // so we just log + continue.
+    console.error('[otc-v2] loadSnapshots failed — snapshot recovery disabled this cycle', err)
+  }
+  return out
+}
+
+// Fase 3 — UPSERT one row per asset. Called every 5s + on shutdown.
+async function flushSnapshot(): Promise<void> {
+  for (const s of assetStates.values()) {
+    try {
+      await prisma.$executeRaw`
+        INSERT INTO otc_engine_snapshot (
+          "assetId", "snapshotVersion",
+          "currentPrice", "smoothedPrice",
+          regime, "regimeStartedAt", "regimeDurationMs",
+          spread, "buyPressure", "sellPressure",
+          volume, depth, speed, "trendBias",
+          "lastTickTime", "lastCandleTime", "updatedAt"
+        ) VALUES (
+          ${s.config.id}, ${CURRENT_SNAPSHOT_VERSION},
+          ${s.price}, ${s.smoothedPrice},
+          ${s.regime}::"OtcRegime",
+          ${new Date(s.regimeStartedAt)},
+          ${Math.floor(s.regimeDurationMs)},
+          ${s.spread}, ${s.buyPressure}, ${s.sellPressure},
+          ${s.volume}, ${s.depth}, ${s.speed}, ${s.trendBias},
+          ${s.lastTickAt ? new Date(s.lastTickAt) : null},
+          ${s.lastCandleAt ? new Date(s.lastCandleAt) : null},
+          NOW()
+        )
+        ON CONFLICT ("assetId") DO UPDATE SET
+          "snapshotVersion"  = EXCLUDED."snapshotVersion",
+          "currentPrice"     = EXCLUDED."currentPrice",
+          "smoothedPrice"    = EXCLUDED."smoothedPrice",
+          regime             = EXCLUDED.regime,
+          "regimeStartedAt"  = EXCLUDED."regimeStartedAt",
+          "regimeDurationMs" = EXCLUDED."regimeDurationMs",
+          spread             = EXCLUDED.spread,
+          "buyPressure"      = EXCLUDED."buyPressure",
+          "sellPressure"     = EXCLUDED."sellPressure",
+          volume             = EXCLUDED.volume,
+          depth              = EXCLUDED.depth,
+          speed              = EXCLUDED.speed,
+          "trendBias"        = EXCLUDED."trendBias",
+          "lastTickTime"     = EXCLUDED."lastTickTime",
+          "lastCandleTime"   = EXCLUDED."lastCandleTime",
+          "updatedAt"        = NOW()
+      `
+    } catch (err) {
+      console.error(`[otc-v2] flushSnapshot failed for ${s.config.id}`, err)
+    }
   }
 }
 

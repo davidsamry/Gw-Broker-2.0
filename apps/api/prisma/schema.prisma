@@ -403,6 +403,7 @@ model OtcAsset {
 
   state           OtcMarketState?
   liquidity       OtcLiquidityState?
+  snapshot        OtcEngineSnapshot?
   ticks           OtcTick[]
   candles         OtcCandle[]
   events          OtcScheduledEvent[]
@@ -513,6 +514,36 @@ model OtcEngineLog {
 
   @@index([createdAt(sort: Desc)])
   @@map("otc_engine_logs")
+}
+
+// Deterministic engine snapshot (Fase 3). One row per asset, UPSERTed
+// every 5s + on shutdown. Primary boot recovery source — captures the
+// EMA-smoothed price + full FSM/liquidity state atomically so a
+// restart resumes without the multi-source reconstruction that
+// candle/tick fallbacks have to do.
+model OtcEngineSnapshot {
+  assetId          String   @id
+  snapshotVersion  Int      @default(1)
+  currentPrice     Decimal  @db.Decimal(18, 5)
+  smoothedPrice    Decimal  @db.Decimal(18, 5)
+  regime           OtcRegime
+  regimeStartedAt  DateTime @db.Timestamptz(3)
+  regimeDurationMs Int
+  spread           Float    @default(0.0001)
+  buyPressure      Float    @default(0.5)
+  sellPressure     Float    @default(0.5)
+  volume           Float    @default(1.0)
+  depth            Float    @default(1.0)
+  speed            Float    @default(1.0)
+  trendBias        Float    @default(0)
+  lastTickTime     DateTime? @db.Timestamptz(3)
+  lastCandleTime   DateTime? @db.Timestamptz(3)
+  updatedAt        DateTime  @default(now()) @db.Timestamptz(3)
+
+  asset            OtcAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([updatedAt(sort: Desc)])
+  @@map("otc_engine_snapshot")
 }
 
 // Audit trail of admin actions on OTC engine.

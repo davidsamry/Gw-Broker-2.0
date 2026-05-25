@@ -48,6 +48,12 @@ export interface OtcAssetState {
   // candles can't introduce a visible discontinuity. Flipped to false
   // by the worker once BOOT_SPIKE_GRACE_MS elapses.
   bootGrace?:      boolean
+  // Provenance (Fase 3 snapshot) — updated by the tick loop so the
+  // 5-second snapshot flush can persist them. lastTickAt = the tick
+  // that just ran; lastCandleAt = openTime (ms) of the most recent
+  // FINALIZED candle across all tfs.
+  lastTickAt?:     number    // epoch ms
+  lastCandleAt?:   number    // epoch ms (finalized candle openTime)
 }
 
 // Output of one engine step. Worker feeds this into candle builders +
