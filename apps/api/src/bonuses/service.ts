@@ -1,0 +1,165 @@
+// User-facing bonus operations (Fase B1):
+//   • validateCodeForUser  — pre-checkout check used by the deposit modal
+//   • attachToDeposit      — called by createPixDeposit when a code is supplied
+//   • activateForPaidDeposit — flips the grant from PENDING → ACTIVE and
+//                              credits the bonus to the user's account.
+//                              Called by the BSPay webhook + admin mark-paid.
+//
+// Constraint enforced everywhere: at most ONE pending|active grant per user.
+
+import { Prisma } from '@prisma/client'
+import { prisma } from '../prisma.js'
+
+export interface ValidatedBonus {
+  id:         string
+  code:       string
+  type:       'PERCENTAGE' | 'FIXED'
+  value:      number
+  minDeposit: number
+  rollover:   number
+  // Preview of what the user would receive for the provided depositAmount.
+  bonusAmount:      number
+  rolloverRequired: number
+}
+
+export type ValidateError =
+  | 'NOT_FOUND'
+  | 'INACTIVE'
+  | 'EXPIRED'
+  | 'BELOW_MIN'
+  | 'USER_HAS_OPEN_GRANT'
+  | 'USER_MAX_USES_REACHED'
+
+/**
+ * Verify a code for a given user + deposit amount. Returns the bonus
+ * preview if valid, otherwise an error code the frontend can translate.
+ */
+export async function validateCodeForUser(
+  userId:        string,
+  code:          string,
+  depositAmount: number,
+): Promise<{ ok: true; bonus: ValidatedBonus } | { ok: false; error: ValidateError }> {
+  const bonus = await prisma.bonus.findUnique({
+    where: { code: code.toUpperCase().trim() },
+  })
+  if (!bonus)         return { ok: false, error: 'NOT_FOUND' }
+  if (!bonus.active)  return { ok: false, error: 'INACTIVE' }
+  if (bonus.expiresAt && bonus.expiresAt < new Date()) return { ok: false, error: 'EXPIRED' }
+  if (Number(bonus.minDeposit) > depositAmount)        return { ok: false, error: 'BELOW_MIN' }
+
+  // Single open grant per user.
+  const openGrant = await prisma.bonusGrant.findFirst({
+    where: { userId, status: { in: ['PENDING', 'ACTIVE'] } },
+    select: { id: true },
+  })
+  if (openGrant) return { ok: false, error: 'USER_HAS_OPEN_GRANT' }
+
+  // Per-user usage cap (counts completed + cancelled too — the limit is
+  // about lifetime redemptions of this specific code).
+  const priorUses = await prisma.bonusGrant.count({
+    where: { userId, bonusId: bonus.id },
+  })
+  if (priorUses >= bonus.maxUsesPerUser) {
+    return { ok: false, error: 'USER_MAX_USES_REACHED' }
+  }
+
+  const bonusAmount = bonus.type === 'PERCENTAGE'
+    ? Math.round((depositAmount * Number(bonus.value)) / 100 * 100) / 100
+    : Number(bonus.value)
+  const rolloverRequired = Math.round(bonusAmount * bonus.rollover * 100) / 100
+
+  return {
+    ok:    true,
+    bonus: {
+      id:         bonus.id,
+      code:       bonus.code,
+      type:       bonus.type,
+      value:      Number(bonus.value),
+      minDeposit: Number(bonus.minDeposit),
+      rollover:   bonus.rollover,
+      bonusAmount,
+      rolloverRequired,
+    },
+  }
+}
+
+/**
+ * Create a PENDING grant tied to a freshly-created deposit. Called from
+ * the deposit creation flow when the user supplied a bonus code that
+ * validateCodeForUser accepted. The grant flips to ACTIVE when the
+ * deposit becomes PAID (see activateForPaidDeposit).
+ */
+export async function createPendingGrantForDeposit(args: {
+  userId:        string
+  bonusId:       string
+  depositId:     string
+  bonusAmount:   number
+  rollover:      number
+}) {
+  return prisma.bonusGrant.create({
+    data: {
+      userId:           args.userId,
+      bonusId:          args.bonusId,
+      depositId:        args.depositId,
+      bonusAmount:      new Prisma.Decimal(args.bonusAmount),
+      rolloverRequired: new Prisma.Decimal(args.bonusAmount * args.rollover),
+      rolloverProgress: new Prisma.Decimal(0),
+      status:           'PENDING',
+    },
+  })
+}
+
+/**
+ * When a deposit becomes PAID, flip any associated PENDING grant to
+ * ACTIVE and credit the bonus amount to the user's real account.
+ * Idempotent — a second call with the same depositId is a no-op.
+ *
+ * Returns the credited bonus amount (0 if no grant or already active).
+ */
+export async function activateForPaidDeposit(depositId: string): Promise<number> {
+  const grant = await prisma.bonusGrant.findFirst({
+    where: { depositId, status: 'PENDING' },
+  })
+  if (!grant) return 0
+
+  // Find the deposit's account so we know where to credit.
+  const deposit = await prisma.deposit.findUnique({
+    where:  { id: depositId },
+    select: { accountId: true, account: { select: { userId: true } } },
+  })
+  if (!deposit) return 0
+
+  const bonusAmount = Number(grant.bonusAmount)
+
+  // Transaction: bump account.balance, write a BONUS transaction row,
+  // flip grant to ACTIVE. All-or-nothing.
+  await prisma.$transaction([
+    prisma.account.update({
+      where: { id: deposit.accountId },
+      data:  { balance: { increment: bonusAmount } },
+    }),
+    prisma.transaction.create({
+      data: {
+        accountId:   deposit.accountId,
+        type:        'BONUS',
+        amount:      new Prisma.Decimal(bonusAmount),
+        description: `Bônus aplicado (grant=${grant.id})`,
+      },
+    }),
+    prisma.bonusGrant.update({
+      where: { id: grant.id },
+      data:  { status: 'ACTIVE' },
+    }),
+  ])
+
+  return bonusAmount
+}
+
+// Get the user's current open (PENDING|ACTIVE) grant if any. Surfaced
+// via /auth/me hydration so the frontend can show rollover progress.
+export async function getUserOpenGrant(userId: string) {
+  return prisma.bonusGrant.findFirst({
+    where: { userId, status: { in: ['PENDING', 'ACTIVE'] } },
+    include: { bonus: { select: { code: true } } },
+  })
+}

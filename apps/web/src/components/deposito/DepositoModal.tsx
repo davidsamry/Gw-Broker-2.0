@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { X, Copy, Check, AlertCircle, CheckCircle2, Clock, Loader2, Zap, ShieldCheck, BadgeCheck } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { X, Copy, Check, AlertCircle, CheckCircle2, Clock, Loader2, Zap, ShieldCheck, BadgeCheck, Gift, Tag } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/store/auth'
@@ -19,12 +19,39 @@ interface CreatedDeposit {
   createdAt: string
 }
 
+// Mirror of apps/api/src/bonuses/service.ts ValidatedBonus.
+interface ValidatedBonus {
+  id:               string
+  code:             string
+  type:             'PERCENTAGE' | 'FIXED'
+  value:            number
+  minDeposit:       number
+  rollover:         number
+  bonusAmount:      number
+  rolloverRequired: number
+}
+
 const MIN = 60        // R$ — kept in sync with apps/api/src/deposits/schema.ts
 const MAX = 10_000    // R$
 const POLL_MS = 3000  // status poll interval while QR is on screen
 const PRESETS = [60, 100, 250, 500, 1000]
 
 type Phase = 'form' | 'qrcode' | 'paid' | 'expired'
+
+// Translate API error codes from /bonuses/validate + /deposits/pix into
+// user-facing messages. Kept here (not at the API edge) so backend stays
+// language-agnostic.
+function bonusErrorLabel(code: string): string {
+  switch (code) {
+    case 'NOT_FOUND':             return 'Código não encontrado.'
+    case 'INACTIVE':              return 'Este código não está mais ativo.'
+    case 'EXPIRED':               return 'Este código expirou.'
+    case 'BELOW_MIN':             return 'Depósito abaixo do mínimo exigido pelo código.'
+    case 'USER_HAS_OPEN_GRANT':   return 'Você já tem um bônus ativo. Complete o rollover antes de usar outro.'
+    case 'USER_MAX_USES_REACHED': return 'Você já usou este código o máximo de vezes permitido.'
+    default:                       return 'Código inválido.'
+  }
+}
 
 export function DepositoModal({ onClose }: DepositoModalProps) {
   const authStore = useAuthStore()
@@ -35,10 +62,45 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
   const [loading, setLoading] = useState(false)
   const [deposit, setDeposit] = useState<CreatedDeposit | null>(null)
   const [copied, setCopied]   = useState(false)
+  // Fase B1 — bonus code input.
+  const [bonusCode, setBonusCode]         = useState('')
+  const [bonusInfo, setBonusInfo]         = useState<ValidatedBonus | null>(null)
+  const [bonusError, setBonusError]       = useState('')        // user-facing error or empty
+  const [validatingBonus, setValidatingBonus] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const validateAbort = useRef<AbortController | null>(null)
 
   const amountNum = parseFloat(amount.replace(',', '.')) || 0
   const valid     = amountNum >= MIN && amountNum <= MAX
+
+  // Debounced validation when the code OR amount changes. Server-side check
+  // covers per-user constraints (open grant, max uses) we can't infer client.
+  useEffect(() => {
+    if (!bonusCode.trim()) { setBonusInfo(null); setBonusError(''); return }
+    if (!valid) { setBonusInfo(null); setBonusError(''); return }
+    const handle = setTimeout(async () => {
+      validateAbort.current?.abort()
+      const ac = new AbortController()
+      validateAbort.current = ac
+      setValidatingBonus(true); setBonusError('')
+      try {
+        const { data } = await api.post<{ bonus: ValidatedBonus }>(
+          '/bonuses/validate',
+          { code: bonusCode.trim(), depositAmount: amountNum },
+          { signal: ac.signal },
+        )
+        setBonusInfo(data.bonus)
+      } catch (err: any) {
+        if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return
+        const code = err?.response?.data?.error ?? 'NOT_FOUND'
+        setBonusInfo(null)
+        setBonusError(bonusErrorLabel(code))
+      } finally {
+        setValidatingBonus(false)
+      }
+    }, 400)
+    return () => clearTimeout(handle)
+  }, [bonusCode, amountNum, valid])
 
   // Status polling while we're showing the QR — stops on resolution or unmount.
   useEffect(() => {
@@ -64,17 +126,26 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
 
   async function submit() {
     if (!valid || loading) return
+    // If a bonus code was typed but is invalid, block submission so the
+    // user can fix or clear it before paying.
+    if (bonusCode.trim() && !bonusInfo) {
+      setError('Verifique o código de bônus ou remova-o antes de continuar.')
+      return
+    }
     setLoading(true); setError('')
     try {
-      const { data } = await api.post<{ deposit: CreatedDeposit }>('/deposits/pix', { amount: amountNum })
+      const payload: Record<string, unknown> = { amount: amountNum }
+      if (bonusCode.trim() && bonusInfo) payload.bonusCode = bonusCode.trim()
+      const { data } = await api.post<{ deposit: CreatedDeposit }>('/deposits/pix', payload)
       setDeposit(data.deposit)
       setPhase('qrcode')
     } catch (err: any) {
-      const code = err?.response?.data?.error
+      const code = err?.response?.data?.error ?? ''
       if      (code === 'PAYMENT_GATEWAY_UNAVAILABLE') setError('Pagamentos indisponíveis no momento. Tente mais tarde.')
       else if (code === 'PAYMENT_GATEWAY_ERROR')       setError('Erro no provedor de pagamento. Tente novamente em instantes.')
       else if (code === 'VALIDATION_ERROR')            setError(`Valor inválido. Mínimo R$ ${MIN}, máximo R$ ${MAX}.`)
       else if (code === 'ACCOUNT_NOT_FOUND')           setError('Sua conta real não foi encontrada.')
+      else if (code.startsWith('BONUS_'))              setError(bonusErrorLabel(code.replace('BONUS_', '')))
       else                                              setError('Erro ao gerar QR. Tente novamente.')
     } finally {
       setLoading(false)
@@ -135,13 +206,16 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
                                      amount={amount} setAmount={setAmount}
                                      valid={valid} amountNum={amountNum}
                                      submit={submit} loading={loading} error={error}
+                                     bonusCode={bonusCode} setBonusCode={setBonusCode}
+                                     bonusInfo={bonusInfo} bonusError={bonusError}
+                                     validatingBonus={validatingBonus}
                                    />}
           {phase === 'qrcode'  && deposit && <QrStep
                                      deposit={deposit} amountNum={amountNum}
                                      copied={copied} onCopy={copy}
                                      onCancel={onClose}
                                    />}
-          {phase === 'paid'    && <PaidStep amount={amountNum} onClose={onClose} />}
+          {phase === 'paid'    && <PaidStep amount={amountNum} bonusInfo={bonusInfo} onClose={onClose} />}
           {phase === 'expired' && <ExpiredStep onRetry={() => { setPhase('form'); setDeposit(null) }} />}
         </div>
       </div>
@@ -153,9 +227,12 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
 
 function FormStep({
   amount, setAmount, valid, amountNum, submit, loading, error,
+  bonusCode, setBonusCode, bonusInfo, bonusError, validatingBonus,
 }: {
   amount: string; setAmount: (v: string) => void; valid: boolean; amountNum: number
   submit: () => void; loading: boolean; error: string
+  bonusCode: string; setBonusCode: (v: string) => void
+  bonusInfo: ValidatedBonus | null; bonusError: string; validatingBonus: boolean
 }) {
   return (
     <div className="flex flex-col gap-5">
@@ -213,6 +290,55 @@ function FormStep({
         </p>
       </div>
 
+      {/* Bonus code — optional */}
+      <div>
+        <label className="block text-[11px] font-semibold text-[#8b8f9a] mb-2 px-0.5 uppercase tracking-wider">
+          Código de bônus <span className="text-[#5d6275] normal-case tracking-normal">(opcional)</span>
+        </label>
+        <div className={cn(
+          'relative flex items-center rounded-xl border bg-[#222637] transition-colors',
+          bonusInfo
+            ? 'border-emerald-500/50 shadow-[0_0_0_3px_rgba(16,185,129,0.05)]'
+            : bonusError
+              ? 'border-red-500/40'
+              : 'border-[#2a2e3b] focus-within:border-[#32BCAD]/60',
+        )}>
+          <Tag size={14} className="ml-3 text-[#7c8195] flex-shrink-0" />
+          <input
+            value={bonusCode}
+            onChange={(e) => setBonusCode(e.target.value.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase())}
+            placeholder="BONUS200"
+            maxLength={32}
+            className="flex-1 bg-transparent px-2 py-3 text-sm font-mono font-bold text-white outline-none placeholder:text-[#4d5266] placeholder:font-normal placeholder:tracking-normal tracking-wider"
+          />
+          {validatingBonus && <Loader2 size={14} className="mr-3 text-[#7c8195] animate-spin" />}
+          {!validatingBonus && bonusInfo && <Check size={16} className="mr-3 text-emerald-400" />}
+        </div>
+
+        {/* Preview when valid */}
+        {bonusInfo && (
+          <div className="mt-2 px-3 py-2.5 rounded-lg bg-emerald-500/8 border border-emerald-500/25 flex items-start gap-2">
+            <Gift size={14} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+            <div className="text-[11px] leading-relaxed">
+              <div className="text-white font-semibold">
+                Você ganha <span className="text-emerald-300">R$ {bonusInfo.bonusAmount.toFixed(2).replace('.', ',')}</span> em bônus
+              </div>
+              <div className="text-[#7c8195] mt-0.5">
+                Rollover {bonusInfo.rollover}× · operar R$ {bonusInfo.rolloverRequired.toFixed(2).replace('.', ',')} pra liberar saque
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Error when invalid */}
+        {bonusError && (
+          <div className="mt-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 flex items-start gap-2">
+            <AlertCircle size={12} className="text-red-400 flex-shrink-0 mt-0.5" />
+            <span className="text-[11px] text-red-300">{bonusError}</span>
+          </div>
+        )}
+      </div>
+
       {error && (
         <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-red-500/10 border border-red-500/30">
           <AlertCircle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
@@ -222,11 +348,11 @@ function FormStep({
 
       <button
         onClick={submit}
-        disabled={!valid || loading}
+        disabled={!valid || loading || (!!bonusCode.trim() && !bonusInfo)}
         className={cn(
           'group relative w-full h-12 rounded-xl text-sm font-bold text-white transition-all duration-200',
           'flex items-center justify-center gap-2 overflow-hidden',
-          valid && !loading
+          valid && !loading && (!bonusCode.trim() || bonusInfo)
             ? 'bg-gradient-to-b from-[#3b82f6] to-[#2563eb] shadow-[0_4px_20px_-4px_rgba(59,130,246,0.6)] hover:shadow-[0_6px_24px_-2px_rgba(59,130,246,0.7)] hover:-translate-y-px active:translate-y-0'
             : 'bg-[#2a2e3b] text-[#5d6275] cursor-not-allowed',
         )}
@@ -322,7 +448,9 @@ function QrStep({
   )
 }
 
-function PaidStep({ amount, onClose }: { amount: number; onClose: () => void }) {
+function PaidStep({ amount, bonusInfo, onClose }: {
+  amount: number; bonusInfo: ValidatedBonus | null; onClose: () => void
+}) {
   return (
     <div className="flex flex-col items-center text-center gap-3 py-5">
       <div className="relative">
@@ -335,6 +463,19 @@ function PaidStep({ amount, onClose }: { amount: number; onClose: () => void }) 
       <p className="text-sm text-[#bdc1cf]">
         <span className="text-emerald-300 font-bold">R$ {amount.toFixed(2).replace('.', ',')}</span> creditado na sua conta real.
       </p>
+      {bonusInfo && (
+        <div className="w-full px-3 py-2.5 rounded-lg bg-emerald-500/8 border border-emerald-500/25 flex items-start gap-2 text-left">
+          <Gift size={14} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+          <div className="text-[11px] leading-relaxed">
+            <div className="text-white font-semibold">
+              +R$ {bonusInfo.bonusAmount.toFixed(2).replace('.', ',')} em bônus aplicado
+            </div>
+            <div className="text-[#7c8195]">
+              Rollover {bonusInfo.rollover}× — opere R$ {bonusInfo.rolloverRequired.toFixed(2).replace('.', ',')} pra liberar saque
+            </div>
+          </div>
+        </div>
+      )}
       <button
         onClick={onClose}
         className="mt-3 w-full h-11 rounded-xl bg-gradient-to-b from-emerald-500 to-emerald-600 text-sm font-bold text-white shadow-[0_4px_20px_-4px_rgba(16,185,129,0.6)] hover:-translate-y-px transition-transform"

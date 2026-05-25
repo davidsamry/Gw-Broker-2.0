@@ -138,6 +138,22 @@ enum OtcEventStatus {
   CANCELLED
 }
 
+// ── Bonus system (Fase B1) ────────────────────────────────────────────────
+// Promotional codes admin defines once (Bonus); each redemption produces a
+// BonusGrant that tracks per-user state including rollover progress.
+
+enum BonusType {
+  PERCENTAGE   // value = % of deposit amount (e.g., 200 = +200% bonus)
+  FIXED        // value = flat R$ credit regardless of deposit size
+}
+
+enum BonusGrantStatus {
+  PENDING      // grant created with a deposit, awaiting deposit to be PAID
+  ACTIVE       // deposit confirmed, bonus credited, rollover in progress
+  COMPLETED    // rollover requirement met — bonus is fully unlocked
+  CANCELLED    // user gave up on bonus OR admin revoked
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -551,6 +567,63 @@ model OtcEngineSnapshot {
 
   @@index([updatedAt(sort: Desc)])
   @@map("otc_engine_snapshot")
+}
+
+// ─── Bonus models (Fase B1) ───────────────────────────────────────────────
+
+// Promotional code definition — created/edited by admin. One row per code.
+model Bonus {
+  id              String       @id @default(cuid())
+  code            String       @unique          // e.g., 'BONUS200', case-insensitive in lookups
+  type            BonusType
+  // For PERCENTAGE: bonus amount = depositAmount × (value / 100)
+  // For FIXED:      bonus amount = value (flat R$)
+  value           Decimal      @db.Decimal(10, 2)
+  // Minimum deposit (R$) required to redeem the code.
+  minDeposit      Decimal      @db.Decimal(18, 2)
+  // Multiplier: total operation volume the user needs to clear to unlock the
+  // bonus. e.g., rollover=10 and bonusAmount=R$200 → user must operate R$2000.
+  rollover        Int
+  active          Boolean      @default(true)
+  // Max successful redemptions per user account. Default 1 = one-shot codes.
+  maxUsesPerUser  Int          @default(1)
+  // Optional expiry — null = never expires.
+  expiresAt       DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  grants          BonusGrant[]
+
+  @@map("bonuses")
+}
+
+// Per-user redemption instance. Tracks rollover progress until status
+// transitions to COMPLETED, then withdrawals are unblocked.
+model BonusGrant {
+  id                String              @id @default(cuid())
+  userId            String
+  bonusId           String
+  // Null only when admin granted manually (no underlying deposit).
+  depositId         String?
+  // Captured at grant time so admin edits to Bonus.value don't retroactively
+  // change in-flight grants.
+  bonusAmount       Decimal             @db.Decimal(18, 2)
+  rolloverRequired  Decimal             @db.Decimal(18, 2)
+  rolloverProgress  Decimal             @default(0) @db.Decimal(18, 2)
+  status            BonusGrantStatus    @default(PENDING)
+  grantedAt         DateTime            @default(now())
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+
+  bonus             Bonus               @relation(fields: [bonusId], references: [id], onDelete: Restrict)
+
+  // Lookups by user (e.g., "do I have an active grant?") + by status (admin list).
+  @@index([userId, status])
+  @@index([status])
+  // Constraint: at most ONE active (PENDING|ACTIVE) grant per user. Enforced
+  // via a partial unique index in the accompanying migration since Prisma
+  // doesn't have first-class partial unique support yet.
+  @@map("bonus_grants")
 }
 
 // Audit trail of admin actions on OTC engine.

@@ -25,6 +25,12 @@ export async function depositRoutes(app: FastifyInstance) {
         req.log.error({ err }, 'BSPay cashin failed')
         return reply.status(502).send({ error: 'PAYMENT_GATEWAY_ERROR' })
       }
+      // Fase B1: bonus validation errors raised by createPixDeposit when
+      // a bonusCode was supplied. Surface them so the modal can map to
+      // user-friendly messages.
+      if (err.message?.startsWith('BONUS_')) {
+        return reply.status(400).send({ error: err.message })
+      }
       req.log.error({ err }, 'Unexpected deposit error')
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }

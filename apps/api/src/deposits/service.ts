@@ -3,6 +3,9 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 import { createCashin, isConfigured } from '../payments/bspay.js'
 import type { CreatePixDepositInput } from './schema.js'
+import {
+  validateCodeForUser, createPendingGrantForDeposit, activateForPaidDeposit,
+} from '../bonuses/service.js'
 
 export interface CreatedDeposit {
   id:         string
@@ -42,6 +45,18 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
   const depositId  = randomUUID()
   const amountDec  = new Prisma.Decimal(input.amount)
 
+  // Fase B1: optional bonus code. Validated BEFORE inserting the deposit
+  // row so the user gets an immediate error if the code's bad. The grant
+  // is created in PENDING state right after the deposit insert; it flips
+  // to ACTIVE only when the deposit confirms (PAID).
+  let validatedBonus: Awaited<ReturnType<typeof validateCodeForUser>> | null = null
+  if (input.bonusCode) {
+    validatedBonus = await validateCodeForUser(userId, input.bonusCode, input.amount)
+    if (!validatedBonus.ok) {
+      throw new Error(`BONUS_${validatedBonus.error}`)
+    }
+  }
+
   // Insert the deposit row first — gives us a stable id to use as external_id
   // with the gateway. If the gateway call below fails, we leave the PENDING
   // row in place (won't credit the user — only the webhook can do that).
@@ -52,6 +67,25 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
       'PIX'::"DepositMethod", 'PENDING'::"DepositStatus", NOW(), NOW()
     )
   `
+
+  // Create the grant after the deposit row exists (FK is depositId, not strict
+  // but we use it for traceability + the activate flow looks it up by depositId).
+  if (validatedBonus?.ok) {
+    try {
+      await createPendingGrantForDeposit({
+        userId,
+        bonusId:     validatedBonus.bonus.id,
+        depositId,
+        bonusAmount: validatedBonus.bonus.bonusAmount,
+        rollover:    validatedBonus.bonus.rollover,
+      })
+    } catch (err) {
+      // If the grant insert fails (e.g., race: user opened a different
+      // bonus tab), leave the deposit alive so the user can still pay,
+      // but log loudly. They just won't get the bonus.
+      console.error('[deposits] grant insert failed — deposit will proceed without bonus', err)
+    }
+  }
 
   // Call BSPay. On failure, mark the deposit FAILED + bubble the error
   // so the user sees something actionable.
@@ -111,16 +145,19 @@ export async function getMyDepositStatus(userId: string, depositId: string) {
 
 // Webhook entry point. Idempotent: if the deposit is already PAID we return
 // without re-crediting the user.
+//
+// Fase B1: bonus credit moved to activateForPaidDeposit (called below)
+// instead of the legacy `deposits.bonus` column path. Keeps the CTE
+// simple — just credit the deposit amount, write the DEPOSIT tx, flip
+// status. Bonus credit happens in its own step after.
 export async function confirmDepositById(depositId: string) {
   const txDeposit = randomUUID()
-  const txBonus   = randomUUID()
   const note      = 'Depósito confirmado pelo gateway (BSPay)'
-  const bonusNote = 'Bônus de depósito confirmado pelo gateway (BSPay)'
 
   const rows = await prisma.$queryRaw<Array<{ id: string }>>`
     WITH
       target AS (
-        SELECT id, "accountId", amount, COALESCE(bonus, 0) AS bonus
+        SELECT id, "accountId", amount
         FROM deposits
         WHERE id = ${depositId}
           AND status = 'PENDING'::"DepositStatus"
@@ -133,7 +170,7 @@ export async function confirmDepositById(depositId: string) {
       ),
       upd_bal AS (
         UPDATE accounts
-        SET balance = balance + (SELECT amount + bonus FROM target)
+        SET balance = balance + (SELECT amount FROM target)
         WHERE id = (SELECT "accountId" FROM target)
         RETURNING id
       ),
@@ -142,15 +179,23 @@ export async function confirmDepositById(depositId: string) {
         SELECT ${txDeposit}, "accountId", 'DEPOSIT'::"TransactionType", amount, ${note}, NOW()
         FROM target
         RETURNING id
-      ),
-      ins_bonus_tx AS (
-        INSERT INTO transactions (id, "accountId", type, amount, description, "createdAt")
-        SELECT ${txBonus}, "accountId", 'BONUS'::"TransactionType", bonus, ${bonusNote}, NOW()
-        FROM target WHERE bonus > 0
-        RETURNING id
       )
     SELECT id FROM upd_dep
   `
-  // rows empty == already PAID or doesn't exist (idempotent, swallowed).
-  return rows.length > 0
+  const wasPending = rows.length > 0
+  if (!wasPending) return false   // already PAID or doesn't exist — idempotent
+
+  // Fase B1: if a BonusGrant is tied to this deposit, activate it now.
+  // Errors here don't roll back the deposit — the user has already paid,
+  // they shouldn't be punished for our bonus accounting; we just log.
+  try {
+    const credited = await activateForPaidDeposit(depositId)
+    if (credited > 0) {
+      console.log(`[deposits] bonus credited deposit=${depositId} amount=${credited}`)
+    }
+  } catch (err) {
+    console.error(`[deposits] activateForPaidDeposit failed for deposit=${depositId}`, err)
+  }
+
+  return true
 }
