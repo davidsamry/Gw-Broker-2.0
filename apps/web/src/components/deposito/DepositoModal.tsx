@@ -401,7 +401,7 @@ function FormStep({
             </option>
             {availableBonuses.map((b) => (
               <option key={b.id} value={b.id}>
-                {b.code} — {b.type === 'PERCENTAGE' ? `${b.value}%` : `R$${b.value}`} (mín R${b.minDeposit}, rollover {b.rollover}×)
+                {b.code} — {b.type === 'PERCENTAGE' ? `${b.value}%` : `R$${b.value}`} (mín R${b.minDeposit})
               </option>
             ))}
           </select>
