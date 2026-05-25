@@ -23,7 +23,6 @@ const MIN = 60        // R$ — kept in sync with apps/api/src/deposits/schema.t
 const MAX = 10_000    // R$
 const POLL_MS = 3000  // status poll interval while QR is on screen
 const PRESETS = [60, 100, 250, 500, 1000]
-const POPULAR_VALUE = 250   // gets the "Mais escolhido" highlight
 
 type Phase = 'form' | 'qrcode' | 'paid' | 'expired'
 
@@ -168,23 +167,17 @@ function FormStep({
         <div className="grid grid-cols-5 gap-2">
           {PRESETS.map((v) => {
             const selected = amountNum === v
-            const popular  = v === POPULAR_VALUE
             return (
               <button
                 key={v}
                 onClick={() => setAmount(String(v))}
                 className={cn(
-                  'relative h-11 rounded-lg text-[13px] font-bold border transition-all duration-150',
+                  'h-11 rounded-lg text-[13px] font-bold border transition-all duration-150',
                   selected
                     ? 'bg-emerald-500/15 border-emerald-400/60 text-emerald-300 shadow-[0_0_0_3px_rgba(16,185,129,0.08)]'
                     : 'bg-[#222637] border-[#2a2e3b] text-[#bdc1cf] hover:text-white hover:border-[#3a4055] hover:bg-[#262b3e]',
                 )}
               >
-                {popular && !selected && (
-                  <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-1.5 py-[1px] rounded text-[8px] font-bold uppercase tracking-wider bg-[#32BCAD] text-white shadow-sm whitespace-nowrap">
-                    Top
-                  </span>
-                )}
                 R$ {v}
               </button>
             )
