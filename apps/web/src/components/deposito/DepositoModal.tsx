@@ -437,16 +437,11 @@ function FormStep({
 
         {/* Preview / error chip */}
         {bonusInfo && (
-          <div className="mt-2 px-3 py-2 rounded-lg bg-emerald-500/8 border border-emerald-500/25 flex items-start gap-2">
-            <Check size={13} className="text-emerald-400 flex-shrink-0 mt-0.5" />
-            <div className="text-[11px] leading-relaxed">
-              <div className="text-white font-semibold">
-                Você ganha <span className="text-emerald-300">R$ {formatBrl(bonusInfo.bonusAmount)}</span> em bônus
-              </div>
-              <div className="text-[#7c8195]">
-                Rollover {bonusInfo.rollover}× · operar R$ {formatBrl(bonusInfo.rolloverRequired)} pra liberar saque
-              </div>
-            </div>
+          <div className="mt-2 px-3 py-2 rounded-lg bg-emerald-500/8 border border-emerald-500/25 flex items-center gap-2">
+            <Check size={13} className="text-emerald-400 flex-shrink-0" />
+            <span className="text-[11px] text-white font-semibold">
+              Você ganha <span className="text-emerald-300">R$ {formatBrl(bonusInfo.bonusAmount)}</span> em bônus
+            </span>
           </div>
         )}
         {bonusError && (
