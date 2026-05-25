@@ -1,10 +1,11 @@
 // Fase 4 — graceful shutdown. Clear all intervals, do final flush of
-// pending writes + runtime state + snapshot so the next boot loses
-// zero context.
+// pending writes + snapshot so the next boot loses zero context.
+//
+// Fase M1: flushRuntimeState removed (legacy market_state/liquidity
+// tables aren't written anymore — see storage/state.ts).
 
 import { setEngineRunning } from './state-map.js'
 import { tickIntervals, intervals, flushPending } from './loops.js'
-import { flushRuntimeState } from '../storage/state.js'
 import { flushSnapshot } from '../storage/snapshot.js'
 
 export function stopOtcV2Worker(): void {
@@ -16,9 +17,8 @@ export function stopOtcV2Worker(): void {
   if (intervals.gapSweep)   { clearInterval(intervals.gapSweep);   intervals.gapSweep   = null }
   if (intervals.prune)      { clearInterval(intervals.prune);      intervals.prune      = null }
   // Final flush — order matters: pending writes first (so the snapshot's
-  // lastCandleTime references one of them), then state, then snapshot.
+  // lastCandleTime references one of them), then snapshot.
   void flushPending()
-  void flushRuntimeState()
   void flushSnapshot()
   setEngineRunning(false)
 }

@@ -1,6 +1,7 @@
 // Fase 4 — otc_engine_snapshot I/O. Atomic engine state per asset,
 // UPSERTed every 5s + on shutdown. Loaded as PRIMARY recovery source.
 
+import { Prisma } from '@prisma/client'
 import { prisma } from '../../../prisma.js'
 import type { OtcRegime } from '../types.js'
 import { assetStates } from '../runtime/state-map.js'
@@ -86,50 +87,61 @@ export async function loadSnapshots(assetIds: string[]): Promise<Map<string, Eng
   return out
 }
 
-// UPSERT one row per asset. Called every 5s + on shutdown.
+// UPSERT every active asset in ONE query. Called every 5s + on shutdown.
+//
+// Was N round-trips (one INSERT per asset) — with the 5-asset launch
+// catalog that's 5 connections held briefly every 5s. Combined with the
+// (now-deleted) flushRuntimeState it was 15 round-trips per cycle,
+// which on a 3-connection pool meant the snapshot flush regularly
+// stalled tick flushes waiting for a connection. Now: one batched
+// INSERT with VALUES (...), (...), ... and the same ON CONFLICT clause.
+//
+// If asset count ever grows past ~50, switch to chunked batches (PG
+// parameter limit is 65k; one row uses 17 params here).
 export async function flushSnapshot(): Promise<void> {
-  for (const s of assetStates.values()) {
-    try {
-      await prisma.$executeRaw`
-        INSERT INTO otc_engine_snapshot (
-          "assetId", "snapshotVersion",
-          "currentPrice", "smoothedPrice",
-          regime, "regimeStartedAt", "regimeDurationMs",
-          spread, "buyPressure", "sellPressure",
-          volume, depth, speed, "trendBias",
-          "lastTickTime", "lastCandleTime", "updatedAt"
-        ) VALUES (
-          ${s.config.id}, ${CURRENT_SNAPSHOT_VERSION},
-          ${s.price}, ${s.smoothedPrice},
-          ${s.regime}::"OtcRegime",
-          ${new Date(s.regimeStartedAt)},
-          ${Math.floor(s.regimeDurationMs)},
-          ${s.spread}, ${s.buyPressure}, ${s.sellPressure},
-          ${s.volume}, ${s.depth}, ${s.speed}, ${s.trendBias},
-          ${s.lastTickAt ? new Date(s.lastTickAt) : null},
-          ${s.lastCandleAt ? new Date(s.lastCandleAt) : null},
-          NOW()
-        )
-        ON CONFLICT ("assetId") DO UPDATE SET
-          "snapshotVersion"  = EXCLUDED."snapshotVersion",
-          "currentPrice"     = EXCLUDED."currentPrice",
-          "smoothedPrice"    = EXCLUDED."smoothedPrice",
-          regime             = EXCLUDED.regime,
-          "regimeStartedAt"  = EXCLUDED."regimeStartedAt",
-          "regimeDurationMs" = EXCLUDED."regimeDurationMs",
-          spread             = EXCLUDED.spread,
-          "buyPressure"      = EXCLUDED."buyPressure",
-          "sellPressure"     = EXCLUDED."sellPressure",
-          volume             = EXCLUDED.volume,
-          depth              = EXCLUDED.depth,
-          speed              = EXCLUDED.speed,
-          "trendBias"        = EXCLUDED."trendBias",
-          "lastTickTime"     = EXCLUDED."lastTickTime",
-          "lastCandleTime"   = EXCLUDED."lastCandleTime",
-          "updatedAt"        = NOW()
-      `
-    } catch (err) {
-      console.error(`[otc-v2] flushSnapshot failed for ${s.config.id}`, err)
-    }
+  const states = Array.from(assetStates.values())
+  if (states.length === 0) return
+  try {
+    const values = states.map(s => Prisma.sql`(
+      ${s.config.id}, ${CURRENT_SNAPSHOT_VERSION},
+      ${s.price}, ${s.smoothedPrice},
+      ${s.regime}::"OtcRegime",
+      ${new Date(s.regimeStartedAt)},
+      ${Math.floor(s.regimeDurationMs)},
+      ${s.spread}, ${s.buyPressure}, ${s.sellPressure},
+      ${s.volume}, ${s.depth}, ${s.speed}, ${s.trendBias},
+      ${s.lastTickAt ? new Date(s.lastTickAt) : null},
+      ${s.lastCandleAt ? new Date(s.lastCandleAt) : null},
+      NOW()
+    )`)
+    await prisma.$executeRaw`
+      INSERT INTO otc_engine_snapshot (
+        "assetId", "snapshotVersion",
+        "currentPrice", "smoothedPrice",
+        regime, "regimeStartedAt", "regimeDurationMs",
+        spread, "buyPressure", "sellPressure",
+        volume, depth, speed, "trendBias",
+        "lastTickTime", "lastCandleTime", "updatedAt"
+      ) VALUES ${Prisma.join(values, ', ')}
+      ON CONFLICT ("assetId") DO UPDATE SET
+        "snapshotVersion"  = EXCLUDED."snapshotVersion",
+        "currentPrice"     = EXCLUDED."currentPrice",
+        "smoothedPrice"    = EXCLUDED."smoothedPrice",
+        regime             = EXCLUDED.regime,
+        "regimeStartedAt"  = EXCLUDED."regimeStartedAt",
+        "regimeDurationMs" = EXCLUDED."regimeDurationMs",
+        spread             = EXCLUDED.spread,
+        "buyPressure"      = EXCLUDED."buyPressure",
+        "sellPressure"     = EXCLUDED."sellPressure",
+        volume             = EXCLUDED.volume,
+        depth              = EXCLUDED.depth,
+        speed              = EXCLUDED.speed,
+        "trendBias"        = EXCLUDED."trendBias",
+        "lastTickTime"     = EXCLUDED."lastTickTime",
+        "lastCandleTime"   = EXCLUDED."lastCandleTime",
+        "updatedAt"        = NOW()
+    `
+  } catch (err) {
+    console.error('[otc-v2] flushSnapshot batch failed', err)
   }
 }

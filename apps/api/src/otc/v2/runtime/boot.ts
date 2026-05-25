@@ -10,7 +10,7 @@ import { loadAssetConfigs, selfHealSeed } from '../storage/assets.js'
 import { loadLatestCandlePerTimeframe, primeCandleCache } from '../storage/candles.js'
 import { loadLatestTicks } from '../storage/ticks.js'
 import { loadSnapshots, flushSnapshot } from '../storage/snapshot.js'
-import { loadPersistedRuntimeStates, flushRuntimeState } from '../storage/state.js'
+import { loadPersistedRuntimeStates } from '../storage/state.js'
 import { pruneOldData, logPruneConfig, PRUNE_ENABLED } from '../storage/prune.js'
 import { bootstrapHistoricalCandles } from '../recovery/bootstrap.js'
 import { backfillMissingCandles } from '../recovery/backfill.js'
@@ -153,10 +153,7 @@ export async function startOtcV2Worker(): Promise<void> {
     setBootedAt(Date.now())
     intervals.flush      = setInterval(flushPending,      TICK_FLUSH_INTERVAL_MS)
     intervals.liquidity  = setInterval(stepAllLiquidity,  LIQUIDITY_UPDATE_INTERVAL_MS)
-    intervals.stateFlush = setInterval(async () => {
-      await flushRuntimeState()
-      await flushSnapshot()
-    }, STATE_FLUSH_INTERVAL_MS)
+    intervals.stateFlush = setInterval(() => { void flushSnapshot() }, STATE_FLUSH_INTERVAL_MS)
     intervals.gapSweep   = setInterval(() => { void sweepAllGaps() }, GAP_SWEEP_INTERVAL_MS)
 
     // Fase 7: prune cycle. Chunked + budgeted; logs retention config

@@ -1,10 +1,22 @@
-// Fase 4 — legacy otc_market_state + otc_liquidity_state I/O.
-// Kept for back-compat (Fase 3 snapshot is the primary source now);
-// these stay populated by the same 5s loop until a future cleanup.
+// Fase M1 (May 2026): legacy otc_market_state + otc_liquidity_state
+// are no longer written by the engine. The Fase 3 otc_engine_snapshot
+// table is the single source of truth — it has everything these
+// legacy tables had + more (FSM duration in ms instead of s, smoothed
+// price, last tick/candle timestamps).
+//
+// Write path removed because the 5s flush loop was doing 10 round-
+// trips (2 per asset × 5 assets) on top of the snapshot flush —
+// pure overhead with no consumer. Read path kept as a defensive
+// fallback for buildInitialState in case otc_engine_snapshot is
+// missing rows (e.g., new asset added live without snapshot yet).
+//
+// Tables themselves stay (no destructive drop) so any old admin tool
+// that reads them still works. They become read-only fossils. A
+// future migration can drop them once we're certain nothing else
+// reads from them.
 
 import { prisma } from '../../../prisma.js'
 import type { OtcRegime } from '../types.js'
-import { assetStates } from '../runtime/state-map.js'
 
 // What we read out of otc_market_state + otc_liquidity_state at boot.
 // All fields optional because either table might be missing rows for a
@@ -69,57 +81,4 @@ export async function loadPersistedRuntimeStates(assetIds: string[]): Promise<Ma
     console.error('[otc-v2] loadPersistedRuntimeStates failed — defaults will be used', err)
   }
   return out
-}
-
-// Periodic snapshot of every asset's regime + liquidity + trendBias
-// to the LEGACY tables. The Fase 3 snapshot table is primary now;
-// these stay populated for back-compat until a future cleanup.
-export async function flushRuntimeState(): Promise<void> {
-  for (const s of assetStates.values()) {
-    try {
-      await prisma.$executeRaw`
-        INSERT INTO otc_market_state
-          ("assetId", "currentRegime", "regimeStartedAt", "regimeDurationS",
-           "currentDrift", "currentVol", "trendBias", "updatedAt")
-        VALUES (
-          ${s.config.id},
-          ${s.regime}::"OtcRegime",
-          ${new Date(s.regimeStartedAt)},
-          ${Math.floor(s.regimeDurationMs / 1000)},
-          0,
-          ${s.config.volatilityBase},
-          ${s.trendBias},
-          NOW()
-        )
-        ON CONFLICT ("assetId") DO UPDATE SET
-          "currentRegime"   = EXCLUDED."currentRegime",
-          "regimeStartedAt" = EXCLUDED."regimeStartedAt",
-          "regimeDurationS" = EXCLUDED."regimeDurationS",
-          "currentVol"      = EXCLUDED."currentVol",
-          "trendBias"       = EXCLUDED."trendBias",
-          "updatedAt"       = NOW()
-      `
-      await prisma.$executeRaw`
-        INSERT INTO otc_liquidity_state
-          ("assetId", spread, "buyPressure", "sellPressure",
-           volume, depth, speed, "updatedAt")
-        VALUES (
-          ${s.config.id},
-          ${s.spread}, ${s.buyPressure}, ${s.sellPressure},
-          ${s.volume}, ${s.depth}, ${s.speed},
-          NOW()
-        )
-        ON CONFLICT ("assetId") DO UPDATE SET
-          spread         = EXCLUDED.spread,
-          "buyPressure"  = EXCLUDED."buyPressure",
-          "sellPressure" = EXCLUDED."sellPressure",
-          volume         = EXCLUDED.volume,
-          depth          = EXCLUDED.depth,
-          speed          = EXCLUDED.speed,
-          "updatedAt"    = NOW()
-      `
-    } catch (err) {
-      console.error(`[otc-v2] flushRuntimeState failed for ${s.config.id}`, err)
-    }
-  }
 }
