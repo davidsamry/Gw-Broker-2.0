@@ -320,10 +320,14 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
   // (it kicks in only on extreme shocks the soft barrier couldn't catch).
   const clamped = clamp(rawNext, s.config.seedPrice * 0.5, s.config.seedPrice * 2)
 
-  // EMA smoothing (alpha = 0.3) — consecutive ticks are correlated,
-  // which is what makes the chart line look like a market chart
-  // instead of TV static.
-  const smoothed = 0.3 * clamped + 0.7 * s.smoothedPrice
+  // EMA smoothing (alpha = 0.6) — consecutive ticks are correlated
+  // enough to keep the chart line continuous, but not so smoothed that
+  // intra-candle high/low collapse onto open/close (which was the
+  // 2026-05-25 "repetitive candles + no wicks" complaint at α=0.3).
+  // Higher alpha = more weight on the new tick = bigger candle bodies
+  // and visible wicks because max/min within a candle actually diverge
+  // from the close.
+  const smoothed = 0.6 * clamped + 0.4 * s.smoothedPrice
 
   s.price         = clamped
   s.smoothedPrice = smoothed
