@@ -13,6 +13,8 @@ import { depositRoutes } from './deposits/routes.js'
 import { bspayWebhookRoutes } from './webhooks/bspay.js'
 import { ticketRoutes } from './tickets/routes.js'
 import { otcV2Routes } from './otc/v2/routes.js'
+import { metricsRoute } from './metrics/route.js'
+import { httpRequestDurationSeconds } from './metrics/registry.js'
 import { prisma } from './prisma.js'
 
 export async function buildApp() {
@@ -83,6 +85,22 @@ export async function buildApp() {
 
   // ── Health check ──────────────────────────────────────────────────────────
   app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
+
+  // ── Fase M3: HTTP metrics ─────────────────────────────────────────────────
+  // Records duration for every request so Grafana can show p50/p95/p99
+  // latency per route + status code. Routes that don't yet have a
+  // routerPath (404s, errors before routing) fall back to "unknown" so
+  // cardinality stays bounded. Excludes /metrics itself to avoid noise.
+  app.addHook('onResponse', async (req, reply) => {
+    const route = req.routeOptions?.url ?? 'unknown'
+    if (route === '/metrics') return
+    const durationSec = reply.elapsedTime / 1000
+    httpRequestDurationSeconds.observe(
+      { method: req.method, route, status_code: String(reply.statusCode) },
+      durationSec,
+    )
+  })
+  await app.register(metricsRoute)
 
   // ── Routes ────────────────────────────────────────────────────────────────
   await app.register(authRoutes,         { prefix: '/auth' })

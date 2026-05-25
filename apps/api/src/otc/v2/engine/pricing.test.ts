@@ -321,11 +321,15 @@ describe('stepPrice', () => {
   it('returns a finite positive number for 10k consecutive ticks', () => {
     const s = makeState()
     const rand = mulberry32(101)
+    let allFinite = true
+    let minP = Infinity
     for (let i = 0; i < 10_000; i++) {
       const p = stepPrice(s, rand)
-      expect(Number.isFinite(p)).toBe(true)
-      expect(p).toBeGreaterThan(0)
+      if (!Number.isFinite(p)) allFinite = false
+      if (p < minP) minP = p
     }
+    expect(allFinite).toBe(true)
+    expect(minP).toBeGreaterThan(0)
   })
 
   it('respects the catastrophic clamp [seed×0.5, seed×2]', () => {

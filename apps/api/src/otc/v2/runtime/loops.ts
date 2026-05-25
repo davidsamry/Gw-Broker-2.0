@@ -12,6 +12,12 @@ import {
 } from './state-map.js'
 import { flushTicksBatch } from '../storage/ticks.js'
 import { flushCandlesBatch } from '../storage/candles.js'
+import {
+  otcTicksEmittedTotal, otcCandlesFinalizedTotal,
+  otcRegimeTransitionsTotal, otcPriceCurrent,
+  otcPendingTicksSize, otcPendingCandlesSize,
+  timedDbOp,
+} from '../../../metrics/registry.js'
 
 // ── Boot-grace window — suppresses random spikes in the first
 // BOOT_SPIKE_GRACE_MS so the first ticks post-restart can't introduce
@@ -50,13 +56,22 @@ export function startAssetLoop(assetId: string): void {
     const now = Date.now()
     // Tag the boot grace window so stepPrice skips its spike branch.
     s.bootGrace = isWithinBootGrace()
-    maybeTransitionRegime(s, now)
+    const fromRegime = s.regime
+    const transitioned = maybeTransitionRegime(s, now)
+    if (transitioned) {
+      otcRegimeTransitionsTotal.inc({ assetId, from: fromRegime, to: s.regime })
+    }
 
     const price = stepPrice(s)
     // Track tick freshness for the Fase 3 snapshot.
     s.lastTickAt = now
     const tick: OtcTick = { assetId: s.config.id, price: round5(price), recordedAt: new Date(now) }
     pendingTicks.push(tick)
+
+    // Fase M3 metrics — these are per-tick (10Hz × 5 assets = 50/sec).
+    // Counter.inc and Gauge.set are constant-time, no allocations.
+    otcTicksEmittedTotal.inc({ assetId })
+    otcPriceCurrent.set({ assetId }, tick.price)
 
     publishTick({ assetId: tick.assetId, price: tick.price, time: now })
 
@@ -84,6 +99,7 @@ export function startAssetLoop(assetId: string): void {
 
       if (finalized) {
         pendingCandles.push(finalized)
+        otcCandlesFinalizedTotal.inc({ assetId, timeframe: String(cb.timeframe) })
         // Track the most-recent finalized candle's openTime for the snapshot.
         const finOpen = finalized.openTime.getTime()
         if (!s.lastCandleAt || finOpen > s.lastCandleAt) {
@@ -104,16 +120,21 @@ export function startAssetLoop(assetId: string): void {
 
 // ── Periodic flush of pending ticks + candles to DB ────────────────────
 export async function flushPending(): Promise<void> {
+  // Update queue-depth gauges before snapshotting so a Prometheus scrape
+  // landing mid-flush still sees the pre-flush depth.
+  otcPendingTicksSize.set(pendingTicks.length)
+  otcPendingCandlesSize.set(pendingCandles.length)
+
   // Snapshot + clear (concurrent ticks during the await are picked up
   // on the next flush — they're already in cache for serving).
   const ticks   = pendingTicks.splice(0)
   const candles = pendingCandles.splice(0)
   if (ticks.length > 0) {
-    try { await flushTicksBatch(ticks) }
+    try { await timedDbOp('flush_ticks', () => flushTicksBatch(ticks)) }
     catch (err) { console.error('[otc-v2] tick flush failed', err) }
   }
   if (candles.length > 0) {
-    try { await flushCandlesBatch(candles) }
+    try { await timedDbOp('flush_candles', () => flushCandlesBatch(candles)) }
     catch (err) { console.error('[otc-v2] candle flush failed', err) }
   }
 }

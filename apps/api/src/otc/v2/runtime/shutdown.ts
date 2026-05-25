@@ -7,6 +7,7 @@
 import { setEngineRunning } from './state-map.js'
 import { tickIntervals, intervals, flushPending } from './loops.js'
 import { flushSnapshot } from '../storage/snapshot.js'
+import { otcEngineRunning } from '../../../metrics/registry.js'
 
 export function stopOtcV2Worker(): void {
   for (const it of tickIntervals) clearInterval(it)
@@ -21,4 +22,5 @@ export function stopOtcV2Worker(): void {
   void flushPending()
   void flushSnapshot()
   setEngineRunning(false)
+  otcEngineRunning.set(0)
 }

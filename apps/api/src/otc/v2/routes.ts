@@ -4,6 +4,9 @@ import { getCachedCandles, getCurrentPrice } from './worker.js'
 import { otcV2Bus, type OtcV2CandleEvent, type OtcV2TickEvent } from './events.js'
 import { registerClient, unregisterClient } from './stream/registry.js'
 import { CANDLES_PER_TF, OTC_TIMEFRAMES, type OtcTimeframe } from './types.js'
+import {
+  otcSseEventsEmittedTotal, otcSseEventsSkippedTotal,
+} from '../../metrics/registry.js'
 
 // Public OTC v2 endpoints. Auth is intentionally absent — pricing is
 // the same for everyone, mirrors how /market/assets and /otc/* (v1)
@@ -130,12 +133,20 @@ export async function otcV2Routes(app: FastifyInstance) {
       if (client.assets && !client.assets.includes(e.assetId)) return
       // Backpressure: skip ticks (cheap to drop, freshest tick always
       // arrives ~200ms later anyway).
-      if (!drained) { client.candlesSkipped++; return }
+      if (!drained) {
+        client.candlesSkipped++
+        otcSseEventsSkippedTotal.inc({ reason: 'backpressure' })
+        return
+      }
       const last = client.lastTickEmitMs.get(e.assetId) ?? 0
-      if (e.time - last < TICK_THROTTLE_MS) return
+      if (e.time - last < TICK_THROTTLE_MS) {
+        otcSseEventsSkippedTotal.inc({ reason: 'throttle' })
+        return
+      }
       client.lastTickEmitMs.set(e.assetId, e.time)
       if (tryWrite(`event: tick\ndata: ${JSON.stringify(e)}\n\n`)) {
         client.ticksReceived++
+        otcSseEventsEmittedTotal.inc({ type: 'tick' })
       }
     }
 
@@ -150,6 +161,7 @@ export async function otcV2Routes(app: FastifyInstance) {
       if (e.isClosed) {
         if (tryWrite(`event: candle\ndata: ${JSON.stringify(e)}\n\n`)) {
           client.candlesReceived++
+          otcSseEventsEmittedTotal.inc({ type: 'candle' })
         }
         // Reset throttle so the next candleUpdate (new bar) emits
         // promptly instead of waiting up to 1s.
@@ -158,13 +170,22 @@ export async function otcV2Routes(app: FastifyInstance) {
       }
 
       // In-progress candleUpdate — backpressure-skippable like ticks.
-      if (!drained) { client.candlesSkipped++; return }
+      if (!drained) {
+        client.candlesSkipped++
+        otcSseEventsSkippedTotal.inc({ reason: 'backpressure' })
+        return
+      }
       const key = `${e.assetId}:${e.timeframe}`
       const last = client.lastCandleEmitMs.get(key) ?? 0
       const now = Date.now()
-      if (now - last < CANDLE_THROTTLE_MS) return
+      if (now - last < CANDLE_THROTTLE_MS) {
+        otcSseEventsSkippedTotal.inc({ reason: 'throttle' })
+        return
+      }
       client.lastCandleEmitMs.set(key, now)
-      tryWrite(`event: candleUpdate\ndata: ${JSON.stringify(e)}\n\n`)
+      if (tryWrite(`event: candleUpdate\ndata: ${JSON.stringify(e)}\n\n`)) {
+        otcSseEventsEmittedTotal.inc({ type: 'candleUpdate' })
+      }
     }
 
     // Keep-alive comment every 25s — survives proxies / Cloudflare's

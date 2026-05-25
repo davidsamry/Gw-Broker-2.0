@@ -7,6 +7,7 @@
 // registry shape stays — the only change is the underlying transport.
 
 import { randomUUID } from 'node:crypto'
+import { otcSseClients } from '../../../metrics/registry.js'
 
 export interface SseClient {
   id:               string          // UUID assigned at connect time
@@ -47,6 +48,7 @@ export function registerClient(opts: {
     closed:           false,
   }
   clients.set(c.id, c)
+  otcSseClients.set(clients.size)
   return c
 }
 
@@ -54,6 +56,7 @@ export function unregisterClient(id: string): void {
   const c = clients.get(id)
   if (c) c.closed = true
   clients.delete(id)
+  otcSseClients.set(clients.size)
 }
 
 export function listClients(): SseClient[] {

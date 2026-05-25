@@ -24,6 +24,9 @@ import {
   startAssetLoop, flushPending, stepAllLiquidity,
   intervals,
 } from './loops.js'
+import {
+  otcEngineRunning, otcEngineAssetsLoaded, timedDbOp,
+} from '../../../metrics/registry.js'
 
 const TICK_FLUSH_INTERVAL_MS       = 1_000
 const LIQUIDITY_UPDATE_INTERVAL_MS = 10_000
@@ -153,7 +156,9 @@ export async function startOtcV2Worker(): Promise<void> {
     setBootedAt(Date.now())
     intervals.flush      = setInterval(flushPending,      TICK_FLUSH_INTERVAL_MS)
     intervals.liquidity  = setInterval(stepAllLiquidity,  LIQUIDITY_UPDATE_INTERVAL_MS)
-    intervals.stateFlush = setInterval(() => { void flushSnapshot() }, STATE_FLUSH_INTERVAL_MS)
+    intervals.stateFlush = setInterval(() => {
+      void timedDbOp('snapshot_flush', () => flushSnapshot())
+    }, STATE_FLUSH_INTERVAL_MS)
     intervals.gapSweep   = setInterval(() => { void sweepAllGaps() }, GAP_SWEEP_INTERVAL_MS)
 
     // Fase 7: prune cycle. Chunked + budgeted; logs retention config
@@ -172,6 +177,10 @@ export async function startOtcV2Worker(): Promise<void> {
     }
 
     console.log(`[otc-v2] running with ${assetStates.size}/${configs.length} assets, ${OTC_TIMEFRAMES.length} timeframes`)
+    // Fase M3 — engine state gauges. Set once after live; per-asset
+    // gauges (price, regime transitions) update from the tick loop.
+    otcEngineRunning.set(1)
+    otcEngineAssetsLoaded.set(assetStates.size)
 
     // 4. Bootstrap historical candles + per-asset backfill — moved
     // to BACKGROUND so the engine is responsive immediately. Bootstrap
