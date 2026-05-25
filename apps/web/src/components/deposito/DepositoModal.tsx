@@ -375,12 +375,19 @@ function ExpiredStep({ onRetry }: { onRetry: () => void }) {
   )
 }
 
-// ── PIX brand mark ─────────────────────────────────────────────────────────
+// ── PIX brand mark — official Banco Central symbol ────────────────────────
+// 4 rounded squares rotated 45° form the canonical PIX rhombus with an
+// X-shaped gap in the middle. Matches the BCB brand guidelines (turquoise
+// #32BCAD, no background circle, 4 quadrants separated by ~2px gap).
 function PixIcon({ size = 32 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" className="relative">
-      <circle cx="16" cy="16" r="16" fill="#32BCAD" />
-      <path d="M20.5 11.5L16 16l-4.5-4.5m9 9L16 16l4.5 4.5m-9 0L16 16l-4.5 4.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" className="relative" aria-label="PIX">
+      <g transform="rotate(45 16 16)" fill="#32BCAD">
+        <rect x="7"  y="7"  width="8" height="8" rx="1.5" />
+        <rect x="17" y="7"  width="8" height="8" rx="1.5" />
+        <rect x="7"  y="17" width="8" height="8" rx="1.5" />
+        <rect x="17" y="17" width="8" height="8" rx="1.5" />
+      </g>
     </svg>
   )
 }
