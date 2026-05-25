@@ -32,6 +32,21 @@ interface OtcLiveState {
   trendBias:        number
   enabled:          boolean
   paused:           boolean
+  // Fase 9 freshness markers
+  lastTickAt:       number | null
+  lastCandleAt:     number | null
+}
+
+interface EngineStatus {
+  running:           boolean
+  bootedAt:          number | null
+  uptimeMs:          number
+  totalAssets:       number
+  sseClients:        number
+  snapshotUpdatedAt: string | null
+  snapshotAgeMs:     number | null
+  gapFills24h:       number
+  recentGapFills:    Array<{ ts: string; assetId: string; tf: number; slotsFilled: number }>
 }
 
 interface OtcAdminAsset {
@@ -80,19 +95,25 @@ const REGIME_CLASS: Record<OtcRegime, string> = {
 
 // ── Page ──────────────────────────────────────────────────────────────
 export default function AdminOtcPage() {
-  const [assets, setAssets] = useState<OtcAdminAsset[]>([])
+  const [assets, setAssets]   = useState<OtcAdminAsset[]>([])
+  const [status, setStatus]   = useState<EngineStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
   const [editing, setEditing] = useState<OtcAdminAsset | null>(null)
   const [busyId, setBusyId]   = useState<string | null>(null)
 
-  // Full reload (used on mount + manual refresh + after mutations)
+  // Full reload — fetches assets + engine status in parallel.
+  // (Fase 9: status added to the same polling cadence as the cards.)
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
     setError('')
     try {
-      const { data } = await api.get<ListResponse>('/admin/otc/assets')
-      setAssets(data.assets)
+      const [assetsRes, statusRes] = await Promise.all([
+        api.get<ListResponse>('/admin/otc/assets'),
+        api.get<EngineStatus>('/admin/otc/engine-status').catch(() => null),
+      ])
+      setAssets(assetsRes.data.assets)
+      if (statusRes) setStatus(statusRes.data)
     } catch {
       setError('Falha ao carregar ativos OTC.')
     } finally {
@@ -158,6 +179,9 @@ export default function AdminOtcPage() {
           {error}
         </div>
       )}
+
+      {/* Fase 9: engine status bar */}
+      {status && <EngineStatusBar status={status} />}
 
       {/* Grid */}
       {loading && assets.length === 0 ? (
@@ -292,6 +316,14 @@ function AssetCard({
         <Metric label="Spread"      value={live ? live.spread.toFixed(5) : '—'} />
       </div>
 
+      {/* Fase 9: freshness row — tick + candle ages */}
+      {live && (
+        <div className="grid grid-cols-2 gap-2 mb-3 text-center">
+          <Metric label="Último tick"   value={live.lastTickAt   ? agoStr(live.lastTickAt)   : '—'} />
+          <Metric label="Última vela"   value={live.lastCandleAt ? agoStr(live.lastCandleAt) : '—'} />
+        </div>
+      )}
+
       {/* Action buttons */}
       <div className="flex items-center gap-2">
         <button
@@ -346,6 +378,67 @@ function RegimeIcon({ regime }: { regime: OtcRegime }) {
 function trendStr(bias: number): string {
   if (Math.abs(bias) < 0.05) return '0'
   return (bias > 0 ? '+' : '') + bias.toFixed(2)
+}
+
+// Fase 9 — "234ms ago" / "12s ago" / "3min ago" — never shows future
+// or negative values (defensive against clock skew).
+function agoStr(epochMs: number): string {
+  const diff = Math.max(0, Date.now() - epochMs)
+  if (diff < 1_000)        return `${diff}ms`
+  if (diff < 60_000)       return `${Math.floor(diff / 1000)}s`
+  if (diff < 3_600_000)    return `${Math.floor(diff / 60_000)}min`
+  if (diff < 86_400_000)   return `${Math.floor(diff / 3_600_000)}h`
+  return `${Math.floor(diff / 86_400_000)}d`
+}
+
+// Fase 9 — uptime "2h 14min" / "12min 04s" / "47s"
+function uptimeStr(ms: number): string {
+  if (ms < 60_000)            return `${Math.floor(ms / 1000)}s`
+  const totalSec = Math.floor(ms / 1000)
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  if (h > 0) return `${h}h ${m}min`
+  const s = totalSec % 60
+  return `${m}min ${String(s).padStart(2, '0')}s`
+}
+
+// ── Engine status bar (Fase 9) ───────────────────────────────────────────
+// Compact horizontal strip above the cards. Shows: engine running flag,
+// uptime, total assets in engine, live SSE client count, snapshot
+// freshness, and a 24h gap-fill counter (badge turns amber if > 0).
+function EngineStatusBar({ status }: { status: EngineStatus }) {
+  const dotClass = status.running ? 'bg-emerald-500' : 'bg-red-500'
+  const stateLabel = status.running ? 'RODANDO' : 'PARADO'
+  const snapStr = status.snapshotAgeMs != null
+    ? agoStr(Date.now() - status.snapshotAgeMs)
+    : '—'
+  const gapBadge =
+    status.gapFills24h === 0
+      ? 'bg-[#1a1f2e] text-[#8b8f9a] border-[#2a2e3b]'
+      : status.gapFills24h < 10
+        ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+        : 'bg-red-500/15 text-red-400 border-red-500/30'
+  return (
+    <div className="mb-4 bg-[#0f1117] border border-[#1f232e] rounded-xl px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px]">
+      <div className="flex items-center gap-2">
+        <span className={cn('w-2 h-2 rounded-full', dotClass)} />
+        <span className="text-white font-semibold">{stateLabel}</span>
+        <span className="text-[#8b8f9a]">uptime <span className="text-white font-mono">{uptimeStr(status.uptimeMs)}</span></span>
+      </div>
+      <div className="text-[#8b8f9a]">
+        Ativos <span className="text-white font-mono">{status.totalAssets}</span>
+      </div>
+      <div className="text-[#8b8f9a]">
+        Streams <span className="text-white font-mono">{status.sseClients}</span>
+      </div>
+      <div className="text-[#8b8f9a]">
+        Snapshot <span className="text-white font-mono">{snapStr}</span>
+      </div>
+      <div className={cn('ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md font-medium border', gapBadge)}>
+        Gaps 24h: <span className="font-mono font-bold">{status.gapFills24h}</span>
+      </div>
+    </div>
+  )
 }
 
 // ── Edit modal ────────────────────────────────────────────────────────

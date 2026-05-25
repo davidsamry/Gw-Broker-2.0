@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
   getAdminOtcAsset,
+  getEngineStatus,
   getStreamStats,
   listAdminOtcAssets,
   listAdminOtcLogs,
@@ -142,6 +143,19 @@ export async function otcAdminRoutes(app: FastifyInstance) {
     try {
       const stats = getStreamStats()
       return reply.send(stats)
+    } catch (err) {
+      app.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Fase 9 — engine health snapshot for the admin panel header.
+  // Combines runtime flags + snapshot freshness + SSE client count +
+  // recent gap-fill events. One DB hit (MAX(updatedAt) on snapshot).
+  app.get('/engine-status', async (_req, reply) => {
+    try {
+      const status = await getEngineStatus()
+      return reply.send(status)
     } catch (err) {
       app.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })

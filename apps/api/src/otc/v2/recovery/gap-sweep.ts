@@ -9,6 +9,7 @@ import { prisma } from '../../../prisma.js'
 import type { OtcAssetConfig, OtcCandle } from '../types.js'
 import { CANDLES_PER_TF, OTC_TIMEFRAMES } from '../types.js'
 import { assetStates, candleCache, round5 } from '../runtime/state-map.js'
+import { recordGapFill } from '../runtime/diagnostics.js'
 import { MAX_BACKFILL_SLOTS } from './backfill.js'
 
 const GAP_DETECT_WINDOW = 200    // last 200 candles is plenty for live UX
@@ -141,6 +142,9 @@ async function detectAndFillGaps(asset: OtcAssetConfig, tf: number): Promise<voi
     candleCache.set(cacheKey, buf)
 
     console.log(`[otc-v2] gap sweep: ${asset.id} tf=${tf} filled ${placeholders.length} slots`)
+    // Fase 9: surface the fill in the admin diagnostics buffer so the
+    // panel can show a "gap alerts (24h)" badge.
+    recordGapFill(asset.id, tf, placeholders.length)
   } catch (err) {
     console.error(`[otc-v2] detectAndFillGaps failed for ${asset.id} tf=${tf}`, err)
   }

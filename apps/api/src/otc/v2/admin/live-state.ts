@@ -21,6 +21,13 @@ export interface OtcAssetLiveState {
   trendBias:        number
   enabled:          boolean
   paused:           boolean
+  // Fase 9 — freshness markers for admin card. Updated by the tick
+  // loop (Fase 3 snapshot integration). null when the engine has
+  // never ticked this asset (rare — only between boot and the first
+  // tick).
+  lastTickAt:       number | null   // epoch ms of last tick processed
+  lastCandleAt:     number | null   // epoch ms of openTime of most recent
+                                    // FINALIZED candle (any tf)
 }
 
 function snapshotLiveState(s: OtcAssetState): OtcAssetLiveState {
@@ -40,6 +47,8 @@ function snapshotLiveState(s: OtcAssetState): OtcAssetLiveState {
     trendBias:        s.trendBias,
     enabled:          s.config.enabled,
     paused:           s.config.paused,
+    lastTickAt:       s.lastTickAt   ?? null,
+    lastCandleAt:     s.lastCandleAt ?? null,
   }
 }
 

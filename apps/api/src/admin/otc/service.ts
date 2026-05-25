@@ -8,7 +8,9 @@ import {
   setAssetTrendBias,
   type OtcAssetLiveState,
 } from '../../otc/v2/worker.js'
-import { listClients } from '../../otc/v2/stream/registry.js'
+import { listClients, clientCount } from '../../otc/v2/stream/registry.js'
+import { gapFillCountLast24h, listRecentGapFills, type GapFillEvent } from '../../otc/v2/runtime/diagnostics.js'
+import { getBootedAt, isEngineRunning } from '../../otc/v2/runtime/state-map.js'
 
 // Admin service for the OTC v2 engine. Joins the on-disk config rows
 // (otc_assets) with two live data sources:
@@ -221,6 +223,60 @@ export async function listAdminOtcLogs(
     afterState:  r.afterState,
     createdAt:   r.createdAt,
   }))
+}
+
+// ── Engine status (Fase 9) ────────────────────────────────────────────
+// Combines runtime flags + snapshot freshness + SSE client count +
+// gap-fill diagnostics into one read for the admin panel header.
+export interface OtcEngineStatus {
+  running:           boolean
+  bootedAt:          number | null    // epoch ms; null when never booted
+  uptimeMs:          number           // 0 when not running
+  totalAssets:       number           // currently loaded in engine
+  sseClients:        number           // live /otc/v2/stream connections
+  snapshotUpdatedAt: string | null    // ISO of most recent snapshot
+  snapshotAgeMs:     number | null    // ms since most recent snapshot
+  gapFills24h:       number           // total slot-fills in last 24h
+  recentGapFills:    Array<{
+    ts:          string               // ISO
+    assetId:     string
+    tf:          number
+    slotsFilled: number
+  }>
+}
+
+export async function getEngineStatus(): Promise<OtcEngineStatus> {
+  const bootedAt = getBootedAt() || null
+  const running  = isEngineRunning()
+
+  // Max updatedAt across all snapshots — one round-trip.
+  let snapshotUpdatedAt: Date | null = null
+  try {
+    const rows = await prisma.$queryRaw<Array<{ maxUpdated: Date | null }>>`
+      SELECT MAX("updatedAt") AS "maxUpdated" FROM otc_engine_snapshot
+    `
+    snapshotUpdatedAt = rows[0]?.maxUpdated ?? null
+  } catch {
+    // Table missing (migration didn't run) → null. Admin sees "—".
+  }
+
+  const recent: GapFillEvent[] = listRecentGapFills(10)
+  return {
+    running,
+    bootedAt,
+    uptimeMs:          bootedAt ? Date.now() - bootedAt : 0,
+    totalAssets:       (await listAdminOtcAssets()).filter(a => a.live).length,
+    sseClients:        clientCount(),
+    snapshotUpdatedAt: snapshotUpdatedAt?.toISOString() ?? null,
+    snapshotAgeMs:     snapshotUpdatedAt ? Date.now() - snapshotUpdatedAt.getTime() : null,
+    gapFills24h:       gapFillCountLast24h(),
+    recentGapFills:    recent.map(e => ({
+      ts:          new Date(e.ts).toISOString(),
+      assetId:     e.assetId,
+      tf:          e.tf,
+      slotsFilled: e.slotsFilled,
+    })),
+  }
 }
 
 // ── Stream stats (Fase 6) ─────────────────────────────────────────────
