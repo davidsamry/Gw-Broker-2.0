@@ -6,7 +6,7 @@ import {
   LayoutGrid, Users, Wallet, Activity, ShieldCheck,
   ArrowDownToLine, ArrowUpFromLine, MessageSquare, Network,
   Copy, Layers, Gift, Zap, TrendingUp, Clock, FileSpreadsheet,
-  Trophy, Image as ImageIcon, FileText, Mail, CreditCard, Radio,
+  Trophy, Image as ImageIcon, FileText, Mail, CreditCard, Radio, X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -42,45 +42,79 @@ const MENU: MenuItem[] = [
   { href: '/admin/pagamentos',     label: 'Pagamentos',      icon: <CreditCard size={15} /> },
 ]
 
-export function AdminSidebar() {
+interface AdminSidebarProps {
+  /** Controls the off-canvas drawer on mobile. Ignored at lg+ where the sidebar is always docked. */
+  mobileOpen?: boolean
+  onClose?: () => void
+}
+
+export function AdminSidebar({ mobileOpen = false, onClose }: AdminSidebarProps) {
   const pathname = usePathname() ?? ''
 
   return (
-    <aside className="w-[220px] flex-shrink-0 bg-[#0f1117] border-r border-[#1f232e] flex flex-col h-screen sticky top-0">
-      {/* Brand header */}
-      <div className="px-4 py-4 border-b border-[#1f232e] flex items-center gap-2.5">
-        <div className="w-9 h-9 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
-          <LayoutGrid size={16} />
-        </div>
-        <div className="min-w-0">
-          <div className="text-sm font-bold text-white leading-tight">Admin Panel</div>
-          <div className="text-[10px] text-[#8b8f9a] leading-tight">Gerenciamento</div>
-        </div>
-      </div>
+    <>
+      {/* Backdrop — only on mobile while the drawer is open */}
+      {mobileOpen && (
+        <div
+          onClick={onClose}
+          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+          aria-hidden="true"
+        />
+      )}
 
-      {/* Nav list */}
-      <nav className="flex-1 overflow-y-auto px-2 pb-4">
-        {MENU.map((item) => {
-          const active = item.href === '/admin'
-            ? pathname === '/admin'
-            : pathname.startsWith(item.href)
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors my-0.5',
-                active
-                  ? 'bg-emerald-500/15 text-white font-semibold border border-emerald-500/30'
-                  : 'text-[#8b8f9a] hover:text-white hover:bg-white/5'
-              )}
-            >
-              <span className={active ? 'text-emerald-400' : ''}>{item.icon}</span>
-              <span>{item.label}</span>
-            </Link>
-          )
-        })}
-      </nav>
-    </aside>
+      <aside
+        className={cn(
+          'w-[220px] flex-shrink-0 bg-[#0f1117] border-r border-[#1f232e] flex flex-col h-screen z-50',
+          // Mobile: fixed off-canvas drawer that slides in from the left.
+          'fixed top-0 left-0 transition-transform duration-200',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full',
+          // Desktop: docked in the flex flow, always visible.
+          'lg:sticky lg:top-0 lg:translate-x-0',
+        )}
+      >
+        {/* Brand header */}
+        <div className="px-4 py-4 border-b border-[#1f232e] flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+            <LayoutGrid size={16} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-white leading-tight">Admin Panel</div>
+            <div className="text-[10px] text-[#8b8f9a] leading-tight">Gerenciamento</div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Fechar menu"
+            className="ml-auto text-[#8b8f9a] hover:text-white lg:hidden"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Nav list */}
+        <nav className="flex-1 overflow-y-auto px-2 pb-4">
+          {MENU.map((item) => {
+            const active = item.href === '/admin'
+              ? pathname === '/admin'
+              : pathname.startsWith(item.href)
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onClose}
+                className={cn(
+                  'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors my-0.5',
+                  active
+                    ? 'bg-emerald-500/15 text-white font-semibold border border-emerald-500/30'
+                    : 'text-[#8b8f9a] hover:text-white hover:bg-white/5'
+                )}
+              >
+                <span className={active ? 'text-emerald-400' : ''}>{item.icon}</span>
+                <span>{item.label}</span>
+              </Link>
+            )
+          })}
+        </nav>
+      </aside>
+    </>
   )
 }

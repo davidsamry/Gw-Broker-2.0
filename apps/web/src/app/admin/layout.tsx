@@ -1,6 +1,8 @@
 'use client'
 
+import { useState } from 'react'
 import { usePathname } from 'next/navigation'
+import { LayoutGrid, Menu } from 'lucide-react'
 import { AdminGuard } from '@/components/admin/AdminGuard'
 import { AdminSidebar } from '@/components/admin/AdminSidebar'
 
@@ -14,14 +16,34 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname   = usePathname() ?? ''
   const fullscreen = FULLSCREEN_PATHS.includes(pathname)
 
+  const [mobileOpen, setMobileOpen] = useState(false)
+
   return (
     <AdminGuard>
       {fullscreen ? (
         children
       ) : (
         <div className="min-h-screen bg-[#0b0d12] text-white flex">
-          <AdminSidebar />
-          <main className="flex-1 min-w-0">{children}</main>
+          <AdminSidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
+          <div className="flex-1 min-w-0 flex flex-col">
+            {/* Mobile top bar — hamburger to open the drawer */}
+            <header className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 h-14 bg-[#0f1117] border-b border-[#1f232e]">
+              <button
+                onClick={() => setMobileOpen(true)}
+                aria-label="Abrir menu"
+                className="text-[#8b8f9a] hover:text-white"
+              >
+                <Menu size={22} />
+              </button>
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                  <LayoutGrid size={14} />
+                </div>
+                <span className="text-sm font-bold text-white">Admin Panel</span>
+              </div>
+            </header>
+            <main className="flex-1 min-w-0">{children}</main>
+          </div>
         </div>
       )}
     </AdminGuard>
