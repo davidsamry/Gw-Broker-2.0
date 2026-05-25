@@ -296,12 +296,10 @@ export default function AdminAssetsPage() {
 }
 
 // ── Edit modal ───────────────────────────────────────────────────────────────
-// Always edits name + payout. For OTC assets (no marketSymbol) also exposes
-// the pricing knobs the OTC worker reads: seedPrice (baseline) and
-// volatility (tick size as fraction). After saving an OTC asset, the modal
-// fires POST /admin/assets/otc-reload so the worker re-reads its cache —
-// the change takes effect on the next tick instead of needing a process
-// restart.
+// Edits name + payout. seedPrice/volatility fields are kept for the
+// legacy `assets` table schema but are no-ops now — the OTC v2 engine
+// (the only active one after Etapa 8 cleanup) has its own admin panel
+// at /admin/otc with live controls per OTC asset.
 function EditAssetModal({
   asset, onClose, onSaved,
 }: {
@@ -352,13 +350,6 @@ function EditAssetModal({
     setSaving(true); setError('')
     try {
       const { data } = await api.patch(`/admin/assets/${asset.id}`, body)
-      // For OTC, ping the worker so the new seed/vol take effect on next
-      // tick (otherwise the in-memory cache stays stale until restart).
-      // Best-effort — UI doesn't block on this; cache reseeds on next deploy
-      // even if the call fails.
-      if (isOtc) {
-        api.post('/admin/assets/otc-reload').catch(() => {})
-      }
       if (data?.asset) onSaved(data.asset)
       else onClose()
     } catch {

@@ -327,28 +327,8 @@ model Asset {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  priceTicks    AssetPriceTick[]
-
   @@index([category, displayOrder])
   @@map("assets")
-}
-
-// Time-series of OTC price ticks. Append-only. The OTC worker writes one
-// row per asset per tick; chart queries derive candles from recent rows;
-// the operation resolver reads the latest row at expiresAt to decide
-// WON/LOST. Indexed (assetId, recordedAt DESC) — serves both "latest tick"
-// (LIMIT 1) and "ticks since X" (range) without a separate latest-snapshot
-// table. Retention pruned by a periodic job in a later phase.
-model AssetPriceTick {
-  id         BigInt   @id @default(autoincrement())
-  assetId    String
-  price      Decimal  @db.Decimal(18, 5)
-  recordedAt DateTime @default(now()) @db.Timestamptz(3)
-
-  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
-
-  @@index([assetId, recordedAt(sort: Desc)])
-  @@map("asset_price_ticks")
 }
 
 // Support ticket opened by a user. The first message body lives in TicketMessage

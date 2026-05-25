@@ -44,24 +44,6 @@ async function fetchOtcV2ExitPrice(assetId: string, expiresAt: Date): Promise<nu
   }
 }
 
-// Legacy OTC v1 — kept while old OTC assets (if any) drain through. After
-// Etapa 8 cleanup this path can be dropped.
-async function fetchLatestOtcTick(assetId: string): Promise<number | null> {
-  try {
-    const rows = await prisma.$queryRaw<Array<{ price: Prisma.Decimal }>>`
-      SELECT price FROM asset_price_ticks
-      WHERE "assetId" = ${assetId}
-      ORDER BY "recordedAt" DESC
-      LIMIT 1
-    `
-    if (rows.length === 0) return null
-    const p = Number(rows[0].price)
-    return Number.isFinite(p) && p > 0 ? p : null
-  } catch {
-    return null
-  }
-}
-
 async function resolveOperation(op: {
   id:           string
   accountId:    string
@@ -81,17 +63,13 @@ async function resolveOperation(op: {
     //   1. BINANCE → public ticker (real market close).
     //   2. OTC v2  → otc_ticks (most recent ≤ expiresAt) — same source
     //                the chart's SSE shows to the user.
-    //   3. OTC v1  → legacy asset_price_ticks (drains as old ops finish).
-    //   4. Fallback → small random nudge so the op still resolves and
+    //   3. Fallback → small random nudge so the op still resolves and
     //                doesn't hang OPEN forever.
     let exitPrice: number | null = null
     if (op.marketSymbol) {
       exitPrice = await fetchBinanceLastPrice(op.marketSymbol)
     } else {
       exitPrice = await fetchOtcV2ExitPrice(op.assetId, op.expiresAt)
-      if (exitPrice == null) {
-        exitPrice = await fetchLatestOtcTick(op.assetId)
-      }
     }
     if (exitPrice == null) {
       const change = (Math.random() * 0.01) - 0.005

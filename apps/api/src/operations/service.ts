@@ -10,30 +10,19 @@ export async function createOperation(userId: string, input: CreateOperationInpu
   const description   = `Operação aberta: ${input.assetSymbol} ${input.direction}`
 
   // ── Authoritative entryPrice for OTC ───────────────────────────────────
-  // For OTC assets (marketSymbol null) the client-sent entryPrice can't be
-  // trusted — they could send anything. Override with the latest server-
-  // owned tick. Resolution order:
-  //   1. OTC v2 (otc_ticks) — the new engine's tick stream.
-  //   2. OTC v1 (asset_price_ticks) — legacy, drains as old ops finish.
-  //   3. Client-sent — last resort if both stores empty (asset just
-  //      seeded, worker not warmed up).
+  // For OTC assets (marketSymbol null) the client-sent entryPrice can't
+  // be trusted — they could send anything. Override with the latest
+  // server-owned tick from otc_ticks. Client-sent stays as last resort
+  // when the engine hasn't warmed up yet (e.g. brand-new asset).
   // BINANCE assets keep client-sent — chart is on the same live feed.
   let entryPrice = input.entryPrice
   if (!input.marketSymbol) {
-    let ticks = await prisma.$queryRaw<Array<{ price: Prisma.Decimal }>>`
+    const ticks = await prisma.$queryRaw<Array<{ price: Prisma.Decimal }>>`
       SELECT price FROM otc_ticks
       WHERE "assetId" = ${input.assetId}
       ORDER BY "recordedAt" DESC
       LIMIT 1
     `
-    if (ticks.length === 0) {
-      ticks = await prisma.$queryRaw<Array<{ price: Prisma.Decimal }>>`
-        SELECT price FROM asset_price_ticks
-        WHERE "assetId" = ${input.assetId}
-        ORDER BY "recordedAt" DESC
-        LIMIT 1
-      `
-    }
     if (ticks.length > 0) {
       entryPrice = Number(ticks[0].price)
     }

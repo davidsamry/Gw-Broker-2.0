@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { bulkSetPayout, listAdminAssets, updateAsset } from './service.js'
-import { reloadOtcAssets } from '../../otc/worker.js'
 
 const listQuerySchema = z.object({
   category: z.enum(['ALL', 'OPEN_MARKET', 'OTC', 'CRYPTO']).optional(),
@@ -74,17 +73,4 @@ export async function assetsAdminRoutes(app: FastifyInstance) {
     }
   })
 
-  // Kicks the in-process OTC worker to re-read every OTC asset's seedPrice
-  // and volatility from DB. Admin calls this after editing those fields so
-  // the change takes effect on the next tick instead of needing a process
-  // restart. No-op on assets without seedPrice or with marketSymbol set.
-  app.post('/otc-reload', async (req, reply) => {
-    try {
-      const loaded = await reloadOtcAssets()
-      return reply.send({ ok: true, loaded })
-    } catch (err) {
-      req.log.error(err)
-      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
-    }
-  })
 }
