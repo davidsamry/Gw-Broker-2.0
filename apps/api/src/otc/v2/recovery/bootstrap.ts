@@ -14,6 +14,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../../../prisma.js'
 import type { OtcAssetConfig } from '../types.js'
 import { CANDLES_PER_TF, OTC_TIMEFRAMES } from '../types.js'
+import { assetStates } from '../runtime/state-map.js'
 
 const ROUND_DECIMALS = 5
 
@@ -34,54 +35,73 @@ interface HistoricalCandleRow {
 }
 
 /**
- * Generate up to N candles backwards. Returns array sorted ascending
- * by openTime (oldest first).
+ * Generate up to N candles to fill the past. Walks BACKWARDS in time
+ * from `endPrice` (the live engine's current price), so the youngest
+ * synthesised candle's close ≈ endPrice — guaranteeing visual
+ * continuity between bootstrap history and live ticks.
+ *
+ * Without this anchor (the original implementation walked forward from
+ * `asset.seedPrice`), the chart showed a visible "jump" between the
+ * last bootstrap candle and the first live candle after every deploy.
+ * Reported by founder on 2026-05-25.
+ *
+ * Returns array sorted ascending by openTime (oldest first).
  *
  * Random-walk character is calibrated to MATCH the live engine so
- * historical bootstrap candles and live candles look continuous on
- * the chart. The live engine ticks at 10Hz with per-tick std =
- * volatilityBase, so per-candle cumulative std = volatilityBase ×
- * √(timeframe × 10). We sample gaussian (not uniform — uniform was
- * the old formula and produced too-narrow bodies, ~4 pips for EUR/USD
- * vs ~30 pips live).
+ * historical bootstrap candles and live candles look continuous: 10Hz
+ * tick rate × per-tick std = volatilityBase ⇒ per-candle cumulative
+ * std = volatilityBase × √(timeframe × 10). Gaussian shocks; 20% of
+ * wicks are zero on each side (asymmetric, Fase M4).
+ *
+ * Mean-reversion pulls each step toward `asset.seedPrice` — so even
+ * though we anchor the youngest candle to `endPrice`, the 3000-bar
+ * walk back in time still asymptotes to seedPrice further into the
+ * past. That mirrors how a real market behaves around its long-term
+ * anchor.
  */
 function generateHistorical(
   asset:     OtcAssetConfig,
   timeframe: number,
   count:     number,
+  endPrice:  number,
 ): HistoricalCandleRow[] {
   const tfMs       = timeframe * 1000
   const nowSlotMs  = Math.floor(Date.now() / tfMs) * tfMs
   const startSlotMs = nowSlotMs - count * tfMs
 
-  const rows: HistoricalCandleRow[] = []
-  let price = asset.seedPrice
-  // Per-candle cumulative volatility under the live engine's 10Hz tick rate.
   const candleStd = asset.volatilityBase * Math.sqrt(timeframe * 10)
   // Mean-reversion per candle — softer than live (-0.0002/tick = -0.12/candle)
   // because we're stepping per-candle here. Keeps the 3000-bar walk anchored
-  // near seed without snapping every candle.
+  // near seed without snapping every candle. Same formula in both directions
+  // of time: `price + (seed - price) × strength`.
   const reversionStrength = 0.05
 
-  for (let i = 0; i < count; i++) {
+  const rows: HistoricalCandleRow[] = new Array(count)
+  // Walk BACKWARDS: iteration i generates the candle at slot index i in
+  // the time array (0 = oldest), but we compute starting from the YOUNGEST
+  // slot whose close = endPrice. So we run the loop from i = count-1 down.
+  let nextClose = endPrice
+  for (let i = count - 1; i >= 0; i--) {
     const openTime = new Date(startSlotMs + i * tfMs)
-    const open = price
+    const close = nextClose
 
-    // Body: gaussian shock — matches the live engine's per-tick accumulation.
+    // Body shock — same formula as forward walk but applied to compute
+    // OPEN backwards from CLOSE. close = open × (1 + shock) ⇒ open = close / (1 + shock).
     const bodyShock = gaussian() * candleStd
-    const close     = price * (1 + bodyShock)
+    let open = close / (1 + bodyShock)
+    // Reversion: pull `open` slightly toward seed so the walk drifts
+    // back to seedPrice as we go further into the past.
+    open = open + (asset.seedPrice - open) * reversionStrength
 
     // Wicks: half-magnitude shocks on either side, positive-only so they
-    // extend BEYOND the body when present. Fase M4 — 20% of the time
-    // the body IS the extreme on that side (no wick) — gives an
-    // asymmetric, more natural look matching real-market candle patterns
-    // where one side often dominates.
+    // extend BEYOND the body when present. 20% chance of no wick on
+    // each side independently (Fase M4 asymmetric wicks).
     const hiExt = Math.random() < 0.2 ? 0 : Math.abs(gaussian()) * candleStd * 0.5
     const loExt = Math.random() < 0.2 ? 0 : Math.abs(gaussian()) * candleStd * 0.5
     const high  = Math.max(open, close) * (1 + hiExt)
     const low   = Math.min(open, close) * (1 - loExt)
 
-    rows.push({
+    rows[i] = {
       assetId:    asset.id,
       timeframe,
       openTime,
@@ -89,13 +109,12 @@ function generateHistorical(
       highPrice:  round5(high),
       lowPrice:   round5(low),
       closePrice: round5(close),
-      // Match live tick rate (10Hz) for the count.
       tickCount:  Math.max(1, timeframe * 10),
       finalizedAt: openTime,
-    })
+    }
 
-    // Step + mean-revert pull toward seed.
-    price = close + (asset.seedPrice - close) * reversionStrength
+    // The previous (older) candle's CLOSE is this candle's OPEN.
+    nextClose = open
   }
 
   return rows
@@ -155,8 +174,15 @@ async function bootstrapOnePair(task: PairTask, batchSize: number): Promise<void
     const have = Number(existing[0]?.count ?? 0)
     if (have >= CANDLES_PER_TF) return
 
+    // Anchor the bootstrap to the engine's CURRENT live price so the
+    // youngest synthesised candle dovetails with the first live candle
+    // (no chart "jump" after deploy). Falls back to seedPrice only if
+    // the engine isn't running yet (e.g., bootstrap called pre-hydrate).
+    const liveState = assetStates.get(asset.id)
+    const endPrice = liveState?.smoothedPrice ?? asset.seedPrice
+
     const need = CANDLES_PER_TF - have
-    const rows = generateHistorical(asset, tf, need)
+    const rows = generateHistorical(asset, tf, need, endPrice)
 
     let inserted = 0
     for (let i = 0; i < rows.length; i += batchSize) {
