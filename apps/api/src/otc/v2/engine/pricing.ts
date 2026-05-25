@@ -261,8 +261,14 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
   const sessionMult = NATURAL_V2 ? sessionVolMultiplier() : 1
   const effectiveVol = s.config.volatilityBase * params.volMultiplier * s.volume * sessionMult
 
-  // Reversion anchors the price to seed over minutes/hours.
-  const reversion    = -0.0002 * (s.price - s.config.seedPrice) / s.config.seedPrice
+  // Reversion anchors the price to seed over minutes/hours. Bumped
+  // 0.0002 → 0.0004 (May 2026) after observing prod runaway where the
+  // engine drifted to ±50% of seed under sustained STRONG trend chains.
+  // Math: at max deviation (price = seed × 2), reversion contribution
+  // is -0.0004/tick = -0.04%/tick = -24%/min back toward seed —
+  // dominates any single shock and any STRONG regime drift, while still
+  // leaving room for visible candle bodies during normal regimes.
+  const reversion    = -0.0004 * (s.price - s.config.seedPrice) / s.config.seedPrice
   const shock        = gaussian(0, effectiveVol, rand)
   // Liquidity bias — stronger weight under NATURAL_V2 to make
   // pressure differentials visible in the price action.
