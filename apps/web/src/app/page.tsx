@@ -30,6 +30,42 @@ import { cn } from '@/lib/utils'
 
 type SidebarTab = 'TRADE' | 'HISTORICO' | 'RANKING' | 'SUPORTE' | 'CONTA' | 'COPY' | 'BONUS'
 
+// ── localStorage-backed asset tabs (persist across sessions) ──────────────
+// IDs only — full Asset objects are resolved against ASSETS on read so a
+// catalog change (asset removed / renamed) doesn't crash; missing IDs are
+// silently dropped.
+const OPEN_ASSETS_KEY     = 'vx:openAssetIds'
+const SELECTED_ASSET_KEY  = 'vx:selectedAssetId'
+const DEFAULT_OPEN_ASSETS = [ASSETS[0], ASSETS[3]]
+const DEFAULT_SELECTED    = ASSETS[3]
+
+function resolveOpenFromStorage(): Asset[] {
+  if (typeof window === 'undefined') return DEFAULT_OPEN_ASSETS
+  try {
+    const raw = localStorage.getItem(OPEN_ASSETS_KEY)
+    if (!raw) return DEFAULT_OPEN_ASSETS
+    const ids = JSON.parse(raw) as unknown
+    if (!Array.isArray(ids)) return DEFAULT_OPEN_ASSETS
+    const resolved = ids
+      .map((id) => ASSETS.find((a) => a.id === id))
+      .filter((a): a is Asset => !!a)
+    return resolved.length > 0 ? resolved : DEFAULT_OPEN_ASSETS
+  } catch {
+    return DEFAULT_OPEN_ASSETS
+  }
+}
+
+function resolveSelectedFromStorage(): Asset {
+  if (typeof window === 'undefined') return DEFAULT_SELECTED
+  try {
+    const id = localStorage.getItem(SELECTED_ASSET_KEY)
+    if (!id) return DEFAULT_SELECTED
+    return ASSETS.find((a) => a.id === id) ?? DEFAULT_SELECTED
+  } catch {
+    return DEFAULT_SELECTED
+  }
+}
+
 export default function TradingPage() {
   const router        = useRouter()
   const authStore     = useAuthStore()
@@ -72,8 +108,26 @@ export default function TradingPage() {
   }, [])
 
   const [assets, setAssets] = useState<Asset[]>(ASSETS)
-  const [selectedAsset, setSelectedAsset] = useState<Asset>(ASSETS[3])
-  const [openAssets, setOpenAssets] = useState<Asset[]>([ASSETS[0], ASSETS[3]])
+  // openAssets + selectedAsset persist across sessions in localStorage so
+  // the user comes back to the same tabs they last had open. Stored as
+  // bare IDs and re-resolved against ASSETS on mount; IDs that don't
+  // resolve (catalog change) are silently dropped.
+  const [selectedAsset, setSelectedAsset] = useState<Asset>(() => resolveSelectedFromStorage())
+  const [openAssets,    setOpenAssets]    = useState<Asset[]>(() => resolveOpenFromStorage())
+
+  // Persist on every change. localStorage writes are sync but cheap; the
+  // alternative (debouncing) wouldn't matter since the user rarely flips
+  // tabs faster than once per second.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try { localStorage.setItem('vx:openAssetIds', JSON.stringify(openAssets.map(a => a.id))) }
+    catch { /* quota / disabled */ }
+  }, [openAssets])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try { localStorage.setItem('vx:selectedAssetId', selectedAsset.id) }
+    catch { /* quota / disabled */ }
+  }, [selectedAsset])
   const [switchModal, setSwitchModal] = useState<'demo' | 'real' | null>(null)
   const [assetInfoOpen, setAssetInfoOpen] = useState(false)
   const [assetSelectorOpen, setAssetSelectorOpen] = useState(false)
