@@ -65,6 +65,11 @@ export interface CashinInput {
   amount:       number   // BRL, 2 decimal places
   externalId:   string   // our Deposit.id — used by webhook lookup
   postbackUrl:  string   // public HTTPS URL on our API
+  // Payer identification — required by PIX since end-2024. Bare digits
+  // (no mask). Name is the user's display name (used by some banks to
+  // show "Pagar para X" on the payer's app).
+  payerDocument?: string
+  payerName?:     string
 }
 
 export interface CashinResponse {
@@ -88,6 +93,12 @@ export async function createCashin(input: CashinInput): Promise<CashinResponse> 
       currency:     'BRL',
       external_id:  input.externalId,
       postback_url: input.postbackUrl,
+      // Payer info — BSPay's schema follows the brcode/pixchargev2 spec.
+      // Document = bare CPF (11 digits). Omitted when not supplied so
+      // older deposits without CPF still go through.
+      ...(input.payerDocument
+        ? { payer: { document: input.payerDocument, name: input.payerName ?? undefined } }
+        : {}),
     }),
     signal: AbortSignal.timeout(15_000),
   })

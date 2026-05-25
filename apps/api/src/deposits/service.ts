@@ -33,14 +33,18 @@ function buildPostbackUrl(): string {
 export async function createPixDeposit(userId: string, input: CreatePixDepositInput): Promise<CreatedDeposit> {
   if (!isConfigured()) throw new Error('BSPAY_NOT_CONFIGURED')
 
-  // Find the user's REAL account (one per user by unique constraint).
-  const accountRows = await prisma.$queryRaw<Array<{ id: string }>>`
-    SELECT id FROM accounts
-    WHERE "userId" = ${userId} AND type = 'REAL'::"AccountType"
+  // Find the user's REAL account + display name (BSPay shows the payer
+  // name on the bank app side).
+  const accountRows = await prisma.$queryRaw<Array<{ id: string; name: string }>>`
+    SELECT a.id, u.name
+    FROM accounts a
+    INNER JOIN users u ON u.id = a."userId"
+    WHERE a."userId" = ${userId} AND a.type = 'REAL'::"AccountType"
     LIMIT 1
   `
   if (accountRows.length === 0) throw new Error('REAL_ACCOUNT_NOT_FOUND')
-  const accountId = accountRows[0].id
+  const accountId  = accountRows[0].id
+  const payerName  = accountRows[0].name
 
   const depositId  = randomUUID()
   const amountDec  = new Prisma.Decimal(input.amount)
@@ -93,9 +97,11 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
   let providerId: string | null
   try {
     const cashin = await createCashin({
-      amount:      input.amount,
-      externalId:  depositId,
-      postbackUrl: buildPostbackUrl(),
+      amount:        input.amount,
+      externalId:    depositId,
+      postbackUrl:   buildPostbackUrl(),
+      payerDocument: input.cpf,
+      payerName,
     })
     qrcode     = cashin.qrcode
     providerId = cashin.providerId

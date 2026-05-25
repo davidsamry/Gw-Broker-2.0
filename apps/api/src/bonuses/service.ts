@@ -163,3 +163,53 @@ export async function getUserOpenGrant(userId: string) {
     include: { bonus: { select: { code: true } } },
   })
 }
+
+// Active, non-expired bonus codes the user can pick from in the deposit
+// modal dropdown. Filters out codes the user already maxed out OR has an
+// open grant for (those would fail validation anyway — better not to
+// offer them). Returns minimal fields so the dropdown stays light.
+export interface AvailableBonus {
+  id:         string
+  code:       string
+  type:       'PERCENTAGE' | 'FIXED'
+  value:      number      // % for PERCENTAGE, R$ for FIXED
+  minDeposit: number
+  rollover:   number
+}
+
+export async function listAvailableBonusesForUser(userId: string): Promise<AvailableBonus[]> {
+  // If user has an open grant, no codes are available — return early.
+  const open = await prisma.bonusGrant.findFirst({
+    where:  { userId, status: { in: ['PENDING', 'ACTIVE'] } },
+    select: { id: true },
+  })
+  if (open) return []
+
+  // Aggregate usage per code so we can filter out user-exhausted codes
+  // in the same round-trip.
+  const rows = await prisma.$queryRaw<Array<{
+    id: string; code: string; type: 'PERCENTAGE' | 'FIXED';
+    value: string; minDeposit: string; rollover: number;
+  }>>`
+    SELECT b.id, b.code, b.type::text AS type,
+           b.value::text AS value,
+           b."minDeposit"::text AS "minDeposit",
+           b.rollover
+    FROM bonuses b
+    LEFT JOIN bonus_grants g
+      ON g."bonusId" = b.id AND g."userId" = ${userId}
+    WHERE b.active = TRUE
+      AND (b."expiresAt" IS NULL OR b."expiresAt" > NOW())
+    GROUP BY b.id
+    HAVING COUNT(g.id) < b."maxUsesPerUser"
+    ORDER BY b."minDeposit" ASC, b."createdAt" DESC
+  `
+  return rows.map(r => ({
+    id:         r.id,
+    code:       r.code,
+    type:       r.type,
+    value:      Number(r.value),
+    minDeposit: Number(r.minDeposit),
+    rollover:   r.rollover,
+  }))
+}

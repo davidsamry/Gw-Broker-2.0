@@ -1,7 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { X, Copy, Check, AlertCircle, CheckCircle2, Clock, Loader2, Zap, ShieldCheck, BadgeCheck, Gift, Tag } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  X, Copy, Check, AlertCircle, CheckCircle2, Clock, Loader2,
+  Banknote, Gift, QrCode, ChevronDown,
+} from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/store/auth'
@@ -31,16 +34,22 @@ interface ValidatedBonus {
   rolloverRequired: number
 }
 
-const MIN = 60        // R$ — kept in sync with apps/api/src/deposits/schema.ts
-const MAX = 10_000    // R$
-const POLL_MS = 3000  // status poll interval while QR is on screen
-const PRESETS = [60, 100, 250, 500, 1000]
+interface AvailableBonus {
+  id:         string
+  code:       string
+  type:       'PERCENTAGE' | 'FIXED'
+  value:      number
+  minDeposit: number
+  rollover:   number
+}
+
+const MIN     = 60        // R$ — kept in sync with apps/api/src/deposits/schema.ts
+const MAX     = 100_000   // R$
+const POLL_MS = 3000
+const PRESETS = [100, 250, 500, 1000, 2500]
 
 type Phase = 'form' | 'qrcode' | 'paid' | 'expired'
 
-// Translate API error codes from /bonuses/validate + /deposits/pix into
-// user-facing messages. Kept here (not at the API edge) so backend stays
-// language-agnostic.
 function bonusErrorLabel(code: string): string {
   switch (code) {
     case 'NOT_FOUND':             return 'Código não encontrado.'
@@ -53,56 +62,69 @@ function bonusErrorLabel(code: string): string {
   }
 }
 
+// CPF mask helpers — display 000.000.000-00, storage = 11 digits only.
+function maskCpf(digits: string): string {
+  const d = digits.replace(/\D/g, '').slice(0, 11)
+  if (d.length <= 3)  return d
+  if (d.length <= 6)  return `${d.slice(0, 3)}.${d.slice(3)}`
+  if (d.length <= 9)  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`
+  return                       `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`
+}
+function unmaskCpf(masked: string): string {
+  return masked.replace(/\D/g, '').slice(0, 11)
+}
+
+function formatBrl(n: number): string {
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 export function DepositoModal({ onClose }: DepositoModalProps) {
   const authStore = useAuthStore()
+  const profileCpf = authStore.user?.cpf ?? null
 
   const [phase, setPhase]     = useState<Phase>('form')
   const [amount, setAmount]   = useState<string>('')
+  const [cpfDigits, setCpfDigits] = useState<string>(profileCpf ?? '')
   const [error, setError]     = useState('')
   const [loading, setLoading] = useState(false)
   const [deposit, setDeposit] = useState<CreatedDeposit | null>(null)
   const [copied, setCopied]   = useState(false)
-  // Fase B1 — bonus code input.
-  const [bonusCode, setBonusCode]         = useState('')
-  const [bonusInfo, setBonusInfo]         = useState<ValidatedBonus | null>(null)
-  const [bonusError, setBonusError]       = useState('')        // user-facing error or empty
-  const [validatingBonus, setValidatingBonus] = useState(false)
+
+  // Bonus state — entry can come from dropdown selection or manual input
+  // followed by Aplicar click.
+  const [availableBonuses, setAvailableBonuses] = useState<AvailableBonus[]>([])
+  const [selectedDropdown, setSelectedDropdown] = useState<string>('')   // bonus.id
+  const [bonusInput,       setBonusInput]       = useState<string>('')   // manual entry
+  const [bonusInfo,        setBonusInfo]        = useState<ValidatedBonus | null>(null)
+  const [bonusError,       setBonusError]       = useState('')
+  const [validatingBonus,  setValidatingBonus]  = useState(false)
+
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const validateAbort = useRef<AbortController | null>(null)
 
   const amountNum = parseFloat(amount.replace(',', '.')) || 0
-  const valid     = amountNum >= MIN && amountNum <= MAX
+  const validAmount = amountNum >= MIN && amountNum <= MAX
+  const validCpf    = cpfDigits.length === 11
+  const canSubmit   = validAmount && validCpf && !loading
 
-  // Debounced validation when the code OR amount changes. Server-side check
-  // covers per-user constraints (open grant, max uses) we can't infer client.
+  // Fetch available bonuses once on open.
   useEffect(() => {
-    if (!bonusCode.trim()) { setBonusInfo(null); setBonusError(''); return }
-    if (!valid) { setBonusInfo(null); setBonusError(''); return }
-    const handle = setTimeout(async () => {
-      validateAbort.current?.abort()
-      const ac = new AbortController()
-      validateAbort.current = ac
-      setValidatingBonus(true); setBonusError('')
-      try {
-        const { data } = await api.post<{ bonus: ValidatedBonus }>(
-          '/bonuses/validate',
-          { code: bonusCode.trim(), depositAmount: amountNum },
-          { signal: ac.signal },
-        )
-        setBonusInfo(data.bonus)
-      } catch (err: any) {
-        if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return
-        const code = err?.response?.data?.error ?? 'NOT_FOUND'
-        setBonusInfo(null)
-        setBonusError(bonusErrorLabel(code))
-      } finally {
-        setValidatingBonus(false)
-      }
-    }, 400)
-    return () => clearTimeout(handle)
-  }, [bonusCode, amountNum, valid])
+    let cancelled = false
+    api.get<{ bonuses: AvailableBonus[] }>('/bonuses/available')
+      .then(({ data }) => { if (!cancelled) setAvailableBonuses(data.bonuses) })
+      .catch(() => { /* dropdown stays empty — user can still type code manually */ })
+    return () => { cancelled = true }
+  }, [])
 
-  // Status polling while we're showing the QR — stops on resolution or unmount.
+  // Re-validate bonus when amount changes IF a code was already applied
+  // (avoids stale "Você ganha R$ X" preview while user adjusts amount).
+  useEffect(() => {
+    if (!bonusInfo) return
+    if (!validAmount) { setBonusInfo(null); return }
+    void applyBonusCode(bonusInfo.code, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amountNum])
+
+  // Status polling while showing QR.
   useEffect(() => {
     if (phase !== 'qrcode' || !deposit) return
     pollRef.current = setInterval(async () => {
@@ -111,31 +133,61 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
         const status   = data?.deposit?.status
         if (status === 'PAID') {
           setPhase('paid')
-          // Optimistically bump balance in store so the header updates without a hard reload.
           const u  = authStore.user
           const ra = u?.accounts.find((a) => a.type === 'REAL')
           if (u && ra) authStore.applyBalanceDelta(ra.id, amountNum)
         } else if (status === 'FAILED' || status === 'CANCELLED') {
           setPhase('expired')
         }
-      } catch { /* network blip — keep polling */ }
+      } catch { /* keep polling */ }
     }, POLL_MS)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, deposit?.id])
 
+  async function applyBonusCode(code: string, silent = false) {
+    if (!code.trim()) { setBonusInfo(null); setBonusError(''); return }
+    if (!validAmount) {
+      if (!silent) setBonusError('Digite o valor do depósito primeiro.')
+      return
+    }
+    setValidatingBonus(true); setBonusError('')
+    try {
+      const { data } = await api.post<{ bonus: ValidatedBonus }>(
+        '/bonuses/validate',
+        { code: code.trim(), depositAmount: amountNum },
+      )
+      setBonusInfo(data.bonus)
+    } catch (err: any) {
+      const errCode = err?.response?.data?.error ?? 'NOT_FOUND'
+      setBonusInfo(null)
+      setBonusError(bonusErrorLabel(errCode))
+    } finally {
+      setValidatingBonus(false)
+    }
+  }
+
+  function onDropdownChange(id: string) {
+    setSelectedDropdown(id)
+    const picked = availableBonuses.find(b => b.id === id)
+    if (!picked) { setBonusInput(''); setBonusInfo(null); setBonusError(''); return }
+    setBonusInput(picked.code)
+    void applyBonusCode(picked.code)
+  }
+
   async function submit() {
-    if (!valid || loading) return
-    // If a bonus code was typed but is invalid, block submission so the
-    // user can fix or clear it before paying.
-    if (bonusCode.trim() && !bonusInfo) {
+    if (!canSubmit) return
+    if (bonusInput.trim() && !bonusInfo) {
       setError('Verifique o código de bônus ou remova-o antes de continuar.')
       return
     }
     setLoading(true); setError('')
     try {
-      const payload: Record<string, unknown> = { amount: amountNum }
-      if (bonusCode.trim() && bonusInfo) payload.bonusCode = bonusCode.trim()
+      const payload: Record<string, unknown> = {
+        amount: amountNum,
+        cpf:    cpfDigits,
+      }
+      if (bonusInput.trim() && bonusInfo) payload.bonusCode = bonusInput.trim()
       const { data } = await api.post<{ deposit: CreatedDeposit }>('/deposits/pix', payload)
       setDeposit(data.deposit)
       setPhase('qrcode')
@@ -143,7 +195,7 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
       const code = err?.response?.data?.error ?? ''
       if      (code === 'PAYMENT_GATEWAY_UNAVAILABLE') setError('Pagamentos indisponíveis no momento. Tente mais tarde.')
       else if (code === 'PAYMENT_GATEWAY_ERROR')       setError('Erro no provedor de pagamento. Tente novamente em instantes.')
-      else if (code === 'VALIDATION_ERROR')            setError(`Valor inválido. Mínimo R$ ${MIN}, máximo R$ ${MAX}.`)
+      else if (code === 'VALIDATION_ERROR')            setError('Dados inválidos. Verifique o valor e o CPF.')
       else if (code === 'ACCOUNT_NOT_FOUND')           setError('Sua conta real não foi encontrada.')
       else if (code.startsWith('BONUS_'))              setError(bonusErrorLabel(code.replace('BONUS_', '')))
       else                                              setError('Erro ao gerar QR. Tente novamente.')
@@ -158,7 +210,7 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
       await navigator.clipboard.writeText(deposit.qrcode)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    } catch { /* clipboard blocked — ignore */ }
+    } catch { /* clipboard blocked */ }
   }
 
   return (
@@ -169,26 +221,21 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
       <div
         onClick={(e) => e.stopPropagation()}
         className={cn(
-          // Soft brand glow via layered shadows; subtle gradient inside the body.
-          'relative w-full max-w-[480px] flex flex-col max-h-[92vh]',
-          'rounded-2xl border border-white/5 overflow-hidden',
-          'bg-gradient-to-b from-[#1c2032] to-[#15182a]',
-          'shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7),0_0_0_1px_rgba(50,188,173,0.05),0_-1px_60px_-20px_rgba(50,188,173,0.25)]',
+          'relative w-full max-w-[460px] flex flex-col max-h-[92vh]',
+          'rounded-2xl border border-[#2a2e3b] overflow-hidden',
+          'bg-[#161827]',
+          'shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)]',
         )}
       >
-        {/* PIX brand accent strip at the very top */}
-        <div className="h-[3px] w-full bg-gradient-to-r from-[#32BCAD] via-[#3ad4c1] to-[#32BCAD]" />
-
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 flex-shrink-0">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a2e3b] flex-shrink-0">
           <div className="flex items-center gap-3">
-            <div className="relative">
-              <div className="absolute inset-0 rounded-full bg-[#32BCAD]/40 blur-md" aria-hidden="true" />
-              <PixIcon size={28} />
+            <div className="w-9 h-9 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
+              <Banknote size={18} className="text-emerald-400" />
             </div>
             <div>
-              <h2 className="text-[15px] font-bold text-white leading-tight">Depósito via PIX</h2>
-              <p className="text-[11px] text-[#7c8195] leading-tight mt-0.5">Crédito instantâneo · Sem taxas</p>
+              <h2 className="text-[15px] font-bold text-white leading-tight">Depositar via PIX</h2>
+              <p className="text-[11px] text-[#7c8195] leading-tight mt-0.5">Depósito instantâneo via PIX</p>
             </div>
           </div>
           <button
@@ -201,14 +248,20 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
         </div>
 
         {/* Body */}
-        <div className="overflow-y-auto px-6 py-5">
+        <div className="overflow-y-auto px-5 py-4">
           {phase === 'form'    && <FormStep
                                      amount={amount} setAmount={setAmount}
-                                     valid={valid} amountNum={amountNum}
-                                     submit={submit} loading={loading} error={error}
-                                     bonusCode={bonusCode} setBonusCode={setBonusCode}
+                                     validAmount={validAmount} amountNum={amountNum}
+                                     cpfDigits={cpfDigits} setCpfDigits={setCpfDigits}
+                                     profileCpf={profileCpf}
+                                     submit={submit} canSubmit={canSubmit}
+                                     loading={loading} error={error}
+                                     availableBonuses={availableBonuses}
+                                     selectedDropdown={selectedDropdown} onDropdownChange={onDropdownChange}
+                                     bonusInput={bonusInput} setBonusInput={setBonusInput}
                                      bonusInfo={bonusInfo} bonusError={bonusError}
                                      validatingBonus={validatingBonus}
+                                     onApplyManual={() => applyBonusCode(bonusInput)}
                                    />}
           {phase === 'qrcode'  && deposit && <QrStep
                                      deposit={deposit} amountNum={amountNum}
@@ -223,25 +276,64 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
   )
 }
 
-// ── Steps ───────────────────────────────────────────────────────────────────
+// ── Form step ──────────────────────────────────────────────────────────────
+
+interface FormStepProps {
+  amount: string; setAmount: (v: string) => void
+  validAmount: boolean; amountNum: number
+  cpfDigits: string; setCpfDigits: (v: string) => void
+  profileCpf: string | null
+  submit: () => void; canSubmit: boolean
+  loading: boolean; error: string
+  availableBonuses: AvailableBonus[]
+  selectedDropdown: string; onDropdownChange: (id: string) => void
+  bonusInput: string; setBonusInput: (v: string) => void
+  bonusInfo: ValidatedBonus | null; bonusError: string
+  validatingBonus: boolean
+  onApplyManual: () => void
+}
 
 function FormStep({
-  amount, setAmount, valid, amountNum, submit, loading, error,
-  bonusCode, setBonusCode, bonusInfo, bonusError, validatingBonus,
-}: {
-  amount: string; setAmount: (v: string) => void; valid: boolean; amountNum: number
-  submit: () => void; loading: boolean; error: string
-  bonusCode: string; setBonusCode: (v: string) => void
-  bonusInfo: ValidatedBonus | null; bonusError: string; validatingBonus: boolean
-}) {
+  amount, setAmount, validAmount, amountNum,
+  cpfDigits, setCpfDigits, profileCpf,
+  submit, canSubmit, loading, error,
+  availableBonuses, selectedDropdown, onDropdownChange,
+  bonusInput, setBonusInput, bonusInfo, bonusError, validatingBonus,
+  onApplyManual,
+}: FormStepProps) {
   return (
-    <div className="flex flex-col gap-5">
-      {/* Presets — bigger, with "Mais escolhido" highlight on R$ 250 */}
+    <div className="flex flex-col gap-4">
+      {/* Limits info bar */}
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#222637] border border-[#2a2e3b]">
+        <AlertCircle size={13} className="text-[#7c8195] flex-shrink-0" />
+        <span className="text-[11px] text-[#bdc1cf]">
+          Mín: <strong className="text-white">R$ {formatBrl(MIN)}</strong>{' '}·{' '}
+          Máx: <strong className="text-white">R$ {formatBrl(MAX)}</strong>
+        </span>
+      </div>
+
+      {/* Valor do depósito */}
       <div>
-        <label className="block text-[11px] font-semibold text-[#8b8f9a] mb-2 px-0.5 uppercase tracking-wider">
-          Valor sugerido
-        </label>
-        <div className="grid grid-cols-5 gap-2">
+        <label className="block text-sm font-bold text-white mb-2">Valor do depósito</label>
+        <div className={cn(
+          'relative flex items-center rounded-lg border transition-colors mb-2',
+          'bg-[#222637]',
+          validAmount
+            ? 'border-emerald-500/40'
+            : amount
+              ? 'border-amber-500/40'
+              : 'border-[#2a2e3b] focus-within:border-emerald-500/40',
+        )}>
+          <span className="pl-3 pr-1 text-sm font-semibold text-[#7c8195] select-none">R$</span>
+          <input
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ''))}
+            placeholder="0,00"
+            className="flex-1 bg-transparent py-3 pr-3 text-base font-bold text-white outline-none placeholder:text-[#4d5266] placeholder:font-normal"
+          />
+        </div>
+        <div className="grid grid-cols-3 gap-2">
           {PRESETS.map((v) => {
             const selected = amountNum === v
             return (
@@ -249,10 +341,10 @@ function FormStep({
                 key={v}
                 onClick={() => setAmount(String(v))}
                 className={cn(
-                  'h-11 rounded-lg text-[13px] font-bold border transition-all duration-150',
+                  'h-11 rounded-lg text-sm font-bold border transition-colors',
                   selected
-                    ? 'bg-emerald-500/15 border-emerald-400/60 text-emerald-300 shadow-[0_0_0_3px_rgba(16,185,129,0.08)]'
-                    : 'bg-[#222637] border-[#2a2e3b] text-[#bdc1cf] hover:text-white hover:border-[#3a4055] hover:bg-[#262b3e]',
+                    ? 'bg-emerald-500/15 border-emerald-400/60 text-emerald-300'
+                    : 'bg-[#222637] border-[#2a2e3b] text-white hover:border-[#3a4055] hover:bg-[#262b3e]',
                 )}
               >
                 R$ {v}
@@ -262,75 +354,101 @@ function FormStep({
         </div>
       </div>
 
-      {/* Amount field with R$ prefix inside */}
+      {/* CPF */}
       <div>
-        <label className="block text-[11px] font-semibold text-[#8b8f9a] mb-2 px-0.5 uppercase tracking-wider">
-          Valor personalizado
+        <label className="block text-sm font-bold text-white mb-2">
+          CPF <span className="text-[#7c8195] font-normal">(obrigatório para PIX)</span>
         </label>
-        <div className={cn(
-          'relative flex items-center rounded-xl border transition-colors',
-          'bg-[#222637]',
-          valid
-            ? 'border-emerald-500/40 shadow-[0_0_0_3px_rgba(16,185,129,0.05)]'
-            : amount
-              ? 'border-amber-500/40'
-              : 'border-[#2a2e3b] focus-within:border-[#32BCAD]/60',
-        )}>
-          <span className="pl-4 pr-1 text-base font-semibold text-[#7c8195] select-none">R$</span>
-          <input
-            inputMode="decimal"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ''))}
-            placeholder="0,00"
-            className="flex-1 bg-transparent py-3.5 pr-4 text-lg font-bold text-white outline-none placeholder:text-[#4d5266] placeholder:font-normal"
-          />
-        </div>
-        <p className="text-[10px] text-[#7c8195] mt-1.5 px-0.5">
-          Mínimo R$ {MIN.toLocaleString('pt-BR')} · Máximo R$ {MAX.toLocaleString('pt-BR')}
-        </p>
+        <input
+          inputMode="numeric"
+          value={maskCpf(cpfDigits)}
+          onChange={(e) => setCpfDigits(unmaskCpf(e.target.value))}
+          placeholder="000.000.000-00"
+          className={cn(
+            'w-full h-11 px-3 rounded-lg bg-[#222637] border text-sm font-mono text-white outline-none transition-colors',
+            cpfDigits.length === 11
+              ? 'border-emerald-500/40'
+              : cpfDigits.length > 0
+                ? 'border-amber-500/40'
+                : 'border-[#2a2e3b] focus:border-emerald-500/40',
+          )}
+        />
+        {profileCpf === cpfDigits && cpfDigits.length === 11 && (
+          <p className="text-[10px] text-[#7c8195] mt-1">CPF cadastrado</p>
+        )}
+        {cpfDigits.length > 0 && cpfDigits.length < 11 && (
+          <p className="text-[10px] text-amber-400 mt-1">CPF deve ter 11 dígitos</p>
+        )}
       </div>
 
-      {/* Bonus code — optional */}
+      {/* Bonus */}
       <div>
-        <label className="block text-[11px] font-semibold text-[#8b8f9a] mb-2 px-0.5 uppercase tracking-wider">
-          Código de bônus <span className="text-[#5d6275] normal-case tracking-normal">(opcional)</span>
+        <label className="block text-sm font-bold text-white mb-2 flex items-center gap-1.5">
+          <Gift size={14} className="text-emerald-400" />
+          Código de bônus <span className="text-[#7c8195] font-normal">(opcional)</span>
         </label>
-        <div className={cn(
-          'relative flex items-center rounded-xl border bg-[#222637] transition-colors',
-          bonusInfo
-            ? 'border-emerald-500/50 shadow-[0_0_0_3px_rgba(16,185,129,0.05)]'
-            : bonusError
-              ? 'border-red-500/40'
-              : 'border-[#2a2e3b] focus-within:border-[#32BCAD]/60',
-        )}>
-          <Tag size={14} className="ml-3 text-[#7c8195] flex-shrink-0" />
-          <input
-            value={bonusCode}
-            onChange={(e) => setBonusCode(e.target.value.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase())}
-            placeholder="BONUS200"
-            maxLength={32}
-            className="flex-1 bg-transparent px-2 py-3 text-sm font-mono font-bold text-white outline-none placeholder:text-[#4d5266] placeholder:font-normal placeholder:tracking-normal tracking-wider"
-          />
-          {validatingBonus && <Loader2 size={14} className="mr-3 text-[#7c8195] animate-spin" />}
-          {!validatingBonus && bonusInfo && <Check size={16} className="mr-3 text-emerald-400" />}
+
+        {/* Dropdown of available codes */}
+        <div className="relative mb-2">
+          <select
+            value={selectedDropdown}
+            onChange={(e) => onDropdownChange(e.target.value)}
+            disabled={availableBonuses.length === 0}
+            className="w-full h-11 px-3 pr-9 rounded-lg bg-[#222637] border border-[#2a2e3b] text-sm text-white outline-none focus:border-emerald-500/40 appearance-none disabled:text-[#5d6275]"
+          >
+            <option value="">
+              {availableBonuses.length === 0 ? 'Sem códigos disponíveis' : 'Selecione um código de bônus'}
+            </option>
+            {availableBonuses.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.code} — {b.type === 'PERCENTAGE' ? `${b.value}%` : `R$${b.value}`} (mín R${b.minDeposit}, rollover {b.rollover}×)
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#7c8195] pointer-events-none" />
         </div>
 
-        {/* Preview when valid */}
+        {/* Manual entry + Aplicar */}
+        <div className="flex items-stretch gap-2">
+          <input
+            value={bonusInput}
+            onChange={(e) => {
+              setBonusInput(e.target.value.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase())
+              // Clear preview when user starts typing fresh
+              if (bonusInfo) {
+                setBonusInput(e.target.value.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase())
+              }
+            }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onApplyManual() } }}
+            placeholder="Ou digite o código aqui"
+            maxLength={32}
+            className="flex-1 h-11 px-3 rounded-lg bg-[#222637] border border-[#2a2e3b] text-sm font-mono text-white outline-none focus:border-emerald-500/40 placeholder:text-[#4d5266] placeholder:font-sans"
+          />
+          <button
+            type="button"
+            onClick={onApplyManual}
+            disabled={!bonusInput.trim() || validatingBonus}
+            className="h-11 px-4 rounded-lg bg-[#2a2e3b] border border-[#2a2e3b] text-xs font-bold text-white hover:bg-[#343b4d] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+          >
+            {validatingBonus ? <Loader2 size={12} className="animate-spin" /> : null}
+            Aplicar
+          </button>
+        </div>
+
+        {/* Preview / error chip */}
         {bonusInfo && (
-          <div className="mt-2 px-3 py-2.5 rounded-lg bg-emerald-500/8 border border-emerald-500/25 flex items-start gap-2">
-            <Gift size={14} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+          <div className="mt-2 px-3 py-2 rounded-lg bg-emerald-500/8 border border-emerald-500/25 flex items-start gap-2">
+            <Check size={13} className="text-emerald-400 flex-shrink-0 mt-0.5" />
             <div className="text-[11px] leading-relaxed">
               <div className="text-white font-semibold">
-                Você ganha <span className="text-emerald-300">R$ {bonusInfo.bonusAmount.toFixed(2).replace('.', ',')}</span> em bônus
+                Você ganha <span className="text-emerald-300">R$ {formatBrl(bonusInfo.bonusAmount)}</span> em bônus
               </div>
-              <div className="text-[#7c8195] mt-0.5">
-                Rollover {bonusInfo.rollover}× · operar R$ {bonusInfo.rolloverRequired.toFixed(2).replace('.', ',')} pra liberar saque
+              <div className="text-[#7c8195]">
+                Rollover {bonusInfo.rollover}× · operar R$ {formatBrl(bonusInfo.rolloverRequired)} pra liberar saque
               </div>
             </div>
           </div>
         )}
-
-        {/* Error when invalid */}
         {bonusError && (
           <div className="mt-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 flex items-start gap-2">
             <AlertCircle size={12} className="text-red-400 flex-shrink-0 mt-0.5" />
@@ -346,46 +464,27 @@ function FormStep({
         </div>
       )}
 
+      {/* CTA */}
       <button
         onClick={submit}
-        disabled={!valid || loading || (!!bonusCode.trim() && !bonusInfo)}
+        disabled={!canSubmit || (!!bonusInput.trim() && !bonusInfo)}
         className={cn(
-          'group relative w-full h-12 rounded-xl text-sm font-bold text-white transition-all duration-200',
-          'flex items-center justify-center gap-2 overflow-hidden',
-          valid && !loading && (!bonusCode.trim() || bonusInfo)
-            ? 'bg-gradient-to-b from-[#3b82f6] to-[#2563eb] shadow-[0_4px_20px_-4px_rgba(59,130,246,0.6)] hover:shadow-[0_6px_24px_-2px_rgba(59,130,246,0.7)] hover:-translate-y-px active:translate-y-0'
+          'w-full h-12 rounded-lg text-sm font-bold text-white transition-all duration-200',
+          'flex items-center justify-center gap-2',
+          canSubmit && (!bonusInput.trim() || bonusInfo)
+            ? 'bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-[0_4px_20px_-4px_rgba(16,185,129,0.6)] hover:-translate-y-px active:translate-y-0'
             : 'bg-[#2a2e3b] text-[#5d6275] cursor-not-allowed',
         )}
       >
-        {/* Shine sweep on hover when active */}
-        {valid && !loading && (
-          <span className="absolute inset-y-0 -left-12 w-12 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12 transition-transform duration-700 group-hover:translate-x-[600%]" aria-hidden="true" />
-        )}
         {loading
           ? (<><Loader2 size={14} className="animate-spin" /> Gerando QR…</>)
-          : valid
-            ? `Gerar QR Code · R$ ${amountNum.toFixed(2).replace('.', ',')}`
-            : 'Gerar QR Code'}
+          : (<><QrCode size={16} /> Gerar QR Code PIX</>)}
       </button>
-
-      {/* Trust signals */}
-      <div className="flex items-center justify-center gap-4 pt-1">
-        <TrustChip icon={<Zap         size={12} />} label="Instantâneo" />
-        <TrustChip icon={<ShieldCheck size={12} />} label="Seguro" />
-        <TrustChip icon={<BadgeCheck  size={12} />} label="PIX oficial" />
-      </div>
     </div>
   )
 }
 
-function TrustChip({ icon, label }: { icon: React.ReactNode; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#7c8195]">
-      <span className="text-[#32BCAD]">{icon}</span>
-      {label}
-    </span>
-  )
-}
+// ── QR / Paid / Expired steps ──────────────────────────────────────────────
 
 function QrStep({
   deposit, amountNum, copied, onCopy, onCancel,
@@ -395,21 +494,18 @@ function QrStep({
 }) {
   return (
     <div className="flex flex-col items-center gap-4">
-      {/* Amount card up top */}
       <div className="w-full rounded-xl bg-[#222637] border border-[#2a2e3b] px-4 py-3 flex items-baseline justify-between">
         <span className="text-[11px] text-[#7c8195] uppercase tracking-wider font-semibold">Valor a pagar</span>
-        <span className="text-xl font-bold text-white tabular-nums">R$ {amountNum.toFixed(2).replace('.', ',')}</span>
+        <span className="text-xl font-bold text-white tabular-nums">R$ {formatBrl(amountNum)}</span>
       </div>
 
-      {/* QR with brand-color glow frame */}
       <div className="relative">
-        <div className="absolute inset-0 rounded-2xl bg-[#32BCAD]/20 blur-xl" aria-hidden="true" />
-        <div className="relative bg-white p-3.5 rounded-2xl border-2 border-[#32BCAD]/30">
+        <div className="absolute inset-0 rounded-2xl bg-emerald-500/15 blur-xl" aria-hidden="true" />
+        <div className="relative bg-white p-3.5 rounded-2xl border-2 border-emerald-500/30">
           <QRCodeSVG value={deposit.qrcode} size={196} level="M" />
         </div>
       </div>
 
-      {/* Status pill */}
       <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30">
         <span className="relative flex h-2 w-2">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
@@ -418,14 +514,13 @@ function QrStep({
         <span className="text-xs font-semibold text-amber-300">Aguardando pagamento</span>
       </div>
 
-      {/* Copy button */}
       <button
         onClick={onCopy}
         className={cn(
           'w-full h-11 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-2',
           copied
             ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-300'
-            : 'bg-[#222637] border-[#2a2e3b] text-white hover:border-[#32BCAD]/50 hover:bg-[#262b3e]',
+            : 'bg-[#222637] border-[#2a2e3b] text-white hover:border-emerald-500/40',
         )}
       >
         {copied
@@ -438,10 +533,7 @@ function QrStep({
         Se houver erro, feche e gere outro QR.
       </p>
 
-      <button
-        onClick={onCancel}
-        className="text-[11px] text-[#7c8195] hover:text-white transition-colors"
-      >
+      <button onClick={onCancel} className="text-[11px] text-[#7c8195] hover:text-white transition-colors">
         Cancelar e fechar
       </button>
     </div>
@@ -461,17 +553,17 @@ function PaidStep({ amount, bonusInfo, onClose }: {
       </div>
       <h3 className="text-lg font-bold text-white mt-1">Depósito confirmado</h3>
       <p className="text-sm text-[#bdc1cf]">
-        <span className="text-emerald-300 font-bold">R$ {amount.toFixed(2).replace('.', ',')}</span> creditado na sua conta real.
+        <span className="text-emerald-300 font-bold">R$ {formatBrl(amount)}</span> creditado na sua conta real.
       </p>
       {bonusInfo && (
         <div className="w-full px-3 py-2.5 rounded-lg bg-emerald-500/8 border border-emerald-500/25 flex items-start gap-2 text-left">
           <Gift size={14} className="text-emerald-400 flex-shrink-0 mt-0.5" />
           <div className="text-[11px] leading-relaxed">
             <div className="text-white font-semibold">
-              +R$ {bonusInfo.bonusAmount.toFixed(2).replace('.', ',')} em bônus aplicado
+              +R$ {formatBrl(bonusInfo.bonusAmount)} em bônus aplicado
             </div>
             <div className="text-[#7c8195]">
-              Rollover {bonusInfo.rollover}× — opere R$ {bonusInfo.rolloverRequired.toFixed(2).replace('.', ',')} pra liberar saque
+              Rollover {bonusInfo.rollover}× — opere R$ {formatBrl(bonusInfo.rolloverRequired)} pra liberar saque
             </div>
           </div>
         </div>
@@ -501,27 +593,10 @@ function ExpiredStep({ onRetry }: { onRetry: () => void }) {
       </p>
       <button
         onClick={onRetry}
-        className="mt-3 w-full h-11 rounded-xl bg-gradient-to-b from-[#3b82f6] to-[#2563eb] text-sm font-bold text-white shadow-[0_4px_20px_-4px_rgba(59,130,246,0.6)] hover:-translate-y-px transition-transform"
+        className="mt-3 w-full h-11 rounded-xl bg-gradient-to-b from-emerald-500 to-emerald-600 text-sm font-bold text-white shadow-[0_4px_20px_-4px_rgba(16,185,129,0.6)] hover:-translate-y-px transition-transform"
       >
         Tentar novamente
       </button>
     </div>
-  )
-}
-
-// ── PIX brand mark — official Banco Central symbol ────────────────────────
-// 4 rounded squares rotated 45° form the canonical PIX rhombus with an
-// X-shaped gap in the middle. Matches the BCB brand guidelines (turquoise
-// #32BCAD, no background circle, 4 quadrants separated by ~2px gap).
-function PixIcon({ size = 32 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" className="relative" aria-label="PIX">
-      <g transform="rotate(45 16 16)" fill="#32BCAD">
-        <rect x="7"  y="7"  width="8" height="8" rx="1.5" />
-        <rect x="17" y="7"  width="8" height="8" rx="1.5" />
-        <rect x="7"  y="17" width="8" height="8" rx="1.5" />
-        <rect x="17" y="17" width="8" height="8" rx="1.5" />
-      </g>
-    </svg>
   )
 }

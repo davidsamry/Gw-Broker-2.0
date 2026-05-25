@@ -1,9 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { validateCodeForUser } from './service.js'
+import { listAvailableBonusesForUser, validateCodeForUser } from './service.js'
 
-// User-facing bonus routes. /validate is the only public endpoint at B1 —
-// listing user grants is exposed via /auth/me hydration in B2.
+// User-facing bonus routes.
 
 const validateSchema = z.object({
   code:          z.string().trim().min(2).max(32),
@@ -11,8 +10,23 @@ const validateSchema = z.object({
 })
 
 export async function bonusRoutes(app: FastifyInstance) {
-  // Requires auth — we need to know which user is checking.
-  app.post('/validate', { preHandler: (app as any).authenticate }, async (req, reply) => {
+  // All routes here need auth.
+  app.addHook('preHandler', (app as any).authenticate)
+
+  // List of bonus codes the current user can actually redeem. Powers the
+  // dropdown in the deposit modal.
+  app.get('/available', async (req, reply) => {
+    try {
+      const userId  = (req as any).user.sub as string
+      const bonuses = await listAvailableBonusesForUser(userId)
+      return reply.send({ bonuses })
+    } catch (err: any) {
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  app.post('/validate', async (req, reply) => {
     const parsed = validateSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
