@@ -168,11 +168,14 @@ export async function startOtcV2Worker(): Promise<void> {
     // and backfills them. Catches gaps that opened up between deploys
     // (e.g., from older code that didn't have boot-time backfill).
     gapSweepInterval = setInterval(() => { void sweepAllGaps() }, GAP_SWEEP_INTERVAL_MS)
-    // Periodic prune — caps unbounded growth of otc_ticks and old
-    // otc_candles. Runs immediately on boot too so a long-running
-    // deploy doesn't wait 5 min before the first cleanup.
-    void pruneOldData()
-    pruneInterval = setInterval(() => { void pruneOldData() }, PRUNE_INTERVAL_MS)
+    // Periodic prune — TEMPORARILY DISABLED.
+    // The first drain after a long accumulation was saturating the
+    // Prisma connection pool (otc_ticks has no recordedAt-only index,
+    // so even chunked DELETEs scan a lot). Auth/login was returning
+    // 500 INTERNAL_ERROR because findUnique on users couldn't get a
+    // connection. Re-enable after adding an index migration.
+    // void pruneOldData()
+    // pruneInterval = setInterval(() => { void pruneOldData() }, PRUNE_INTERVAL_MS)
 
     console.log(`[otc-v2] running with ${assetStates.size}/${configs.length} assets, ${OTC_TIMEFRAMES.length} timeframes`)
   } catch (err) {
