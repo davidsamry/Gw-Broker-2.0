@@ -69,7 +69,7 @@ export default function AdminDashboardPage() {
   useEffect(() => { load(preset === 'custom' ? '30d' : preset) }, [preset])
 
   return (
-    <div className="px-6 py-6 max-w-[1400px] mx-auto">
+    <div className="px-4 py-4 sm:px-6 sm:py-6 max-w-[1400px] mx-auto">
       {/* Topbar */}
       <div className="flex items-start justify-between mb-5">
         <div>
