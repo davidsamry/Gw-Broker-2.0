@@ -119,12 +119,14 @@ function TabBtn({ active, onClick, label }: { active: boolean; onClick: () => vo
       onClick={onClick}
       className={cn(
         'flex-1 px-4 py-3.5 text-sm font-bold tracking-wider uppercase transition-colors relative',
-        active ? 'text-orange-400' : 'text-[#8b8f9a] hover:text-white'
+        // Project accent blue — matches the asset-tab underline in Header.tsx
+        // and the gradient CTAs elsewhere.
+        active ? 'text-blue-400' : 'text-[#8b8f9a] hover:text-white'
       )}
     >
       {label}
       {active && (
-        <span className="absolute bottom-0 left-3 right-3 h-[2px] bg-orange-400 rounded-t" />
+        <span className="absolute bottom-0 left-3 right-3 h-[2px] bg-blue-500 rounded-t" />
       )}
     </button>
   )
