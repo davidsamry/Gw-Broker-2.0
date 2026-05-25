@@ -685,41 +685,72 @@ async function flushRuntimeState(): Promise<void> {
 //                                            tick-level data older)
 //   admin/engine logs → 30 days             (audit retention)
 //
-// One DELETE per (table, timeframe) — Postgres handles each in a
-// single index-backed scan, no full-table walks.
+// IMPORTANT: chunked DELETEs (LIMIT 5000 via CTE) so a first-run
+// catch-up on millions of accumulated rows doesn't lock the table
+// for minutes and starve the connection pool. The previous
+// non-chunked version returned auth/login 500s during boot because
+// a single DELETE was holding row locks + the pool was saturated.
+const PRUNE_CHUNK            = 5_000   // rows per DELETE round-trip
+const PRUNE_MAX_BUDGET_MS    = 10_000  // walk away after this much time
+// Pulled from the WITH-CTE result; we stop looping when fewer than
+// this came back (= the table is now at steady state for this cycle).
+async function deleteChunked(
+  table:      string,
+  whereSql:   string,
+  budgetMs:   number,
+): Promise<number> {
+  const start = Date.now()
+  let totalDeleted = 0
+  while (Date.now() - start < budgetMs) {
+    // CTE with LIMIT — Postgres doesn't allow DELETE ... LIMIT directly.
+    // ctid is the physical row pointer, fastest possible match.
+    const deleted: number = await prisma.$executeRawUnsafe(`
+      WITH victim AS (
+        SELECT ctid FROM ${table}
+         WHERE ${whereSql}
+         LIMIT ${PRUNE_CHUNK}
+      )
+      DELETE FROM ${table} t
+       USING victim v
+       WHERE t.ctid = v.ctid
+    `)
+    totalDeleted += deleted
+    if (deleted < PRUNE_CHUNK) break  // drained
+    // Tiny breather so the connection pool can serve other queries
+    // (auth/login etc.) between batches.
+    await new Promise(r => setTimeout(r, 50))
+  }
+  return totalDeleted
+}
+
 async function pruneOldData(): Promise<void> {
   try {
     const t = Date.now()
-
-    // Ticks: keep last 1h only. Resolution-side never reads older.
-    await prisma.$executeRaw`
-      DELETE FROM otc_ticks
-      WHERE "recordedAt" < NOW() - INTERVAL '1 hour'
-    `
-
-    // Candles per timeframe — single statement using a CASE-driven
-    // retention boundary. The (timeframe, openTime) index supports
-    // this scan efficiently.
-    await prisma.$executeRaw`
-      DELETE FROM otc_candles
-      WHERE
-        (timeframe = 5    AND "openTime" < NOW() - INTERVAL '6 hours')  OR
-        (timeframe = 15   AND "openTime" < NOW() - INTERVAL '1 day')    OR
-        (timeframe = 30   AND "openTime" < NOW() - INTERVAL '2 days')   OR
-        (timeframe = 60   AND "openTime" < NOW() - INTERVAL '7 days')   OR
-        (timeframe = 300  AND "openTime" < NOW() - INTERVAL '30 days')
-    `
-
-    // Audit + engine logs — generous 30d window.
+    const ticks = await deleteChunked(
+      'otc_ticks',
+      `"recordedAt" < NOW() - INTERVAL '1 hour'`,
+      PRUNE_MAX_BUDGET_MS,
+    )
+    const candles = await deleteChunked(
+      'otc_candles',
+      `(timeframe = 5    AND "openTime" < NOW() - INTERVAL '6 hours')  OR
+       (timeframe = 15   AND "openTime" < NOW() - INTERVAL '1 day')    OR
+       (timeframe = 30   AND "openTime" < NOW() - INTERVAL '2 days')   OR
+       (timeframe = 60   AND "openTime" < NOW() - INTERVAL '7 days')   OR
+       (timeframe = 300  AND "openTime" < NOW() - INTERVAL '30 days')`,
+      PRUNE_MAX_BUDGET_MS,
+    )
+    // Audit logs rarely have anything to prune — single small DELETE.
     await prisma.$executeRaw`
       DELETE FROM otc_admin_logs WHERE "createdAt" < NOW() - INTERVAL '30 days'
     `
     await prisma.$executeRaw`
       DELETE FROM otc_engine_logs WHERE "createdAt" < NOW() - INTERVAL '30 days'
     `
-
     const ms = Date.now() - t
-    if (ms > 1000) console.log(`[otc-v2] prune cycle finished in ${ms}ms`)
+    if (ticks + candles > 0 || ms > 1000) {
+      console.log(`[otc-v2] prune: ticks=${ticks} candles=${candles} in ${ms}ms`)
+    }
   } catch (err) {
     console.error('[otc-v2] pruneOldData failed', err)
   }
