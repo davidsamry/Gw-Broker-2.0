@@ -24,13 +24,19 @@ async function fetchBinanceLastPrice(marketSymbol: string): Promise<number | nul
   }
 }
 
-// OTC v2 exit price: the tick recorded AT or just before the op's
-// expiresAt — same row the chart's SSE has just shown to the user.
-// Source of truth for the new 5 OTC assets.
-async function fetchOtcV2ExitPrice(assetId: string, expiresAt: Date): Promise<number | null> {
+// OTC v2 exit price — Fase 8: returns the tick row's price AND
+// recordedAt so the caller can log how stale the tick was vs the
+// op's expiresAt. Same query as before; just richer return value.
+//
+// "Same row the chart's SSE has just shown the user" is the
+// invariant — never resolve an op against a price the user didn't
+// have a chance to see.
+async function fetchOtcV2ExitTick(assetId: string, expiresAt: Date): Promise<{
+  price: number; recordedAt: Date
+} | null> {
   try {
-    const rows = await prisma.$queryRaw<Array<{ price: Prisma.Decimal }>>`
-      SELECT price FROM otc_ticks
+    const rows = await prisma.$queryRaw<Array<{ price: Prisma.Decimal; recordedAt: Date }>>`
+      SELECT price, "recordedAt" FROM otc_ticks
       WHERE "assetId" = ${assetId}
         AND "recordedAt" <= ${expiresAt}
       ORDER BY "recordedAt" DESC
@@ -38,9 +44,121 @@ async function fetchOtcV2ExitPrice(assetId: string, expiresAt: Date): Promise<nu
     `
     if (rows.length === 0) return null
     const p = Number(rows[0].price)
-    return Number.isFinite(p) && p > 0 ? p : null
+    return Number.isFinite(p) && p > 0 ? { price: p, recordedAt: rows[0].recordedAt } : null
   } catch {
     return null
+  }
+}
+
+// Fase 8 — fallback when the tick stream missed expiresAt but a
+// finalized candle covers that slot. Walks timeframes shortest-first
+// so the close is from the smallest bar containing expiresAt (most
+// precise). NEVER returns a candle whose slot is the FUTURE relative
+// to expiresAt; only candles whose slot has elapsed.
+const OTC_TIMEFRAMES_SEC = [5, 15, 30, 60, 300]
+async function fetchOtcCandleCloseAtSlot(assetId: string, expiresAt: Date): Promise<{
+  price: number; timeframe: number; openTime: Date
+} | null> {
+  const expiresMs = expiresAt.getTime()
+  for (const tf of OTC_TIMEFRAMES_SEC) {
+    try {
+      const tfMs = tf * 1000
+      const slotOpen = Math.floor(expiresMs / tfMs) * tfMs
+      // Candle whose openTime == the slot of expiresAt. close = the
+      // last tick that fell in that slot, which IS the price the chart
+      // was showing when the op expired.
+      const rows = await prisma.$queryRaw<Array<{ closePrice: string; openTime: Date }>>`
+        SELECT "closePrice"::text, "openTime"
+        FROM otc_candles
+        WHERE "assetId" = ${assetId}
+          AND timeframe = ${tf}
+          AND "openTime" = ${new Date(slotOpen)}
+        LIMIT 1
+      `
+      if (rows.length === 0) continue
+      const p = Number(rows[0].closePrice)
+      if (Number.isFinite(p) && p > 0) {
+        return { price: p, timeframe: tf, openTime: rows[0].openTime }
+      }
+    } catch {
+      // try next tf
+    }
+  }
+  return null
+}
+
+// Fase 8 — what source the exitPrice came from. Used only for the
+// per-resolution log line; doesn't affect math.
+type ExitPriceSource =
+  | 'binance'        // Live Binance ticker
+  | 'otc_tick'       // Last otc_ticks row at or before expiresAt
+  | 'otc_candle'     // Close of the otc_candles slot containing expiresAt
+  | 'random'         // Last resort — small nudge so op resolves
+type ExitInfo = {
+  price:       number
+  source:      ExitPriceSource
+  // tick_age_ms: how stale the chosen source is vs the op's expiresAt.
+  // For 'binance' the API is real-time (~0ms). For 'otc_tick' this is
+  // expiresAt - recordedAt. For 'otc_candle' this is expiresAt - candle
+  // openTime + tfMs (close of the slot). For 'random' this is 0.
+  tickAgeMs:   number
+  // Extra context for the log when source='otc_candle'.
+  candleTf?:   number
+}
+
+async function resolveExitPrice(op: {
+  assetId: string; expiresAt: Date; marketSymbol: string | null; entryPrice: Prisma.Decimal
+}): Promise<ExitInfo> {
+  // ── 1. BINANCE (real market) ──────────────────────────────────────
+  if (op.marketSymbol) {
+    const p = await fetchBinanceLastPrice(op.marketSymbol)
+    if (p != null) {
+      return { price: p, source: 'binance', tickAgeMs: 0 }
+    }
+    // Binance ticker down — fall through. Real BINANCE assets shouldn't
+    // ever hit otc_ticks/otc_candles (no engine running for them) so
+    // we go straight to random.
+    return makeRandomExit(op.entryPrice)
+  }
+
+  // ── 2. OTC tick at or before expiresAt (preferred — same row the
+  //       chart's SSE has shown the user) ───────────────────────────
+  const tick = await fetchOtcV2ExitTick(op.assetId, op.expiresAt)
+  if (tick) {
+    return {
+      price:     tick.price,
+      source:    'otc_tick',
+      tickAgeMs: op.expiresAt.getTime() - tick.recordedAt.getTime(),
+    }
+  }
+
+  // ── 3. OTC candle close for the slot containing expiresAt ──────
+  // Fase 8 NEW fallback — if the tick stream missed (prune ran while
+  // op resolving, etc.) but a candle finalized for the slot, use
+  // its close. That's still the chart price the user would have seen
+  // — much better than rolling random dice.
+  const candle = await fetchOtcCandleCloseAtSlot(op.assetId, op.expiresAt)
+  if (candle) {
+    const tfMs = candle.timeframe * 1000
+    return {
+      price:     candle.price,
+      source:    'otc_candle',
+      tickAgeMs: op.expiresAt.getTime() - (candle.openTime.getTime() + tfMs),
+      candleTf:  candle.timeframe,
+    }
+  }
+
+  // ── 4. Last resort — random nudge so the op doesn't hang OPEN ──
+  return makeRandomExit(op.entryPrice)
+}
+
+function makeRandomExit(entryPrice: Prisma.Decimal): ExitInfo {
+  const entry = Number(entryPrice)
+  const change = (Math.random() * 0.01) - 0.005
+  return {
+    price:     parseFloat((entry * (1 + change)).toFixed(5)),
+    source:    'random',
+    tickAgeMs: 0,
   }
 }
 
@@ -59,23 +177,24 @@ async function resolveOperation(op: {
     const entry = Number(op.entryPrice)
     const amount = Number(op.amount)
 
-    // exitPrice resolution order:
-    //   1. BINANCE → public ticker (real market close).
-    //   2. OTC v2  → otc_ticks (most recent ≤ expiresAt) — same source
-    //                the chart's SSE shows to the user.
-    //   3. Fallback → small random nudge so the op still resolves and
-    //                doesn't hang OPEN forever.
-    let exitPrice: number | null = null
-    if (op.marketSymbol) {
-      exitPrice = await fetchBinanceLastPrice(op.marketSymbol)
-    } else {
-      exitPrice = await fetchOtcV2ExitPrice(op.assetId, op.expiresAt)
-    }
-    if (exitPrice == null) {
-      const change = (Math.random() * 0.01) - 0.005
-      exitPrice = parseFloat((entry * (1 + change)).toFixed(5))
-    } else {
-      exitPrice = parseFloat(exitPrice.toFixed(5))
+    const exit = await resolveExitPrice(op)
+    const exitPrice = parseFloat(exit.price.toFixed(5))
+
+    // Fase 8 — divergence detection. When we used a tick, ALSO peek
+    // at the candle close for the same slot. If they disagree by >0.5%
+    // it means the chart and the resolution price likely diverged
+    // (engine bug, stale tick, etc.) — WARN so it's visible in logs.
+    // Doesn't change the resolution — exit price IS the tick that
+    // was shown to the user.
+    let divergenceWarn = ''
+    if (exit.source === 'otc_tick' && !op.marketSymbol) {
+      const candle = await fetchOtcCandleCloseAtSlot(op.assetId, op.expiresAt)
+      if (candle) {
+        const pct = Math.abs((exitPrice - candle.price) / candle.price) * 100
+        if (pct > 0.5) {
+          divergenceWarn = ` divergence_pct=${pct.toFixed(3)} candle_close=${candle.price}`
+        }
+      }
     }
 
     const won =
@@ -113,6 +232,17 @@ async function resolveOperation(op: {
         }),
       ])
     }
+
+    // Single structured log per resolution — grepable for auditing
+    // resolution quality. Should see ~0% source=random in healthy runs.
+    const tfStr = exit.candleTf ? ` candle_tf=${exit.candleTf}` : ''
+    console.log(
+      `[op-resolve] op=${op.id} asset=${op.assetId} dir=${op.direction}` +
+      ` entry=${entry.toFixed(5)} exit=${exitPrice.toFixed(5)}` +
+      ` source=${exit.source} tick_age_ms=${exit.tickAgeMs}${tfStr}` +
+      ` won=${won} profit=${profit.toFixed(2)}` +
+      divergenceWarn,
+    )
   } catch (err) {
     console.error('[worker] failed to resolve', op.id, err)
   }
