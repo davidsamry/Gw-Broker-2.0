@@ -918,7 +918,10 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
         >
           <div className={cn(
             'bg-[#1d2130]/95 backdrop-blur-sm border border-[#3a3f50] text-white text-[11px] font-mono font-bold px-2 py-0.5 rounded shadow-lg shadow-black/40 transition-opacity duration-150',
-            candleSecsLeft <= 5 && 'border-red-500/70 text-red-300',
+            // User asked the candle clock to always stay white — kept the
+            // subtle opacity pulse on the last 5s so the urgency cue still
+            // exists, but dropped the red border + red text recolour that
+            // used to fire below 5s.
             candleTimerPulse ? 'opacity-60' : 'opacity-100'
           )}>
             {String(Math.floor(candleSecsLeft / 60)).padStart(2, '0')}:{String(candleSecsLeft % 60).padStart(2, '0')}
