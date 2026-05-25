@@ -47,7 +47,11 @@ export default function BonusAdminPage() {
       const { data } = await api.get<ListResponse>('/admin/bonuses')
       setBonuses(data.bonuses)
     } catch (err: any) {
-      setError(err?.response?.data?.error ?? 'Erro ao carregar bônus.')
+      // Surface the detail (only present in non-prod) alongside the code so
+      // we can debug missing-table / migration-pending issues without SSH.
+      const code   = err?.response?.data?.error  ?? 'NETWORK_ERROR'
+      const detail = err?.response?.data?.detail ?? err?.response?.data?.message
+      setError(detail ? `${code} — ${detail}` : code)
     } finally {
       setLoading(false)
     }

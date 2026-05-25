@@ -29,9 +29,17 @@ export async function bonusesAdminRoutes(app: FastifyInstance) {
     try {
       const bonuses = await listAdminBonuses()
       return reply.send({ bonuses })
-    } catch (err) {
-      app.log.error(err)
-      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    } catch (err: any) {
+      // Verbose log so EasyPanel logs surface the actual cause (table missing,
+      // enum mismatch, pool exhausted, etc.) without needing a separate debug.
+      app.log.error({ err: err?.message, stack: err?.stack, code: err?.code }, '[admin/bonuses] list failed')
+      return reply.status(500).send({
+        error:  'INTERNAL_ERROR',
+        // Include the underlying message in non-prod so the admin UI shows
+        // something actionable. In prod we keep it generic to avoid leaking
+        // schema details.
+        detail: process.env.NODE_ENV !== 'production' ? (err?.message ?? null) : null,
+      })
     }
   })
 

@@ -66,10 +66,12 @@ CREATE INDEX "bonus_grants_status_idx" ON "bonus_grants"("status");
 
 -- Partial unique index: at most ONE pending+active grant per user. Postgres
 -- supports this via `WHERE` clause on the unique constraint; Prisma doesn't
--- emit it from the schema yet so we create it manually here.
+-- emit it from the schema yet so we create it manually here. Explicit enum
+-- casts on the IN literals — newer PG versions infer them but older / strict
+-- modes (and the Prisma migrate executor) sometimes fail without the cast.
 CREATE UNIQUE INDEX "bonus_grants_userId_one_open_grant"
     ON "bonus_grants"("userId")
-    WHERE "status" IN ('PENDING', 'ACTIVE');
+    WHERE "status" IN ('PENDING'::"BonusGrantStatus", 'ACTIVE'::"BonusGrantStatus");
 
 -- AddForeignKey
 ALTER TABLE "bonus_grants" ADD CONSTRAINT "bonus_grants_bonusId_fkey"

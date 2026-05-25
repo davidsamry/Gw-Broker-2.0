@@ -36,7 +36,7 @@ export async function listAdminBonuses(): Promise<BonusListItem[]> {
       b."minDeposit"::text AS "minDeposit",
       b.rollover, b.active, b."maxUsesPerUser",
       b."expiresAt", b."createdAt", b."updatedAt",
-      COALESCE(SUM(CASE WHEN g.status IN ('PENDING','ACTIVE') THEN 1 ELSE 0 END), 0)::bigint AS "activeGrants",
+      COALESCE(SUM(CASE WHEN g.status IN ('PENDING'::"BonusGrantStatus",'ACTIVE'::"BonusGrantStatus") THEN 1 ELSE 0 END), 0)::bigint AS "activeGrants",
       COALESCE(COUNT(g.id), 0)::bigint AS "totalGrants"
     FROM bonuses b
     LEFT JOIN bonus_grants g ON g."bonusId" = b.id
