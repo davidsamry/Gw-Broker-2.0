@@ -261,34 +261,32 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
   const sessionMult = NATURAL_V2 ? sessionVolMultiplier() : 1
   const effectiveVol = s.config.volatilityBase * params.volMultiplier * s.volume * sessionMult
 
-  // Reversion anchors the price to seed over minutes/hours. Bumped
-  // 0.0002 → 0.0004 (May 2026) after observing prod runaway where the
-  // engine drifted to ±50% of seed under sustained STRONG trend chains.
-  // Math: at max deviation (price = seed × 2), reversion contribution
-  // is -0.0004/tick = -0.04%/tick = -24%/min back toward seed —
-  // dominates any single shock and any STRONG regime drift, while still
-  // leaving room for visible candle bodies during normal regimes.
+  // Reversion anchors the price to seed over minutes/hours. Was bumped
+  // 0.0002 → 0.0004 in M4 then softened to 0.00015 in Etapa B (2026-05-25)
+  // after observing the chart felt "over-anchored" — every trend got
+  // snapped back too fast. The soft barrier (added in M4) is now the
+  // primary safety net against runaway; reversion is back to a gentle
+  // pull that lets trends sustain for minutes before retracing.
   const distRatio = (s.price - s.config.seedPrice) / s.config.seedPrice
-  const reversion = -0.0004 * distRatio
+  const reversion = -0.00015 * distRatio
 
-  // Fase M4 — soft barrier. The hard clamp at [seed×0.5, seed×2]
-  // creates an ugly visual "stick" when price runs into it (the BTC
-  // seedPrice × 0.5 = 34001 incident this week). Instead of relying
-  // only on the hard cap, layer in a progressive force that engages
-  // when |distRatio| > 0.3 and grows quadratically toward the clamp.
+  // Fase M4 — soft barrier; Etapa B threshold raised 0.30 → 0.35.
+  // Engages later so trends can extend into "wide range" territory
+  // (±35% from seed) before the engine starts pulling back. Quadratic
+  // growth past the threshold still guarantees the hard clamp at ±50%
+  // is virtually never reached in normal operation.
   //
   //   distRatio   barrier per tick    per-second pull
-  //   0.30        0                   0
-  //   0.40        ±0.0005             ±0.5%/sec
-  //   0.45        ±0.001125           ±1.1%/sec
-  //   0.50        ±0.002              ±2%/sec   ← dominates any shock
+  //   0.35        0                   0
+  //   0.40        ±0.000125           ±0.13%/sec
+  //   0.45        ±0.0005             ±0.5%/sec
+  //   0.50        ±0.001125           ±1.1%/sec
   //
-  // The hard clamp stays as a safety net but should now rarely engage
-  // in normal operation. Smooth onset (= 0 at boundary) prevents the
-  // chart from "jolting" the moment the barrier activates.
+  // Smooth onset (= 0 at boundary) prevents the chart from "jolting"
+  // the moment the barrier activates.
   let softBarrier = 0
   if (NATURAL_V2) {
-    const SOFT_BARRIER_THRESHOLD = 0.3
+    const SOFT_BARRIER_THRESHOLD = 0.35
     const SOFT_BARRIER_SCALE     = 0.05
     const absDist = Math.abs(distRatio)
     if (absDist > SOFT_BARRIER_THRESHOLD) {
@@ -304,14 +302,18 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
   const liqWeight     = NATURAL_V2 ? LIQUIDITY_BIAS_WEIGHT : 0.5
   const liquidityBias = liqWeight * (s.buyPressure - s.sellPressure) * effectiveVol
 
-  // Spike — rare news-event discontinuity. NATURAL_V2 biases direction
-  // 70% counter-trend during trends (rejection wick pattern). Disabled
+  // Spike — single-tick burst that creates a wick on the live candle.
+  // Etapa B: bumped rate 0.0005 → 0.0015 (3× more frequent — was 1.8/min,
+  // now ~5.4/min). Magnitude dropped 1.5× → 1.0× effectiveVol so the
+  // spike creates a visible wick without becoming a jump that's
+  // smoothed out badly by the EMA. NATURAL_V2 biases direction 70%
+  // counter-trend during trends (rejection wick pattern). Disabled
   // during the boot grace window.
   let spike = 0
-  if (!s.bootGrace && rand() < 0.0005) {
+  if (!s.bootGrace && rand() < 0.0015) {
     const counterTrend = NATURAL_V2 && trendDir !== 0 && rand() < COUNTER_TREND_SPIKE_PROB
     const dir = counterTrend ? -trendDir : (rand() > 0.5 ? 1 : -1)
-    spike = dir * 1.5 * effectiveVol
+    spike = dir * 1.0 * effectiveVol
   }
 
   const rawNext = s.price * (1 + drift + reversion + softBarrier + shock + liquidityBias + spike)
