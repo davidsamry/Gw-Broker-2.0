@@ -11,6 +11,7 @@ import { loadLatestCandlePerTimeframe, primeCandleCache } from '../storage/candl
 import { loadLatestTicks } from '../storage/ticks.js'
 import { loadSnapshots, flushSnapshot } from '../storage/snapshot.js'
 import { loadPersistedRuntimeStates, flushRuntimeState } from '../storage/state.js'
+import { pruneOldData, logPruneConfig, PRUNE_ENABLED } from '../storage/prune.js'
 import { bootstrapHistoricalCandles } from '../recovery/bootstrap.js'
 import { backfillMissingCandles } from '../recovery/backfill.js'
 import { sweepAllGaps } from '../recovery/gap-sweep.js'
@@ -28,8 +29,10 @@ const TICK_FLUSH_INTERVAL_MS       = 1_000
 const LIQUIDITY_UPDATE_INTERVAL_MS = 10_000
 const STATE_FLUSH_INTERVAL_MS      = 5_000
 const GAP_SWEEP_INTERVAL_MS        = 30_000
-// Prune is temporarily disabled — re-enable after validating the index
-// on otc_ticks.recordedAt is in place and the first drain ran cleanly.
+// Fase 7: prune re-enabled. Cycles every 5 min; each cycle is chunked
+// + budgeted to 10s max so it can't starve the connection pool the
+// way the first attempt did. Disable with OTC_PRUNE_ENABLED=false.
+const PRUNE_INTERVAL_MS            = 5 * 60_000
 
 // Boots the engine. If it can't load assets on first try (e.g., DB
 // not ready, transient connection issue), it backs off and retries up
@@ -149,9 +152,21 @@ export async function startOtcV2Worker(): Promise<void> {
       await flushSnapshot()
     }, STATE_FLUSH_INTERVAL_MS)
     intervals.gapSweep   = setInterval(() => { void sweepAllGaps() }, GAP_SWEEP_INTERVAL_MS)
-    // intervals.prune — DISABLED (see worker.ts comment from earlier
-    // hotfix; re-enable in a follow-up after the recordedAt index is
-    // confirmed deployed in production).
+
+    // Fase 7: prune cycle. Chunked + budgeted; logs retention config
+    // on first boot so an operator can verify env overrides at a
+    // glance. Toggleable via OTC_PRUNE_ENABLED=false for emergency.
+    if (PRUNE_ENABLED) {
+      logPruneConfig()
+      // First run is async-fired (don't block boot); subsequent ones
+      // every 5 min. The first run drains whatever backlog accumulated
+      // while prune was disabled — chunked DELETEs keep the pool free
+      // for auth/login etc. throughout.
+      void pruneOldData()
+      intervals.prune = setInterval(() => { void pruneOldData() }, PRUNE_INTERVAL_MS)
+    } else {
+      console.log('[otc-v2] prune DISABLED via OTC_PRUNE_ENABLED=false')
+    }
 
     console.log(`[otc-v2] running with ${assetStates.size}/${configs.length} assets, ${OTC_TIMEFRAMES.length} timeframes`)
   } catch (err) {

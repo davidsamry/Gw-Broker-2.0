@@ -423,6 +423,10 @@ model OtcTick {
   asset       OtcAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
 
   @@index([assetId, recordedAt(sort: Desc)])
+  // Fase 7: covers the prune query `WHERE recordedAt < NOW() - INTERVAL '1h'`
+  // which can't use the leading-assetId index. Added via migration
+  // 20260525014500_otc_ticks_recordedat_index.
+  @@index([recordedAt], name: "otc_ticks_recordedAt_idx")
   @@map("otc_ticks")
 }
 
@@ -445,6 +449,9 @@ model OtcCandle {
 
   @@unique([assetId, timeframe, openTime])
   @@index([assetId, timeframe, openTime(sort: Desc)])
+  // Fase 7: covers the prune query `WHERE timeframe = X AND openTime < Y`
+  // which can't use the leading-assetId index efficiently.
+  @@index([timeframe, openTime], name: "otc_candles_timeframe_openTime_idx")
   @@map("otc_candles")
 }
 
