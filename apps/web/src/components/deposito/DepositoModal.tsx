@@ -12,6 +12,11 @@ import { cn } from '@/lib/utils'
 
 interface DepositoModalProps {
   onClose: () => void
+  // Optional bonus code to apply on mount (e.g., user clicked "Depositar"
+  // on a card in the BonusPanel). When provided, the manual input is
+  // pre-filled and the dropdown selection is synced; validation fires as
+  // soon as the user enters a deposit amount.
+  initialBonusCode?: string
 }
 
 interface CreatedDeposit {
@@ -78,7 +83,7 @@ function formatBrl(n: number): string {
   return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-export function DepositoModal({ onClose }: DepositoModalProps) {
+export function DepositoModal({ onClose, initialBonusCode }: DepositoModalProps) {
   const authStore = useAuthStore()
   const profileCpf = authStore.user?.cpf ?? null
 
@@ -91,10 +96,10 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
   const [copied, setCopied]   = useState(false)
 
   // Bonus state — entry can come from dropdown selection or manual input
-  // followed by Aplicar click.
+  // followed by Aplicar click. initialBonusCode pre-fills both.
   const [availableBonuses, setAvailableBonuses] = useState<AvailableBonus[]>([])
   const [selectedDropdown, setSelectedDropdown] = useState<string>('')   // bonus.id
-  const [bonusInput,       setBonusInput]       = useState<string>('')   // manual entry
+  const [bonusInput,       setBonusInput]       = useState<string>(initialBonusCode ?? '')   // manual entry
   const [bonusInfo,        setBonusInfo]        = useState<ValidatedBonus | null>(null)
   const [bonusError,       setBonusError]       = useState('')
   const [validatingBonus,  setValidatingBonus]  = useState(false)
@@ -106,14 +111,31 @@ export function DepositoModal({ onClose }: DepositoModalProps) {
   const validCpf    = cpfDigits.length === 11
   const canSubmit   = validAmount && validCpf && !loading
 
-  // Fetch available bonuses once on open.
+  // Fetch available bonuses once on open. When initialBonusCode is set
+  // and matches a returned bonus, sync the dropdown selection too.
   useEffect(() => {
     let cancelled = false
     api.get<{ bonuses: AvailableBonus[] }>('/bonuses/available')
-      .then(({ data }) => { if (!cancelled) setAvailableBonuses(data.bonuses) })
+      .then(({ data }) => {
+        if (cancelled) return
+        setAvailableBonuses(data.bonuses)
+        if (initialBonusCode) {
+          const match = data.bonuses.find(b => b.code === initialBonusCode.toUpperCase())
+          if (match) setSelectedDropdown(match.id)
+        }
+      })
       .catch(() => { /* dropdown stays empty — user can still type code manually */ })
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // If we have an initial code AND the user enters a valid amount, kick off
+  // validation automatically so the preview appears without an extra click.
+  useEffect(() => {
+    if (!initialBonusCode || bonusInfo || !validAmount) return
+    void applyBonusCode(initialBonusCode)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [validAmount])
 
   // Re-validate bonus when amount changes IF a code was already applied
   // (avoids stale "Você ganha R$ X" preview while user adjusts amount).

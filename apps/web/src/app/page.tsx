@@ -78,6 +78,10 @@ export default function TradingPage() {
   const [assetInfoOpen, setAssetInfoOpen] = useState(false)
   const [assetSelectorOpen, setAssetSelectorOpen] = useState(false)
   const [depositoOpen, setDepositoOpen] = useState(false)
+  // Optional bonus code to pre-apply when the deposit modal opens. Set by
+  // the BonusPanel's "Depositar agora" CTA so the user doesn't have to
+  // copy/paste the code manually.
+  const [depositoBonusCode, setDepositoBonusCode] = useState<string | undefined>(undefined)
   const [contaInitialTab, setContaInitialTab] = useState<'retirada' | 'minha-conta'>('minha-conta')
   const [configOpen, setConfigOpen] = useState(false)
   const [theme, setTheme] = useState<'diurno' | 'crepusculo' | 'noite'>('noite')
@@ -202,10 +206,15 @@ export default function TradingPage() {
       )
     }
     if (sidebarTab === 'BONUS') {
-      if (isMobile) return <BonusPanel onClose={() => setSidebarTab('TRADE')} />
+      // Card CTA opens the deposit modal with the bonus code pre-applied.
+      const openWithBonus = (code: string) => {
+        setDepositoBonusCode(code)
+        setDepositoOpen(true)
+      }
+      if (isMobile) return <BonusPanel onClose={() => setSidebarTab('TRADE')} onDeposit={openWithBonus} />
       return (
         <div className="flex flex-1 min-h-0 overflow-hidden">
-          <BonusPanel onClose={() => setSidebarTab('TRADE')} />
+          <BonusPanel onClose={() => setSidebarTab('TRADE')} onDeposit={openWithBonus} />
           <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
         </div>
       )
@@ -356,7 +365,10 @@ export default function TradingPage() {
         <AssetInfoModal asset={selectedAsset} marketPrice={displayPrice} onClose={() => setAssetInfoOpen(false)} onTrade={() => setAssetInfoOpen(false)} />
       )}
       {depositoOpen && (
-        <DepositoModal onClose={() => setDepositoOpen(false)} />
+        <DepositoModal
+          onClose={() => { setDepositoOpen(false); setDepositoBonusCode(undefined) }}
+          initialBonusCode={depositoBonusCode}
+        />
       )}
       {switchModal && (
         <AccountSwitchModal switchedTo={switchModal} demoBalance={demoBalance} realBalance={realBalance} onClose={() => setSwitchModal(null)} />

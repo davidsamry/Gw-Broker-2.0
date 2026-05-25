@@ -9,12 +9,16 @@
 // WELCOME100 card.
 
 import { useEffect, useState } from 'react'
-import { X, Check, ChevronRight, Copy, Loader2, Gift } from 'lucide-react'
+import { X, Check, Loader2, Gift, ArrowRight } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 interface BonusPanelProps {
-  onClose: () => void
+  onClose:    () => void
+  // Triggered when the user clicks "Depositar" on a bonus card. The parent
+  // opens the deposit modal pre-filled with this code so the user doesn't
+  // have to paste it manually.
+  onDeposit?: (code: string) => void
 }
 
 type Tab = 'DISPONIVEL' | 'NOTICIAS'
@@ -33,9 +37,8 @@ function formatBrl(n: number): string {
   return n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 }
 
-export function BonusPanel({ onClose }: BonusPanelProps) {
+export function BonusPanel({ onClose, onDeposit }: BonusPanelProps) {
   const [tab, setTab]       = useState<Tab>('DISPONIVEL')
-  const [copiedCode, setCopiedCode] = useState<string | null>(null)
   const [bonuses, setBonuses] = useState<AvailableBonus[]>([])
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(false)
@@ -50,10 +53,8 @@ export function BonusPanel({ onClose }: BonusPanelProps) {
     return () => { cancelled = true }
   }, [])
 
-  function copyCode(code: string) {
-    navigator.clipboard?.writeText(code)
-    setCopiedCode(code)
-    setTimeout(() => setCopiedCode(null), 2000)
+  function startDeposit(code: string) {
+    onDeposit?.(code)
   }
 
   return (
@@ -98,8 +99,7 @@ export function BonusPanel({ onClose }: BonusPanelProps) {
                   <BonusCard
                     key={b.id}
                     bonus={b}
-                    copied={copiedCode === b.code}
-                    onCopy={() => copyCode(b.code)}
+                    onDeposit={() => startDeposit(b.code)}
                   />
                 ))
         )}
@@ -147,10 +147,9 @@ function buildBullets(b: AvailableBonus): string[] {
   ]
 }
 
-function BonusCard({ bonus, copied, onCopy }: {
+function BonusCard({ bonus, onDeposit }: {
   bonus: AvailableBonus
-  copied: boolean
-  onCopy: () => void
+  onDeposit: () => void
 }) {
   const title   = buildTitle(bonus)
   const bullets = buildBullets(bonus)
@@ -173,12 +172,11 @@ function BonusCard({ bonus, copied, onCopy }: {
       </ul>
 
       <button
-        onClick={onCopy}
+        onClick={onDeposit}
         className="w-full flex items-center justify-center gap-2 bg-white text-[#3a2a5a] font-bold text-sm py-3 rounded-xl hover:bg-white/90 transition-colors relative"
       >
-        {copied ? <Copy size={14} /> : null}
-        <span>{copied ? 'Código copiado!' : 'Copiar código'}</span>
-        {!copied && <ChevronRight size={14} className="text-[#3a2a5a]" />}
+        <span>Depositar agora</span>
+        <ArrowRight size={14} className="text-[#3a2a5a]" />
       </button>
     </div>
   )
