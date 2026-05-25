@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Eye, RefreshCw, Pencil, LogOut, ArrowRightLeft, BarChart2, User, Gem, PiggyBank, Wallet } from 'lucide-react'
+import { X, RefreshCw, Pencil, LogOut, ArrowRightLeft, BarChart2, User, Gem, PiggyBank, Wallet } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 function handleCardKeyDown(e: React.KeyboardEvent<HTMLDivElement>, action: () => void) {
@@ -109,8 +109,12 @@ export function AccountDropdown({
             <span className="text-xs text-[#8b8f9a] font-medium">VIP:</span>
             <span className="text-xs text-white font-semibold">+4% de lucro</span>
           </div>
-          <button className="text-[#8b8f9a] hover:text-white transition-colors">
-            <Eye size={14} />
+          <button
+            onClick={onClose}
+            className="w-7 h-7 -mr-1 flex items-center justify-center rounded-md text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors"
+            aria-label="Fechar"
+          >
+            <X size={16} />
           </button>
         </div>
 
