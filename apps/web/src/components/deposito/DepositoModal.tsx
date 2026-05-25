@@ -111,8 +111,12 @@ export function DepositoModal({ onClose, initialBonusCode }: DepositoModalProps)
   const validCpf    = cpfDigits.length === 11
   const canSubmit   = validAmount && validCpf && !loading
 
-  // Fetch available bonuses once on open. When initialBonusCode is set
-  // and matches a returned bonus, sync the dropdown selection too.
+  // Fetch available bonuses once on open. When initialBonusCode is set,
+  // also: (1) sync the dropdown to the matching option, (2) pre-fill the
+  // amount with max(100, bonus.minDeposit) so the bonus passes validation
+  // out of the gate — user can edit it down (validation will then warn
+  // they're below the bonus minimum). User flow: click "Depositar agora"
+  // on a bonus card → modal opens with everything ready to confirm.
   useEffect(() => {
     let cancelled = false
     api.get<{ bonuses: AvailableBonus[] }>('/bonuses/available')
@@ -121,7 +125,15 @@ export function DepositoModal({ onClose, initialBonusCode }: DepositoModalProps)
         setAvailableBonuses(data.bonuses)
         if (initialBonusCode) {
           const match = data.bonuses.find(b => b.code === initialBonusCode.toUpperCase())
-          if (match) setSelectedDropdown(match.id)
+          if (match) {
+            setSelectedDropdown(match.id)
+            // Only pre-fill amount if the user hasn't typed anything yet.
+            if (!amount) setAmount(String(Math.max(100, match.minDeposit)))
+          } else if (!amount) {
+            // Code unknown to us (shouldn't happen via the panel CTA) —
+            // default to 100 so validation has a starting point.
+            setAmount('100')
+          }
         }
       })
       .catch(() => { /* dropdown stays empty — user can still type code manually */ })
@@ -136,6 +148,13 @@ export function DepositoModal({ onClose, initialBonusCode }: DepositoModalProps)
     void applyBonusCode(initialBonusCode)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [validAmount])
+
+  function removeBonus() {
+    setBonusInput('')
+    setBonusInfo(null)
+    setBonusError('')
+    setSelectedDropdown('')
+  }
 
   // Re-validate bonus when amount changes IF a code was already applied
   // (avoids stale "Você ganha R$ X" preview while user adjusts amount).
@@ -284,6 +303,7 @@ export function DepositoModal({ onClose, initialBonusCode }: DepositoModalProps)
                                      bonusInfo={bonusInfo} bonusError={bonusError}
                                      validatingBonus={validatingBonus}
                                      onApplyManual={() => applyBonusCode(bonusInput)}
+                                     onRemoveBonus={removeBonus}
                                    />}
           {phase === 'qrcode'  && deposit && <QrStep
                                      deposit={deposit} amountNum={amountNum}
@@ -313,6 +333,7 @@ interface FormStepProps {
   bonusInfo: ValidatedBonus | null; bonusError: string
   validatingBonus: boolean
   onApplyManual: () => void
+  onRemoveBonus: () => void
 }
 
 function FormStep({
@@ -321,7 +342,7 @@ function FormStep({
   submit, canSubmit, loading, error,
   availableBonuses, selectedDropdown, onDropdownChange,
   bonusInput, setBonusInput, bonusInfo, bonusError, validatingBonus,
-  onApplyManual,
+  onApplyManual, onRemoveBonus,
 }: FormStepProps) {
   return (
     <div className="flex flex-col gap-4">
@@ -459,11 +480,20 @@ function FormStep({
 
         {/* Preview / error chip */}
         {bonusInfo && (
-          <div className="mt-2 px-3 py-2 rounded-lg bg-emerald-500/8 border border-emerald-500/25 flex items-center gap-2">
-            <Check size={13} className="text-emerald-400 flex-shrink-0" />
-            <span className="text-[11px] text-white font-semibold">
-              Você ganha <span className="text-emerald-300">R$ {formatBrl(bonusInfo.bonusAmount)}</span> em bônus
-            </span>
+          <div className="mt-2 px-3 py-2 rounded-lg bg-emerald-500/8 border border-emerald-500/25 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <Check size={13} className="text-emerald-400 flex-shrink-0" />
+              <span className="text-[11px] text-white font-semibold truncate">
+                Você ganha <span className="text-emerald-300">R$ {formatBrl(bonusInfo.bonusAmount)}</span> em bônus
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={onRemoveBonus}
+              className="text-[11px] font-semibold text-[#7c8195] hover:text-red-300 transition-colors flex-shrink-0"
+            >
+              Remover
+            </button>
           </div>
         )}
         {bonusError && (
