@@ -354,7 +354,7 @@ export default function TradingPage() {
                     {isDemo ? 'DEMO' : 'REAL'}
                   </div>
                   <div className="text-sm font-bold text-white leading-tight whitespace-nowrap">
-                    R${balance.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    R${balance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
                 <ChevronDown size={12} className={cn('text-[#8b8f9a] transition-transform flex-shrink-0', mobileAccountOpen && 'rotate-180')} />
