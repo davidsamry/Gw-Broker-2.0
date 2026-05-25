@@ -51,7 +51,7 @@ interface AvailableBonus {
 const MIN     = 60        // R$ — kept in sync with apps/api/src/deposits/schema.ts
 const MAX     = 100_000   // R$
 const POLL_MS = 3000
-const PRESETS = [100, 250, 500, 1000, 2500]
+const PRESETS = [100, 250, 500, 1000, 2500, 5000]
 
 type Phase = 'form' | 'qrcode' | 'paid' | 'expired'
 
