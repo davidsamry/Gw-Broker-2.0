@@ -22,13 +22,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {fullscreen ? (
         children
       ) : (
-        <div className="min-h-screen bg-[#0b0d12] text-white flex">
+        // Body has `h-full overflow-hidden` globally (locked for the
+        // trading chart). Admin gets its own scroll context here:
+        // `h-full overflow-y-auto` makes the wrapper take viewport
+        // height and scroll internally when pages exceed the fold.
+        // Sidebar's lg:sticky uses THIS div as its scroll context.
+        <div className="h-full overflow-y-auto bg-[#0b0d12] text-white flex">
           <AdminSidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
-          {/* Content column — plain block (NOT flex flex-col) so the page
-              scrolls naturally on long pages. The previous
-              `flex-1 flex flex-col` + `main flex-1` setup capped main to
-              the cross-axis height of the outer flex row, breaking scroll
-              on any page taller than the viewport. */}
+          {/* Content column — plain block so long pages flow + scroll. */}
           <div className="flex-1 min-w-0">
             {/* Mobile top bar — hamburger to open the drawer. lg:
                 breakpoint matches the sidebar's docking threshold so
