@@ -54,6 +54,12 @@ export interface OtcAssetState {
   // FINALIZED candle across all tfs.
   lastTickAt?:     number    // epoch ms
   lastCandleAt?:   number    // epoch ms (finalized candle openTime)
+  // Fase 5 (naturalidade) — pullback state machine. When > 0, drift is
+  // flipped (counter-trend) for the next N ticks to simulate the
+  // natural breathe-in/breathe-out pattern real markets show during
+  // trends. Not persisted in the snapshot — on restart the engine
+  // just enters a fresh pullback cycle when the FSM decides.
+  pullbackTicksRemaining?: number
 }
 
 // Output of one engine step. Worker feeds this into candle builders +

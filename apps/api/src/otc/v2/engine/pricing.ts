@@ -17,6 +17,54 @@
 
 import type { OtcAssetState, OtcRegime } from '../types.js'
 
+// Fase 5 naturalidade — set OTC_NATURAL_V2=false to disable all of
+// pullback / micro pullback / session multiplier / counter-trend
+// spike bias / strengthened liquidity bias. Useful for A/B during
+// rollout. Default ON.
+const NATURAL_V2 = process.env.OTC_NATURAL_V2 !== 'false'
+
+// Per-tick chance of starting a "pullback" cycle during a trend.
+// 0.005 = 0.5%, so ~1 pullback per 200 ticks (~20s) during trending
+// regimes. Lateral regimes never trigger pullbacks (no trend to
+// pull back against).
+const PULLBACK_TRIGGER_CHANCE  = 0.005
+// Pullback duration range (ticks). 10-30 ticks = 1-3 seconds of
+// counter-trend drift.
+const PULLBACK_MIN_TICKS       = 10
+const PULLBACK_MAX_TICKS       = 30
+// During a pullback, drift is flipped and amplified to make the
+// counter-move visible (1.5× the regime's normal drift, negated).
+const PULLBACK_DRIFT_MULT      = -1.5
+
+// Per-tick chance of a single-tick "micro pullback" (only counts
+// when not already inside a pullback). 1% = ~6 micro pullbacks per
+// 60s candle. Adds breath to otherwise-straight trend lines without
+// adding noise.
+const MICRO_PULLBACK_CHANCE    = 0.01
+const MICRO_PULLBACK_MULT      = -0.4    // soft counter-trend
+
+// Counter-trend bias for the random spike. 70% of spikes during
+// trends go AGAINST the trend, which is what creates the natural
+// "rejection wick" pattern (price tests a level, gets pushed back).
+const COUNTER_TREND_SPIKE_PROB = 0.7
+
+// Boost the existing liquidity-pressure bias weight. Was 0.5 (too
+// subtle to see); 1.0 doubles it but pressure is already clamped
+// to [0.3, 0.7] so max contribution is ±0.4 × effectiveVol.
+const LIQUIDITY_BIAS_WEIGHT    = 1.0
+
+// Session-based volatility multiplier — rough approximation of real
+// market activity windows. Helps the chart "feel" different at
+// different times of day rather than looking the same 24/7.
+export function sessionVolMultiplier(now: Date = new Date()): number {
+  const hour = now.getUTCHours()
+  if (hour >= 13 && hour < 17) return 1.4   // NY session (peak)
+  if (hour >= 7  && hour < 13) return 1.2   // London session
+  if (hour >= 17 && hour < 22) return 0.8   // post-NY tail
+  if (hour >= 0  && hour < 6)  return 0.7   // Asian (low)
+  return 1.0                                 // transition zones
+}
+
 // ── Regime parameters ──────────────────────────────────────────────────
 interface RegimeParams {
   driftPerTick:  number
@@ -108,9 +156,12 @@ export const REGIME_PARAMS: Record<OtcRegime, RegimeParams> = {
     driftPerTick: 0,
     volMultiplier: 0.6,
     durMinMs: 30_000, durMaxMs: 90_000,
+    // Fase 5: EXPANSION weight bumped 20→35 so compression more
+    // reliably leads to a visible breakout. Compression-then-
+    // expansion is a textbook market pattern; engine should reflect it.
     transitions: {
-      LATERAL: 35, COMPRESSION: 15, EXPANSION: 20,
-      LOW_VOL: 15, TREND_UP_WEAK: 7, TREND_DOWN_WEAK: 8,
+      LATERAL: 25, COMPRESSION: 10, EXPANSION: 35,
+      LOW_VOL: 10, TREND_UP_WEAK: 10, TREND_DOWN_WEAK: 10,
     },
   },
   EXPANSION: {
@@ -169,37 +220,72 @@ export function stepLiquidity(s: OtcAssetState, rand: () => number = Math.random
 // ── Per-tick price step ────────────────────────────────────────────────
 // price_t+1 = price_t × (1 + drift + reversion + shock + liquidityBias + spike)
 // then EMA smoothed and clamped.
+//
+// Fase 5 layered on top of the basic random walk:
+//   • Pullback FSM:    1-3s counter-trend bursts ~0.5%/tick during trends
+//   • Micro pullback:  single-tick soft counter-move, ~1%/tick
+//   • Session mult:    UTC-hour-driven vol bump (NY peak, Asian low)
+//   • Spike bias:      70% of spikes go counter-trend → rejection wicks
+//   • Liquidity bias:  weight bumped 0.5 → 1.0 (still pressure-clamped)
+//
+// All bounded by the existing clamp [seed*0.5, seed*2]. Disabling via
+// OTC_NATURAL_V2=false reverts to plain random walk for A/B testing.
 export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): number {
   const params = REGIME_PARAMS[s.regime]
+  const trendDir = params.driftPerTick > 0 ? 1 : params.driftPerTick < 0 ? -1 : 0
+
+  // ── Pullback FSM (overrides drift for the pullback duration) ─────
+  let effectiveDriftMult = 1   // applied to params.driftPerTick
+  if (NATURAL_V2 && trendDir !== 0) {
+    if (s.pullbackTicksRemaining && s.pullbackTicksRemaining > 0) {
+      effectiveDriftMult = PULLBACK_DRIFT_MULT  // counter-trend, amplified
+      s.pullbackTicksRemaining--
+    } else if (rand() < PULLBACK_TRIGGER_CHANCE) {
+      // Start a new pullback. First tick of it runs immediately.
+      s.pullbackTicksRemaining = PULLBACK_MIN_TICKS +
+        Math.floor(rand() * (PULLBACK_MAX_TICKS - PULLBACK_MIN_TICKS))
+      effectiveDriftMult = PULLBACK_DRIFT_MULT
+      s.pullbackTicksRemaining--
+    } else if (rand() < MICRO_PULLBACK_CHANCE) {
+      // Single-tick soft counter-move. Doesn't compound into pullback.
+      effectiveDriftMult = MICRO_PULLBACK_MULT
+    }
+  }
 
   // trendBias max ±1 → max ±0.000005 per tick = ±0.3%/min — same
   // scale as a STRONG regime drift, so a slammed bias has noticeable
   // but bounded effect, not an instant runaway.
-  const drift        = params.driftPerTick + s.trendBias * 0.000005
-  const effectiveVol = s.config.volatilityBase * params.volMultiplier * s.volume
-  // Reversion was -0.0008 (strong snap-back). At -0.0002 it still
-  // anchors the price to seed over minutes/hours without producing
-  // the violent reversion candles we saw post-deploy when the engine
-  // restarted far from seed.
+  const drift = params.driftPerTick * effectiveDriftMult + s.trendBias * 0.000005
+
+  // ── Session vol multiplier ───────────────────────────────────────
+  const sessionMult = NATURAL_V2 ? sessionVolMultiplier() : 1
+  const effectiveVol = s.config.volatilityBase * params.volMultiplier * s.volume * sessionMult
+
+  // Reversion anchors the price to seed over minutes/hours.
   const reversion    = -0.0002 * (s.price - s.config.seedPrice) / s.config.seedPrice
   const shock        = gaussian(0, effectiveVol, rand)
-  const liquidityBias = 0.5 * (s.buyPressure - s.sellPressure) * effectiveVol
-  // Spike: rare news-event-style discontinuity. Frequency cut in half
-  // (0.001 → 0.0005) and magnitude halved (3× → 1.5×) so spikes are
-  // visible but no longer dominate the chart. Disabled during the
-  // boot grace window so the first ticks after restart never introduce
-  // a discontinuity that would look like a deploy-time gap to the user.
-  const spike        = !s.bootGrace && rand() < 0.0005
-    ? (rand() > 0.5 ? 1 : -1) * 1.5 * effectiveVol
-    : 0
+  // Liquidity bias — stronger weight under NATURAL_V2 to make
+  // pressure differentials visible in the price action.
+  const liqWeight     = NATURAL_V2 ? LIQUIDITY_BIAS_WEIGHT : 0.5
+  const liquidityBias = liqWeight * (s.buyPressure - s.sellPressure) * effectiveVol
+
+  // Spike — rare news-event discontinuity. NATURAL_V2 biases direction
+  // 70% counter-trend during trends (rejection wick pattern). Disabled
+  // during the boot grace window.
+  let spike = 0
+  if (!s.bootGrace && rand() < 0.0005) {
+    const counterTrend = NATURAL_V2 && trendDir !== 0 && rand() < COUNTER_TREND_SPIKE_PROB
+    const dir = counterTrend ? -trendDir : (rand() > 0.5 ? 1 : -1)
+    spike = dir * 1.5 * effectiveVol
+  }
 
   const rawNext = s.price * (1 + drift + reversion + shock + liquidityBias + spike)
   // Catastrophic protection — never wander beyond half/double the seed.
   const clamped = clamp(rawNext, s.config.seedPrice * 0.5, s.config.seedPrice * 2)
 
-  // EMA smoothing (alpha = 0.3) — consecutive ticks are correlated, which
-  // is what makes the chart line look like a market chart instead of TV
-  // static.
+  // EMA smoothing (alpha = 0.3) — consecutive ticks are correlated,
+  // which is what makes the chart line look like a market chart
+  // instead of TV static.
   const smoothed = 0.3 * clamped + 0.7 * s.smoothedPrice
 
   s.price         = clamped
