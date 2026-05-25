@@ -24,10 +24,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       ) : (
         <div className="min-h-screen bg-[#0b0d12] text-white flex">
           <AdminSidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
-          <div className="flex-1 min-w-0 flex flex-col">
-            {/* Mobile top bar — hamburger to open the drawer. lg: breakpoint
-                matches the sidebar's docking threshold so the bar appears
-                exactly when the drawer hides. */}
+          {/* Content column — plain block (NOT flex flex-col) so the page
+              scrolls naturally on long pages. The previous
+              `flex-1 flex flex-col` + `main flex-1` setup capped main to
+              the cross-axis height of the outer flex row, breaking scroll
+              on any page taller than the viewport. */}
+          <div className="flex-1 min-w-0">
+            {/* Mobile top bar — hamburger to open the drawer. lg:
+                breakpoint matches the sidebar's docking threshold so
+                the bar appears exactly when the drawer hides. */}
             <header className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 h-14 bg-[#0f1117] border-b border-[#1f232e]">
               <button
                 onClick={() => setMobileOpen(true)}
@@ -43,7 +48,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 <span className="text-sm font-bold text-white">Admin Panel</span>
               </div>
             </header>
-            <main className="flex-1 min-w-0">{children}</main>
+            <main className="min-w-0">{children}</main>
           </div>
         </div>
       )}
