@@ -96,29 +96,30 @@ export default function BonusAdminPage() {
   const inactive = total - active
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 md:p-6 max-w-7xl mx-auto">
+      {/* Header — stacks vertically on mobile so the CTA isn't squashed
+          against the title. */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
             <Gift size={18} className="text-emerald-400" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h1 className="text-lg font-bold text-white">Bônus</h1>
             <p className="text-xs text-[#8b8f9a]">Gerencie os códigos de bônus para depósitos</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={() => load()}
             className="h-9 px-3 rounded-lg bg-[#1f232e] border border-[#2a2e3b] text-xs text-[#8b8f9a] hover:text-white hover:border-[#3a4055] flex items-center gap-1.5"
           >
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-            Atualizar
+            <span className="hidden sm:inline">Atualizar</span>
           </button>
           <button
             onClick={() => setCreating(true)}
-            className="h-9 px-4 rounded-lg bg-gradient-to-b from-emerald-500 to-emerald-600 text-xs font-bold text-white shadow-[0_2px_10px_-2px_rgba(16,185,129,0.5)] hover:-translate-y-px transition-transform flex items-center gap-1.5"
+            className="flex-1 sm:flex-initial h-9 px-4 rounded-lg bg-gradient-to-b from-emerald-500 to-emerald-600 text-xs font-bold text-white shadow-[0_2px_10px_-2px_rgba(16,185,129,0.5)] hover:-translate-y-px transition-transform flex items-center justify-center gap-1.5"
           >
             <Plus size={13} strokeWidth={3} />
             Novo Bônus
@@ -127,7 +128,7 @@ export default function BonusAdminPage() {
       </div>
 
       {/* Counters */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-6">
         <Counter label="Total de bônus" value={total}   color="emerald" />
         <Counter label="Ativos"          value={active}  color="emerald" />
         <Counter label="Inativos"        value={inactive} color="muted"  />
@@ -139,17 +140,20 @@ export default function BonusAdminPage() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="rounded-xl border border-[#1f232e] bg-[#13161e] overflow-hidden">
-        <div className="grid grid-cols-[1fr_120px_100px_120px_100px_100px_80px] gap-2 px-4 py-3 border-b border-[#1f232e] text-[10px] font-bold uppercase tracking-wider text-[#8b8f9a]">
-          <div>Código</div>
-          <div>Tipo</div>
-          <div>Valor</div>
-          <div>Depósito Mín.</div>
-          <div>Rollover</div>
-          <div>Status</div>
-          <div className="text-right">Ações</div>
-        </div>
+      {/* Table — wraps in overflow-x-auto so narrow screens get horizontal
+          scroll instead of squishing the columns. Min width keeps columns
+          from collapsing into each other. */}
+      <div className="rounded-xl border border-[#1f232e] bg-[#13161e] overflow-x-auto">
+        <div className="min-w-[760px]">
+          <div className="grid grid-cols-[1fr_120px_100px_120px_100px_100px_80px] gap-2 px-4 py-3 border-b border-[#1f232e] text-[10px] font-bold uppercase tracking-wider text-[#8b8f9a]">
+            <div>Código</div>
+            <div>Tipo</div>
+            <div>Valor</div>
+            <div>Depósito Mín.</div>
+            <div>Rollover</div>
+            <div>Status</div>
+            <div className="text-right">Ações</div>
+          </div>
 
         {loading && bonuses.length === 0 ? (
           <div className="px-4 py-10 text-center text-sm text-[#8b8f9a]">
@@ -240,6 +244,7 @@ export default function BonusAdminPage() {
             </div>
           ))
         )}
+        </div>
       </div>
 
       {(creating || editing) && (

@@ -45,9 +45,12 @@ const MENU: MenuItem[] = [
 interface AdminSidebarProps {
   /** Controls the off-canvas drawer on mobile. Ignored at lg+ where the sidebar is always docked. */
   mobileOpen?: boolean
-  onClose?: () => void
+  onClose?:    () => void
 }
 
+// Off-canvas drawer < lg, docked column at lg+. Backdrop renders below the
+// drawer on mobile so a tap outside closes it. Tapping a menu link auto-
+// closes the drawer too via onClose.
 export function AdminSidebar({ mobileOpen = false, onClose }: AdminSidebarProps) {
   const pathname = usePathname() ?? ''
 

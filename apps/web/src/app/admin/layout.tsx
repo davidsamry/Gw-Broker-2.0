@@ -15,7 +15,6 @@ const FULLSCREEN_PATHS = ['/admin/login', '/admin/setup-2fa']
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname   = usePathname() ?? ''
   const fullscreen = FULLSCREEN_PATHS.includes(pathname)
-
   const [mobileOpen, setMobileOpen] = useState(false)
 
   return (
@@ -26,7 +25,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="min-h-screen bg-[#0b0d12] text-white flex">
           <AdminSidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
           <div className="flex-1 min-w-0 flex flex-col">
-            {/* Mobile top bar — hamburger to open the drawer */}
+            {/* Mobile top bar — hamburger to open the drawer. lg: breakpoint
+                matches the sidebar's docking threshold so the bar appears
+                exactly when the drawer hides. */}
             <header className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 h-14 bg-[#0f1117] border-b border-[#1f232e]">
               <button
                 onClick={() => setMobileOpen(true)}
