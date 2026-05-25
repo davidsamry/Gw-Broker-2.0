@@ -72,10 +72,12 @@ function generateHistorical(
     const close     = price * (1 + bodyShock)
 
     // Wicks: half-magnitude shocks on either side, positive-only so they
-    // always extend BEYOND the body. Gives the random-walk feel without
-    // letting wicks dominate.
-    const hiExt = Math.abs(gaussian()) * candleStd * 0.5
-    const loExt = Math.abs(gaussian()) * candleStd * 0.5
+    // extend BEYOND the body when present. Fase M4 — 20% of the time
+    // the body IS the extreme on that side (no wick) — gives an
+    // asymmetric, more natural look matching real-market candle patterns
+    // where one side often dominates.
+    const hiExt = Math.random() < 0.2 ? 0 : Math.abs(gaussian()) * candleStd * 0.5
+    const loExt = Math.random() < 0.2 ? 0 : Math.abs(gaussian()) * candleStd * 0.5
     const high  = Math.max(open, close) * (1 + hiExt)
     const low   = Math.min(open, close) * (1 - loExt)
 

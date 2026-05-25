@@ -268,7 +268,36 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
   // is -0.0004/tick = -0.04%/tick = -24%/min back toward seed —
   // dominates any single shock and any STRONG regime drift, while still
   // leaving room for visible candle bodies during normal regimes.
-  const reversion    = -0.0004 * (s.price - s.config.seedPrice) / s.config.seedPrice
+  const distRatio = (s.price - s.config.seedPrice) / s.config.seedPrice
+  const reversion = -0.0004 * distRatio
+
+  // Fase M4 — soft barrier. The hard clamp at [seed×0.5, seed×2]
+  // creates an ugly visual "stick" when price runs into it (the BTC
+  // seedPrice × 0.5 = 34001 incident this week). Instead of relying
+  // only on the hard cap, layer in a progressive force that engages
+  // when |distRatio| > 0.3 and grows quadratically toward the clamp.
+  //
+  //   distRatio   barrier per tick    per-second pull
+  //   0.30        0                   0
+  //   0.40        ±0.0005             ±0.5%/sec
+  //   0.45        ±0.001125           ±1.1%/sec
+  //   0.50        ±0.002              ±2%/sec   ← dominates any shock
+  //
+  // The hard clamp stays as a safety net but should now rarely engage
+  // in normal operation. Smooth onset (= 0 at boundary) prevents the
+  // chart from "jolting" the moment the barrier activates.
+  let softBarrier = 0
+  if (NATURAL_V2) {
+    const SOFT_BARRIER_THRESHOLD = 0.3
+    const SOFT_BARRIER_SCALE     = 0.05
+    const absDist = Math.abs(distRatio)
+    if (absDist > SOFT_BARRIER_THRESHOLD) {
+      const over = absDist - SOFT_BARRIER_THRESHOLD
+      const sign = distRatio > 0 ? 1 : -1
+      softBarrier = -sign * over * over * SOFT_BARRIER_SCALE
+    }
+  }
+
   const shock        = gaussian(0, effectiveVol, rand)
   // Liquidity bias — stronger weight under NATURAL_V2 to make
   // pressure differentials visible in the price action.
@@ -285,8 +314,10 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
     spike = dir * 1.5 * effectiveVol
   }
 
-  const rawNext = s.price * (1 + drift + reversion + shock + liquidityBias + spike)
+  const rawNext = s.price * (1 + drift + reversion + softBarrier + shock + liquidityBias + spike)
   // Catastrophic protection — never wander beyond half/double the seed.
+  // With M4 soft barrier, this should rarely engage in normal operation
+  // (it kicks in only on extreme shocks the soft barrier couldn't catch).
   const clamped = clamp(rawNext, s.config.seedPrice * 0.5, s.config.seedPrice * 2)
 
   // EMA smoothing (alpha = 0.3) — consecutive ticks are correlated,

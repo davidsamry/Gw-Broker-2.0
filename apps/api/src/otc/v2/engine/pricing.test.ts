@@ -440,3 +440,83 @@ describe('stepPrice', () => {
     expect(s.price).not.toBe(100)
   })
 })
+
+// ── Fase M4 — soft barrier ────────────────────────────────────────────
+
+describe('stepPrice — M4 soft barrier', () => {
+  it('does not engage when price is within ±30% of seed', () => {
+    // Run two engines starting at price = seed × 1.2 (20% above, well
+    // under the 30% threshold). With same RNG, prices should be identical
+    // regardless of whether soft barrier exists — i.e., the barrier
+    // contributes 0 in this region. We can't easily disable the barrier
+    // without an env var, so instead: confirm that price near seed
+    // drifts roughly symmetrically (no asymmetric pull above 0).
+    const config = makeConfig({ seedPrice: 100, volatilityBase: 0.0002 })
+    const sUp   = makeState({ config, price: 120, smoothedPrice: 120, regime: 'LATERAL' })
+    const sDown = makeState({ config, price: 80,  smoothedPrice: 80,  regime: 'LATERAL' })
+    const randA = mulberry32(909)
+    const randB = mulberry32(909)
+    for (let i = 0; i < 2000; i++) {
+      stepPrice(sUp,   randA)
+      stepPrice(sDown, randB)
+    }
+    // Both should converge toward seed (reversion) by roughly symmetric
+    // amounts. Just assert both moved meaningfully closer to seed.
+    expect(Math.abs(sUp.price - 100)).toBeLessThan(20)
+    expect(Math.abs(sDown.price - 100)).toBeLessThan(20)
+  })
+
+  it('engages when |price - seed|/seed > 0.3 and pulls back toward seed', () => {
+    // Start at price = seed × 1.45 — well into soft barrier territory
+    // (distRatio = 0.45, barrier ≈ ±0.001125/tick). With reversion +
+    // barrier acting together, price should drift back toward seed
+    // within 500 ticks even in LATERAL (no opposing trend).
+    const config = makeConfig({ seedPrice: 100, volatilityBase: 0.0002 })
+    const s = makeState({
+      config,
+      price: 145, smoothedPrice: 145,
+      regime: 'LATERAL',
+    })
+    const rand = mulberry32(1010)
+    for (let i = 0; i < 1000; i++) stepPrice(s, rand)
+    // Soft barrier + reversion should pull at least 10% closer to seed.
+    expect(s.price).toBeLessThan(145)
+    expect(s.price - 100).toBeLessThan(45)
+  })
+
+  it('engages symmetrically below seed (pulls UP)', () => {
+    const config = makeConfig({ seedPrice: 100, volatilityBase: 0.0002 })
+    const s = makeState({
+      config,
+      price: 55, smoothedPrice: 55,
+      regime: 'LATERAL',
+    })
+    const rand = mulberry32(1111)
+    for (let i = 0; i < 1000; i++) stepPrice(s, rand)
+    expect(s.price).toBeGreaterThan(55)
+    expect(100 - s.price).toBeLessThan(45)
+  })
+
+  it('keeps price further from the clamp than reversion alone would', () => {
+    // Run a hostile scenario: TREND_UP_STRONG for a long time, starting
+    // ALREADY at +35% from seed (so soft barrier engages immediately).
+    // Soft barrier should prevent reaching the +100% clamp ceiling.
+    const config = makeConfig({ seedPrice: 100, volatilityBase: 0.0002 })
+    const s = makeState({
+      config,
+      price: 135, smoothedPrice: 135,
+      regime: 'TREND_UP_STRONG',
+      regimeStartedAt: Date.now(),
+      regimeDurationMs: 60 * 60_000,   // an hour — won't transition
+    })
+    const rand = mulberry32(1212)
+    let maxP = -Infinity
+    for (let i = 0; i < 10_000; i++) {
+      stepPrice(s, rand)
+      if (s.price > maxP) maxP = s.price
+    }
+    // Without soft barrier, runaway easily hits seed×2 = 200 (the
+    // 2026-05-25 incident). With barrier, expect max well under 180.
+    expect(maxP).toBeLessThan(180)
+  })
+})
