@@ -318,14 +318,29 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
         expiresInSeconds: expiresInSec,
       })
 
-      const operationId: string = res.data?.operation?.id ?? res.data?.id ?? clientTradeId
+      const operationId:   string = res.data?.operation?.id ?? res.data?.id ?? clientTradeId
+      // Authoritative server expiresAt — anchor the timer to wall-clock,
+      // not "duration since now()", so we don't drift by the POST latency.
+      const serverOp:      any    = res.data?.operation ?? res.data
+      const serverExpiryMs: number = serverOp?.expiresAt
+        ? new Date(serverOp.expiresAt).getTime()
+        : (Date.now() + expiresInSec * 1000)
+      const delayMs = Math.max(0, serverExpiryMs - Date.now())
 
-      // Schedule result popup after expiry — GETs the real operationId, but
-      // emits chart events keyed by clientTradeId (matches the OPEN above).
+      // Schedule result popup at the EXACT server expiry. GETs the real
+      // operationId, but emits chart events keyed by clientTradeId
+      // (matches the OPEN above). If the first GET races the backend
+      // resolver and returns status='OPEN', retry up to 5× × 300ms —
+      // covers the worst case even though backend now JIT-resolves.
       setTimeout(async () => {
         try {
-          const { data } = await api.get(`/operations/${operationId}`)
-          const operation = data?.operation ?? data
+          let operation: any = null
+          for (let attempt = 0; attempt < 6; attempt++) {
+            const { data } = await api.get(`/operations/${operationId}`)
+            operation = data?.operation ?? data
+            if (operation?.status === 'WON' || operation?.status === 'LOST' || operation?.status === 'CANCELLED') break
+            await new Promise(r => setTimeout(r, 300))
+          }
           const won = operation?.status === 'WON'
           const profit = won ? parseFloat(operation?.profit ?? '0') : 0
 
@@ -374,7 +389,7 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
           setOpenTrades(prev => prev.filter(t => t.id !== clientTradeId))
           setTimeout(() => onTradePlaced?.(null), 4000)
         }
-      }, expiresInSec * 1000)
+      }, delayMs)
 
     } catch (err: any) {
       // Server rejected — roll back the optimistic open trade + marker + refund.
