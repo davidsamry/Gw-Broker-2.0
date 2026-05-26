@@ -11,7 +11,10 @@ const COUNTRIES = [
   'Argentina', 'Chile', 'Colômbia', 'México', 'Peru',
 ]
 
-const CURRENCIES = ['BRL', 'USD', 'EUR', 'GBP', 'ARS', 'MXN']
+// Only BRL accepted at this stage of the rollout. Other currencies were
+// listed during early mocks but the deposit (PIX) + payout pipelines are
+// BRL-only. Add entries here when those rails support new currencies.
+const CURRENCIES = ['BRL']
 
 export default function LoginPage() {
   // Initial tab honours ?tab=register so marketing/landing pages can deep-link
