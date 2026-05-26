@@ -66,23 +66,52 @@ export async function listUsers(params: ListUsersParams): Promise<UserListRespon
     ? Prisma.sql`WHERE ${Prisma.join(where, ' AND ')}`
     : Prisma.empty
 
+  // Two-stage query — page + filter the users table FIRST (cheap, indexed),
+  // then attach balances + op counts via lateral subqueries that run only
+  // for the returned 20 rows. The old single-query approach did
+  // `LEFT JOIN operations` BEFORE the LIMIT, exploding cardinality to
+  // `users × ops_per_user` rows before the GROUP BY collapsed them again
+  // — slow + scaled badly with op volume.
+  //
+  // count(*) for pagination stays as a separate plain-FROM query so it
+  // doesn't pay the JOIN cost either.
   const [rows, countRows] = await Promise.all([
     prisma.$queryRaw<UserListRow[]>`
-      SELECT
-        u.id, u.name, u.email, u.role::text AS role, u."kycStatus"::text AS "kycStatus",
-        u.blocked, u."twoFactorEnabled", u."createdAt",
-        COALESCE(MAX(CASE WHEN a.type = 'REAL'::"AccountType" THEN a.balance END), 0) AS "realBalance",
-        COALESCE(MAX(CASE WHEN a.type = 'DEMO'::"AccountType" THEN a.balance END), 0) AS "demoBalance",
-        COUNT(o.id)::int AS "totalOps",
-        MAX(GREATEST(o."openedAt", o."closedAt"))   AS "lastActivity"
-      FROM users u
-      LEFT JOIN accounts   a ON a."userId" = u.id
-      LEFT JOIN operations o ON o."accountId" = a.id
-      ${whereSql}
-      GROUP BY u.id
-      ORDER BY u."createdAt" DESC
-      LIMIT ${pageSize}
-      OFFSET ${offset}
+      WITH page_users AS (
+        SELECT u.id, u.name, u.email, u.role::text AS role,
+               u."kycStatus"::text AS "kycStatus",
+               u.blocked, u."twoFactorEnabled", u."createdAt"
+        FROM users u
+        ${whereSql}
+        ORDER BY u."createdAt" DESC
+        LIMIT ${pageSize}
+        OFFSET ${offset}
+      )
+      SELECT pu.*,
+        COALESCE((
+          SELECT a.balance FROM accounts a
+          WHERE a."userId" = pu.id AND a.type = 'REAL'::"AccountType"
+          LIMIT 1
+        ), 0) AS "realBalance",
+        COALESCE((
+          SELECT a.balance FROM accounts a
+          WHERE a."userId" = pu.id AND a.type = 'DEMO'::"AccountType"
+          LIMIT 1
+        ), 0) AS "demoBalance",
+        COALESCE((
+          SELECT COUNT(*)::int
+          FROM operations o
+          JOIN accounts a ON a.id = o."accountId"
+          WHERE a."userId" = pu.id
+        ), 0) AS "totalOps",
+        (
+          SELECT MAX(GREATEST(o."openedAt", o."closedAt"))
+          FROM operations o
+          JOIN accounts a ON a.id = o."accountId"
+          WHERE a."userId" = pu.id
+        ) AS "lastActivity"
+      FROM page_users pu
+      ORDER BY pu."createdAt" DESC
     `,
     prisma.$queryRaw<Array<{ total: bigint }>>`
       SELECT COUNT(*)::bigint AS total FROM users u ${whereSql}
