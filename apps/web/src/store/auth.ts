@@ -170,9 +170,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (cachedUser) {
       set({ user: cachedUser, token, loading: false })
     }
-    // Also restore operations cache so the FECHADAS list + Histórico paint
+    // Also restore operations / withdrawals / transactions caches so the
+    // FECHADAS list + Histórico + Retirada + Transações tabs all paint
     // instantly. Same SWR contract — /auth/me below overwrites on success.
     useOperationsStore.getState().loadFromCache()
+    useWithdrawalsStore.getState().loadFromCache()
+    useTransactionsStore.getState().loadFromCache()
 
     try {
       const { data } = await api.get('/auth/me')
