@@ -142,11 +142,18 @@ export async function getUserDetail(userId: string) {
     twoFactorEnabled: boolean
     nickname: string | null; lastName: string | null; birthDate: Date | null
     cpf: string | null; phone: string | null; country: string | null; address: string | null
+    // Admin-edit-drawer fields (migration 20260526000000_admin_user_edit_fields)
+    isFake: boolean; copyTraderEnabled: boolean
+    payoutOverrideForex: number | null; payoutOverrideOtc: number | null; payoutOverrideCrypto: number | null
+    canTradeForex: boolean; canTradeOtc: boolean; canTradeCrypto: boolean
     createdAt: Date; updatedAt: Date
   }>>`
     SELECT id, name, email, role::text AS role, "kycStatus"::text AS "kycStatus",
            blocked, "blockedAt", "blockedReason", "twoFactorEnabled",
            nickname, "lastName", "birthDate", cpf, phone, country, address,
+           "isFake", "copyTraderEnabled",
+           "payoutOverrideForex", "payoutOverrideOtc", "payoutOverrideCrypto",
+           "canTradeForex", "canTradeOtc", "canTradeCrypto",
            "createdAt", "updatedAt"
     FROM users
     WHERE id = ${userId}
@@ -156,8 +163,10 @@ export async function getUserDetail(userId: string) {
   if (!user) throw new Error('USER_NOT_FOUND')
 
   const [accounts, operations, transactions, withdrawals] = await Promise.all([
-    prisma.$queryRaw<Array<{ id: string; type: string; balance: any; currency: string; createdAt: Date }>>`
-      SELECT id, type::text AS type, balance, currency, "createdAt"
+    prisma.$queryRaw<Array<{ id: string; type: string; balance: any; bonusBalance: any; rolloverRequired: any; rolloverProgress: any; currency: string; createdAt: Date }>>`
+      SELECT id, type::text AS type, balance,
+             "bonusBalance", "rolloverRequired", "rolloverProgress",
+             currency, "createdAt"
       FROM accounts WHERE "userId" = ${userId}
     `,
     prisma.$queryRaw<any[]>`
@@ -191,7 +200,13 @@ export async function getUserDetail(userId: string) {
       ...user,
       birthDate: user.birthDate ? new Date(user.birthDate).toISOString().slice(0, 10) : null,
     },
-    accounts: accounts.map((a) => ({ ...a, balance: decimalToString(a.balance) })),
+    accounts: accounts.map((a) => ({
+      ...a,
+      balance:          decimalToString(a.balance),
+      bonusBalance:     decimalToString(a.bonusBalance),
+      rolloverRequired: decimalToString(a.rolloverRequired),
+      rolloverProgress: decimalToString(a.rolloverProgress),
+    })),
     operations: operations.map((o) => ({
       ...o,
       amount:     decimalToString(o.amount),
@@ -204,12 +219,30 @@ export async function getUserDetail(userId: string) {
   }
 }
 
-// ── Block / unblock + role ────────────────────────────────────────────────
+// ── Block / unblock + role + admin-edit-drawer fields ─────────────────────
 
 export interface UpdateUserAdminInput {
+  // Existing admin actions
   role?:          'USER' | 'ADMIN'
   blocked?:       boolean
   blockedReason?: string | null
+  // Profile fields editable from the drawer
+  name?:          string
+  lastName?:      string | null
+  email?:         string
+  cpf?:           string | null
+  phone?:         string | null
+  // Admin toggles
+  isFake?:                Boolean
+  copyTraderEnabled?:     Boolean
+  // Per-user payout overrides (null = clear, use asset default)
+  payoutOverrideForex?:   number | null
+  payoutOverrideOtc?:     number | null
+  payoutOverrideCrypto?:  number | null
+  // Per-user market permissions
+  canTradeForex?:         Boolean
+  canTradeOtc?:           Boolean
+  canTradeCrypto?:        Boolean
 }
 
 export async function updateUserByAdmin(
@@ -222,7 +255,9 @@ export async function updateUserByAdmin(
     throw new Error('SELF_LOCKOUT_PROTECTED')
   }
 
-  // Build SET fragments.
+  // Build SET fragments. Every supported field follows the same pattern:
+  // include the SQL only when the caller explicitly passed the key, so a
+  // PATCH that touches "name" alone doesn't clobber unrelated columns.
   const sets: Prisma.Sql[] = []
   if (input.role !== undefined) {
     sets.push(Prisma.sql`role = ${input.role}::"UserRole"`)
@@ -236,19 +271,105 @@ export async function updateUserByAdmin(
       ? Prisma.sql`"blockedReason" = ${input.blockedReason}`
       : Prisma.sql`"blockedReason" = NULL`)
   }
+  // Profile fields
+  if (input.name      !== undefined) sets.push(Prisma.sql`name = ${input.name}`)
+  if (input.lastName  !== undefined) sets.push(Prisma.sql`"lastName" = ${input.lastName}`)
+  if (input.email     !== undefined) sets.push(Prisma.sql`email = ${input.email}`)
+  if (input.cpf       !== undefined) sets.push(Prisma.sql`cpf = ${input.cpf}`)
+  if (input.phone     !== undefined) sets.push(Prisma.sql`phone = ${input.phone}`)
+  // Admin toggles
+  if (input.isFake             !== undefined) sets.push(Prisma.sql`"isFake" = ${input.isFake}`)
+  if (input.copyTraderEnabled  !== undefined) sets.push(Prisma.sql`"copyTraderEnabled" = ${input.copyTraderEnabled}`)
+  // Payout overrides — DB CHECK constraint validates 0-100, NULL allowed.
+  if (input.payoutOverrideForex   !== undefined) sets.push(Prisma.sql`"payoutOverrideForex" = ${input.payoutOverrideForex}`)
+  if (input.payoutOverrideOtc     !== undefined) sets.push(Prisma.sql`"payoutOverrideOtc" = ${input.payoutOverrideOtc}`)
+  if (input.payoutOverrideCrypto  !== undefined) sets.push(Prisma.sql`"payoutOverrideCrypto" = ${input.payoutOverrideCrypto}`)
+  // Market permissions
+  if (input.canTradeForex   !== undefined) sets.push(Prisma.sql`"canTradeForex" = ${input.canTradeForex}`)
+  if (input.canTradeOtc     !== undefined) sets.push(Prisma.sql`"canTradeOtc" = ${input.canTradeOtc}`)
+  if (input.canTradeCrypto  !== undefined) sets.push(Prisma.sql`"canTradeCrypto" = ${input.canTradeCrypto}`)
+
   if (sets.length === 0) return null
 
   sets.push(Prisma.sql`"updatedAt" = NOW()`)
 
+  try {
+    const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+      UPDATE users SET ${Prisma.join(sets, ', ')}
+      WHERE id = ${targetUserId}
+      RETURNING id
+    `
+    if (rows.length === 0) throw new Error('USER_NOT_FOUND')
+  } catch (err: any) {
+    // Surface the email-unique violation as a meaningful error code
+    // so the frontend can show "Email já em uso" instead of generic 500.
+    if (err?.code === 'P2002' || /unique/i.test(err?.message ?? '')) {
+      throw new Error('EMAIL_ALREADY_IN_USE')
+    }
+    throw err
+  }
+
+  // Refetch for response.
+  return getUserDetail(targetUserId)
+}
+
+// ── Bonus / rollover edit (per-account) ────────────────────────────────────
+
+export interface UpdateBonusInput {
+  // Account these values apply to. Typically the user's REAL account.
+  accountId:         string
+  bonusBalance?:     number
+  rolloverRequired?: number
+  rolloverProgress?: number
+}
+
+export async function updateUserBonus(targetUserId: string, input: UpdateBonusInput) {
+  const sets: Prisma.Sql[] = []
+  if (input.bonusBalance !== undefined) {
+    sets.push(Prisma.sql`"bonusBalance" = ${new Prisma.Decimal(input.bonusBalance)}`)
+  }
+  if (input.rolloverRequired !== undefined) {
+    sets.push(Prisma.sql`"rolloverRequired" = ${new Prisma.Decimal(input.rolloverRequired)}`)
+  }
+  if (input.rolloverProgress !== undefined) {
+    sets.push(Prisma.sql`"rolloverProgress" = ${new Prisma.Decimal(input.rolloverProgress)}`)
+  }
+  if (sets.length === 0) return null
+
+  sets.push(Prisma.sql`"updatedAt" = NOW()`)
+
+  // Defense in depth: tie the update to the targetUserId via the JOIN
+  // so a forged accountId from another user can't bypass authorization.
   const rows = await prisma.$queryRaw<Array<{ id: string }>>`
-    UPDATE users SET ${Prisma.join(sets, ', ')}
+    UPDATE accounts SET ${Prisma.join(sets, ', ')}
+    WHERE id = ${input.accountId} AND "userId" = ${targetUserId}
+    RETURNING id
+  `
+  if (rows.length === 0) throw new Error('ACCOUNT_NOT_FOUND')
+
+  return getUserDetail(targetUserId)
+}
+
+// ── Reset password ─────────────────────────────────────────────────────────
+// Admin-forced password reset. The new password is bcrypt-hashed here and
+// stored directly — same hashing used by the auth/register flow. Returns
+// success indicator; the admin is responsible for communicating the new
+// password to the user out-of-band.
+
+import { hash } from 'bcryptjs'
+
+export async function resetUserPassword(targetUserId: string, newPassword: string) {
+  if (newPassword.length < 6) throw new Error('PASSWORD_TOO_SHORT')
+
+  const hashed = await hash(newPassword, 10)
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    UPDATE users SET password = ${hashed}, "updatedAt" = NOW()
     WHERE id = ${targetUserId}
     RETURNING id
   `
   if (rows.length === 0) throw new Error('USER_NOT_FOUND')
 
-  // Refetch for response.
-  return getUserDetail(targetUserId)
+  return { ok: true }
 }
 
 // ── Balance adjustment ────────────────────────────────────────────────────

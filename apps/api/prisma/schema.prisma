@@ -182,6 +182,25 @@ model User {
   blocked          Boolean   @default(false)
   blockedAt        DateTime?
   blockedReason    String?
+  // ── Admin-side toggles ──────────────────────────────────────────────────
+  // isFake          → user is a demo/test account; doesn't affect KPIs.
+  // copyTraderEnabled → user can subscribe to a copy trader (future feature).
+  // Both default false — opt-in by admin via the edit drawer.
+  isFake             Boolean   @default(false)
+  copyTraderEnabled  Boolean   @default(false)
+  // ── Per-user payout overrides ───────────────────────────────────────────
+  // When set (non-null), the trading engine uses this % instead of the
+  // asset's default payout for that market. Null = use asset default.
+  // Range 0-100, validated on input.
+  payoutOverrideForex   Int?
+  payoutOverrideOtc     Int?
+  payoutOverrideCrypto  Int?
+  // ── Per-user market permissions ─────────────────────────────────────────
+  // Default true (legacy users keep full access). Admin can revoke a
+  // specific market for a user (KYC mismatch, compliance, etc).
+  canTradeForex    Boolean   @default(true)
+  canTradeOtc      Boolean   @default(true)
+  canTradeCrypto   Boolean   @default(true)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -198,6 +217,13 @@ model Account {
   userId    String
   type      AccountType
   balance   Decimal     @default(0) @db.Decimal(18, 2)
+  // Admin-managed bonus balance + rollover state. Independent from the
+  // BonusGrant table (that one tracks individual code redemptions); these
+  // three fields let admin set "lump-sum" values directly via the user
+  // edit drawer without needing to mint a synthetic Bonus row.
+  bonusBalance     Decimal     @default(0) @db.Decimal(18, 2)
+  rolloverRequired Decimal     @default(0) @db.Decimal(18, 2)
+  rolloverProgress Decimal     @default(0) @db.Decimal(18, 2)
   currency  String      @default("BRL")
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
