@@ -44,7 +44,7 @@ export const ASSETS: Asset[] = [
   { id: 'gbp-jpy-otc', symbol: 'GBP/JPY', label: 'GBP/JPY (OTC)', type: 'OTC', category: 'Moedas',          payout: 87, payout5min: 87, flag1: '🇬🇧', flag2: '🇯🇵', code1: 'gb', code2: 'jp', price: 198.50,   change24h: 0 },
   { id: 'btc-usd-otc', symbol: 'BTC/USD', label: 'BTC/USD (OTC)', type: 'OTC', category: 'Cripto',          payout: 82, payout5min: 82, flag1: '₿',  flag2: '🇺🇸', code1: 'crypto:btc', code2: 'us', price: 68000, change24h: 0 },
   { id: 'gold-otc',    symbol: 'GOLD',    label: 'GOLD (OTC)',    type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🥇', flag2: '🇺🇸', code1: 'asset:gold', code2: '', price: 2350,    change24h: 0 },
-  { id: 'nasdaq-otc',  symbol: 'NASDAQ',  label: 'NASDAQ (OTC)',  type: 'OTC', category: 'Ações',           payout: 78, payout5min: 78, flag1: '📊', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 18450,   change24h: 0 },
+  { id: 'nasdaq-otc',  symbol: 'NASDAQ',  label: 'NASDAQ (OTC)',  type: 'OTC', category: 'Ações',           payout: 78, payout5min: 78, flag1: '📊', flag2: '🇺🇸', code1: 'asset:nasdaq', code2: '', price: 18450,   change24h: 0 },
 
   // ── OTC v2 — expansion batch (29 new, migration 20260526020000) ─────────
   // 8 Moedas
@@ -75,14 +75,14 @@ export const ASSETS: Asset[] = [
   { id: 'natgas-otc',   symbol: 'NATGAS',   label: 'NATGAS (OTC)',   type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '🔥', flag2: '🇺🇸', code1: 'asset:natgas',   code2: '', price: 2.80,   change24h: 0 },
   { id: 'wheat-otc',    symbol: 'WHEAT',    label: 'WHEAT (OTC)',    type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '🌾', flag2: '🇺🇸', code1: 'asset:wheat',    code2: '', price: 540,    change24h: 0 },
 
-  // 7 Ações (stocks)
-  { id: 'aapl-otc',  symbol: 'AAPL',  label: 'AAPL (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🍎', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 215,  change24h: 0 },
-  { id: 'msft-otc',  symbol: 'MSFT',  label: 'MSFT (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🪟', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 425,  change24h: 0 },
-  { id: 'googl-otc', symbol: 'GOOGL', label: 'GOOGL (OTC)', type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🔵', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 170,  change24h: 0 },
-  { id: 'amzn-otc',  symbol: 'AMZN',  label: 'AMZN (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '📦', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 185,  change24h: 0 },
-  { id: 'tsla-otc',  symbol: 'TSLA',  label: 'TSLA (OTC)',  type: 'OTC', category: 'Ações', payout: 76, payout5min: 76, flag1: '🚗', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 220,  change24h: 0 },
-  { id: 'meta-otc',  symbol: 'META',  label: 'META (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🔷', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 510,  change24h: 0 },
-  { id: 'nvda-otc',  symbol: 'NVDA',  label: 'NVDA (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🟢', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 130,  change24h: 0 },
+  // 7 Ações (stocks) — Clearbit logos via stock:<ticker>
+  { id: 'aapl-otc',  symbol: 'AAPL',  label: 'AAPL (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🍎', flag2: '🇺🇸', code1: 'stock:aapl',  code2: '', price: 215,  change24h: 0 },
+  { id: 'msft-otc',  symbol: 'MSFT',  label: 'MSFT (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🪟', flag2: '🇺🇸', code1: 'stock:msft',  code2: '', price: 425,  change24h: 0 },
+  { id: 'googl-otc', symbol: 'GOOGL', label: 'GOOGL (OTC)', type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🔵', flag2: '🇺🇸', code1: 'stock:googl', code2: '', price: 170,  change24h: 0 },
+  { id: 'amzn-otc',  symbol: 'AMZN',  label: 'AMZN (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '📦', flag2: '🇺🇸', code1: 'stock:amzn',  code2: '', price: 185,  change24h: 0 },
+  { id: 'tsla-otc',  symbol: 'TSLA',  label: 'TSLA (OTC)',  type: 'OTC', category: 'Ações', payout: 76, payout5min: 76, flag1: '🚗', flag2: '🇺🇸', code1: 'stock:tsla',  code2: '', price: 220,  change24h: 0 },
+  { id: 'meta-otc',  symbol: 'META',  label: 'META (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🔷', flag2: '🇺🇸', code1: 'stock:meta',  code2: '', price: 510,  change24h: 0 },
+  { id: 'nvda-otc',  symbol: 'NVDA',  label: 'NVDA (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🟢', flag2: '🇺🇸', code1: 'stock:nvda',  code2: '', price: 130,  change24h: 0 },
 
   // ── Binance crypto (live kline WS) ──────────────────────────────────────
   { id: 'btc-usdt-binance', symbol: 'BTC/USDT', label: 'Bitcoin / USDT', type: 'Crypto', source: 'BINANCE', marketSymbol: 'BTCUSDT', category: 'Cripto', payout: 95, payout5min: 95, flag1: '₿', flag2: 'USDT', code1: 'crypto:btc', code2: 'us', price: 67420.15, change24h: 1.24 },

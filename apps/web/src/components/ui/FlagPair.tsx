@@ -1,10 +1,23 @@
-import { Coins, Droplet, Flame, Wheat } from 'lucide-react'
+import { Coins, Droplet, Flame, Wheat, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface FlagPairProps {
-  code1: string  // country code (e.g. 'us'), 'crypto:btc', or 'asset:gold'
-  code2: string  // ignored when code1 is single-asset mode
+  code1: string  // country code (e.g. 'us'), 'crypto:btc', 'asset:gold', or 'stock:aapl'
+  code2: string  // ignored when code1 is single-asset/single-stock mode
   size?: number
+}
+
+// Ticker → company domain for Clearbit logo lookup. Add a new line per
+// new stock symbol; the company's main marketing domain is what
+// Clearbit uses to fetch the official logo.
+const STOCK_DOMAINS: Record<string, string> = {
+  aapl:  'apple.com',
+  msft:  'microsoft.com',
+  googl: 'google.com',
+  amzn:  'amazon.com',
+  tsla:  'tesla.com',
+  meta:  'meta.com',
+  nvda:  'nvidia.com',
 }
 
 // ── Single-asset icon registry ───────────────────────────────────────────
@@ -25,6 +38,8 @@ const ASSET_ICONS: Record<string, {
   brent:    { Icon: Droplet, bg: 'bg-stone-900',  fg: 'text-stone-100' },
   natgas:   { Icon: Flame,   bg: 'bg-blue-600',   fg: 'text-blue-100'  },
   wheat:    { Icon: Wheat,   bg: 'bg-yellow-600', fg: 'text-yellow-50' },
+  // Indices — no company logo; use a chart icon themed by the exchange.
+  nasdaq:   { Icon: BarChart3, bg: 'bg-sky-700',   fg: 'text-sky-100'  },
 }
 
 function getImgSrc(code: string): string {
@@ -61,6 +76,41 @@ export function FlagPair({ code1, code2, size = 22 }: FlagPairProps) {
     }
     // Unknown asset key — fall through to dual-flag rendering with a
     // neutral placeholder so the row doesn't crash.
+  }
+
+  // Stock mode — render the company's official logo via Clearbit. Wraps
+  // the logo on a white circular tile so dark-themed logos and light-
+  // themed logos both pop against the panel's dark background.
+  if (code1.startsWith('stock:')) {
+    const ticker = code1.replace('stock:', '')
+    const domain = STOCK_DOMAINS[ticker]
+    if (domain) {
+      return (
+        <div
+          className="flex-shrink-0 rounded-full overflow-hidden bg-white border-2 border-[#1a1e2e] flex items-center justify-center"
+          style={{ width: size, height: size }}
+        >
+          <img
+            src={`https://logo.clearbit.com/${domain}`}
+            alt={ticker}
+            style={{
+              width:     Math.round(size * 0.82),
+              height:    Math.round(size * 0.82),
+              objectFit: 'contain',
+            }}
+            // If Clearbit ever 404s for a ticker, the broken-image icon
+            // would look worse than the blank tile — swap to a 1px
+            // transparent gif so the white circle stays clean. The
+            // ticker text right next to it identifies the asset anyway.
+            onError={(e) => {
+              const img = e.currentTarget
+              img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=='
+            }}
+          />
+        </div>
+      )
+    }
+    // Unknown stock ticker — fall through to dual-flag default.
   }
 
   // Dual-flag mode — forex pairs (us/eu, gb/jp) and crypto pairs (btc/us).
