@@ -377,8 +377,8 @@ export default function TradingPage() {
                   : <level.Icon size={18} className={cn(level.color, 'flex-shrink-0')} />
                 }
                 <div className="text-left min-w-0">
-                  <div className={cn('text-[10px] font-bold leading-tight', isDemo ? 'text-yellow-400' : 'text-green-400')}>
-                    {isDemo ? 'DEMO' : 'REAL'}
+                  <div className={cn('text-[10px] font-bold leading-tight whitespace-nowrap', isDemo ? 'text-yellow-400' : 'text-green-400')}>
+                    {isDemo ? 'CONTA DEMO' : 'CONTA REAL'}
                   </div>
                   <div className="text-sm font-bold text-white leading-tight whitespace-nowrap">
                     R${balance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
