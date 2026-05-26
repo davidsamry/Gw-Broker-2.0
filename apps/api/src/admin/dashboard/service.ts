@@ -68,11 +68,12 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
   //                                  from every KPI, P/L and chart — so
   //                                  admin can stage demo flows without
   //                                  polluting the real-money dashboard)
-  // `as any` cast: the local Prisma client may be regenerated lazily
-  // on Windows (EPERM dll lock); runtime is fine because the migration
-  // already added the column. Prod build regenerates from schema.prisma.
+  // Prisma 6 requires the explicit `is:` wrapper for to-one relation
+  // filters (no field shorthand). The `as any` lets the local TS pass
+  // even when the Prisma client hasn't been regenerated locally on
+  // Windows due to the EPERM dll-lock issue.
   const realNonFakeAccount: any = {
-    account: { type: 'REAL', user: { isFake: false } },
+    account: { type: 'REAL', user: { is: { isFake: false } } },
   }
 
   const [
@@ -103,7 +104,7 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
     // KPI: total REAL balance (all-time, non-fake users only)
     prisma.account.aggregate({
       _sum: { balance: true },
-      where: { type: 'REAL', user: { isFake: false } as any },
+      where: { type: 'REAL', user: { is: { isFake: false } } as any },
     }),
     // KPI: total BONUS credited to REAL accounts (all-time, non-fake)
     prisma.transaction.aggregate({
