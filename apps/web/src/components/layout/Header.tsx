@@ -1,12 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { Bell, ChevronDown, Plus, X, GraduationCap, Gem } from 'lucide-react'
+import { Bell, ChevronDown, Plus, X, GraduationCap } from 'lucide-react'
 import { type Asset } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { AccountDropdown } from './AccountDropdown'
 import { Logo } from './Logo'
 import { FlagPair } from '@/components/ui/FlagPair'
+import { getAccountLevel } from '@/lib/accountLevel'
 
 interface HeaderProps {
   selectedAsset: Asset
@@ -22,6 +23,7 @@ interface HeaderProps {
   onMinhaConta?: () => void
   onLogout?: () => void
   onResetDemo?: () => Promise<void>
+  onNiveis?: () => void
   isDemo: boolean
   onSelectDemo: () => void
   onSelectReal: () => void
@@ -46,6 +48,7 @@ export function Header({
   onMinhaConta,
   onLogout,
   onResetDemo,
+  onNiveis,
   isDemo,
   onSelectDemo,
   onSelectReal,
@@ -56,6 +59,9 @@ export function Header({
   userId = '',
 }: HeaderProps) {
   const [accountOpen, setAccountOpen] = useState(false)
+  // Level icon for the REAL chip — PADRÃO=Send, PRO=Trophy, VIP=Gem.
+  // For DEMO accounts we keep the GraduationCap regardless of balance.
+  const level = getAccountLevel(realBalance)
 
   return (
     <div className="flex-shrink-0">
@@ -140,7 +146,7 @@ export function Header({
             >
               {isDemo
                 ? <GraduationCap size={18} className="text-yellow-400 flex-shrink-0" />
-                : <Gem size={18} className="text-purple-400 flex-shrink-0" />
+                : <level.Icon size={18} className={cn(level.color, 'flex-shrink-0')} />
               }
               <div className="text-left">
                 <div className={cn('text-[10px] font-bold leading-tight', isDemo ? 'text-yellow-400' : 'text-green-400')}>
@@ -170,6 +176,7 @@ export function Header({
                 onTransacoes={onTransacoes ?? (() => {})}
                 onOperacoes={onOperacoes ?? (() => {})}
                 onMinhaConta={onMinhaConta ?? (() => {})}
+                onNiveis={onNiveis ?? (() => {})}
               />
             )}
           </div>

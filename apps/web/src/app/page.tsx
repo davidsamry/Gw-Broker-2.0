@@ -14,6 +14,7 @@ import { TradingCompactCard } from '@/components/trading/TradingCompactCard'
 import { AccountSwitchModal } from '@/components/layout/AccountSwitchModal'
 import { AssetInfoModal } from '@/components/trading/AssetInfoModal'
 import { AssetSelectorModal } from '@/components/trading/AssetSelectorModal'
+import { NiveisModal } from '@/components/layout/NiveisModal'
 import { SupportPanel } from '@/components/layout/SupportPanel'
 import { ContaPage } from '@/components/conta/ContaPage'
 import { HistoricoPanel } from '@/components/layout/HistoricoPanel'
@@ -138,6 +139,7 @@ export default function TradingPage() {
   const [depositoBonusCode, setDepositoBonusCode] = useState<string | undefined>(undefined)
   const [contaInitialTab, setContaInitialTab] = useState<'retirada' | 'minha-conta'>('minha-conta')
   const [configOpen, setConfigOpen] = useState(false)
+  const [niveisOpen, setNiveisOpen] = useState(false)
   const [theme, setTheme] = useState<'diurno' | 'crepusculo' | 'noite'>('noite')
   const [tradeSettings, setTradeSettings] = useState<TradeSettings>({
     autoScroll: true,
@@ -306,6 +308,7 @@ export default function TradingPage() {
             onTransacoes={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA') }}
             onOperacoes={() => setSidebarTab('TRADE')}
             onMinhaConta={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA') }}
+            onNiveis={() => setNiveisOpen(true)}
             onLogout={() => { authStore.logout().then(() => router.replace('/login')) }}
             onResetDemo={() => authStore.resetDemo()}
             isDemo={isDemo}
@@ -383,6 +386,7 @@ export default function TradingPage() {
                     onTransacoes={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA'); setMobileAccountOpen(false) }}
                     onOperacoes={() => { setSidebarTab('TRADE'); setMobileAccountOpen(false) }}
                     onMinhaConta={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA'); setMobileAccountOpen(false) }}
+                    onNiveis={() => { setNiveisOpen(true); setMobileAccountOpen(false) }}
                   />
                 </div>
               )}
@@ -422,6 +426,9 @@ export default function TradingPage() {
       </div>
 
       {/* ── Global modals (shared desktop + mobile) ──────────────────────── */}
+      {niveisOpen && (
+        <NiveisModal realBalance={realBalance} onClose={() => setNiveisOpen(false)} />
+      )}
       {assetSelectorOpen && (
         <AssetSelectorModal selectedAsset={selectedAsset} assets={assets} onSelect={handleSelectAsset} onClose={() => setAssetSelectorOpen(false)} />
       )}

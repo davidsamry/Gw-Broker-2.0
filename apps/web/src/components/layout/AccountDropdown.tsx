@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, RefreshCw, Pencil, LogOut, ArrowRightLeft, BarChart2, User, Gem, PiggyBank, Wallet } from 'lucide-react'
+import { X, RefreshCw, Pencil, LogOut, ArrowRightLeft, BarChart2, User, Gem, PiggyBank, Wallet, Award } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 function handleCardKeyDown(e: React.KeyboardEvent<HTMLDivElement>, action: () => void) {
@@ -27,6 +27,7 @@ interface AccountDropdownProps {
   onTransacoes: () => void
   onOperacoes: () => void
   onMinhaConta: () => void
+  onNiveis: () => void
 }
 
 const menuItems = (actions: {
@@ -35,11 +36,13 @@ const menuItems = (actions: {
   onTransacoes: () => void
   onOperacoes: () => void
   onMinhaConta: () => void
+  onNiveis: () => void
 }) => [
   { label: 'Depósito', icon: <PiggyBank size={14} />, action: actions.onDeposito },
   { label: 'Retirada', icon: <Wallet size={14} />, action: actions.onRetirada },
   { label: 'Transações', icon: <ArrowRightLeft size={14} />, action: actions.onTransacoes },
   { label: 'Operações', icon: <BarChart2 size={14} />, action: actions.onOperacoes },
+  { label: 'Níveis de conta', icon: <Award size={14} />, action: actions.onNiveis },
   { label: 'Minha Conta', icon: <User size={14} />, action: actions.onMinhaConta },
 ]
 
@@ -59,6 +62,7 @@ export function AccountDropdown({
   onTransacoes,
   onOperacoes,
   onMinhaConta,
+  onNiveis,
 }: AccountDropdownProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [resetting, setResetting] = useState(false)
@@ -85,7 +89,7 @@ export function AccountDropdown({
   }
 
   const shortId = userId ? userId.slice(0, 8).toUpperCase() : '--------'
-  const items = menuItems({ onDeposito, onRetirada, onTransacoes, onOperacoes, onMinhaConta })
+  const items = menuItems({ onDeposito, onRetirada, onTransacoes, onOperacoes, onMinhaConta, onNiveis })
 
   return (
     <div
