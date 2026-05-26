@@ -1269,12 +1269,17 @@ function TradeResultMarker({ event, chartRef, seriesRef, tfSec }: TradeResultMar
 
   if (!pos || dismissed) return null
 
-  const profit = event.won ? (event.profit ?? 0) : 0
-  const sign   = profit > 0 ? '+' : ''
+  // Win → +profit (green). Loss → -stake (red). Tie/cancel → 0 (neutral
+  // green — won is false at that point so we still show the amount lost,
+  // which on a tie is 0).
+  const pnl  = event.won ? (event.profit ?? 0) : -event.amount
+  const sign = pnl > 0 ? '+' : pnl < 0 ? '-' : ''
+  const abs  = Math.abs(pnl)
 
   return (
     <>
-      {/* Card to the LEFT of the expiry dot — Quotex-style compact result */}
+      {/* Card to the LEFT of the expiry dot — single rounded panel with
+          dismiss X in the top-right corner. */}
       <div
         className="absolute z-[7]"
         style={{
@@ -1284,24 +1289,22 @@ function TradeResultMarker({ event, chartRef, seriesRef, tfSec }: TradeResultMar
         }}
       >
         <div className={cn(
-          'flex items-stretch rounded-lg shadow-xl overflow-hidden pointer-events-auto',
-          event.won ? 'bg-[#2e9c5f]' : 'bg-[#d65555]'
+          'relative rounded-lg shadow-xl pointer-events-auto pl-4 pr-7 py-2 min-w-[160px]',
+          event.won ? 'bg-[#16a34a]' : 'bg-[#dc2626]'
         )}>
-          <div className="flex flex-col px-4 py-2 min-w-[180px]">
-            <span className="text-[10px] text-white/85 tracking-wider font-semibold uppercase leading-tight">
-              Resultado (lucro / perda)
-            </span>
-            <span className="text-[18px] font-bold leading-tight mt-1 font-mono text-white">
-              {sign}R$ {profit.toFixed(2)}
-            </span>
-          </div>
           <button
             onClick={() => setDismissed(true)}
-            className="px-2 text-white/70 hover:text-white hover:bg-black/15 transition-colors flex items-center"
+            className="absolute top-1 right-1.5 text-white/70 hover:text-white transition-colors leading-none"
             aria-label="Fechar"
           >
-            <X size={13} />
+            <X size={12} />
           </button>
+          <div className="text-[10px] text-white tracking-wider font-bold uppercase leading-tight">
+            Resultado (L/P)
+          </div>
+          <div className="text-[20px] font-extrabold leading-tight mt-0.5 text-white">
+            {sign}R$ {abs.toFixed(2).replace('.', ',')}
+          </div>
         </div>
       </div>
 
