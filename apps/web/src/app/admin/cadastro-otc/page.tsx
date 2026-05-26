@@ -258,7 +258,13 @@ export default function CadastroOtcPage() {
               value={datetime}
               onChange={(e) => setDatetime(e.target.value)}
               required
-              className="w-full h-9 bg-[#1a1e2a] border border-[#1f232e] rounded-lg px-3 text-xs text-white outline-none focus:border-emerald-500/60"
+              // colorScheme: 'dark' tells the browser to render its
+              // native datetime UI (clock picker, calendar icon, hour /
+              // minute number fields) in dark-mode palette. Without it,
+              // Chrome paints the time portion red on dark backgrounds
+              // (its default "unset" color), which was the bug.
+              style={{ colorScheme: 'dark' }}
+              className="w-full h-9 bg-[#1a1e2a] border border-[#1f232e] rounded-lg px-3 text-xs text-white outline-none focus:border-emerald-500/60 [color-scheme:dark]"
             />
           </Field>
           <Field label="Timeframe">
