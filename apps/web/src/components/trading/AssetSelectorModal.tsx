@@ -89,7 +89,9 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
           <button onClick={onClose} className="w-5 h-5 flex items-center justify-center rounded bg-blue-600 text-white">
             <X size={10} />
           </button>
-          <span className="text-xs leading-none">{selectedAsset.flag1}{selectedAsset.flag2}</span>
+          {/* Removed the flag1+flag2 emoji span — duplicate of the proper
+              icon shown in each row + looked awkward next to the new
+              single-icon assets (stocks/commodities). */}
           <span className="text-xs font-semibold text-white">{selectedAsset.label}</span>
           <span className="text-xs font-bold text-orange-400">{selectedAsset.payout}%</span>
           <ChevronDown size={12} className="text-[#8b8f9a]" />
