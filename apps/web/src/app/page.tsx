@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore, useCurrentAccount } from '@/store/auth'
-import { GraduationCap, Gem, Plus, Bell, ChevronDown, X } from 'lucide-react'
+import { GraduationCap, Plus, Bell, ChevronDown, X } from 'lucide-react'
+import { getAccountLevel } from '@/lib/accountLevel'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Header } from '@/components/layout/Header'
 import { Logo } from '@/components/layout/Logo'
@@ -209,6 +210,14 @@ export default function TradingPage() {
   const realBalance = parseFloat(accounts.find(a => a.type === 'REAL')?.balance ?? '0')
   const balance     = isDemo ? demoBalance : realBalance
 
+  // Mobile-header level icon — same logic as desktop Header.tsx. The
+  // `mounted` gate avoids a hydration mismatch: SSR has realBalance=0
+  // (no auth on the server), client may render the persisted balance.
+  // Both render PADRÃO until mounted, then swap to the real level.
+  const [headerMounted, setHeaderMounted] = useState(false)
+  useEffect(() => { setHeaderMounted(true) }, [])
+  const level = getAccountLevel(headerMounted ? realBalance : 0)
+
   function handleSelectAsset(asset: Asset) {
     setSelectedAsset(asset)
     if (!openAssets.find((a) => a.id === asset.id)) {
@@ -365,7 +374,7 @@ export default function TradingPage() {
               >
                 {isDemo
                   ? <GraduationCap size={18} className="text-yellow-400 flex-shrink-0" />
-                  : <Gem size={18} className="text-purple-400 flex-shrink-0" />
+                  : <level.Icon size={18} className={cn(level.color, 'flex-shrink-0')} />
                 }
                 <div className="text-left min-w-0">
                   <div className={cn('text-[10px] font-bold leading-tight', isDemo ? 'text-yellow-400' : 'text-green-400')}>
