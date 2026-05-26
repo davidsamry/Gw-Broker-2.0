@@ -911,16 +911,16 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           Uses /vx-icon.png (project favicon, copied to public/) — the
           icon-only mark, NOT the full wordmark from vx-logo.png. */}
       {!chartReady && (
-        <div className="absolute inset-0 z-20 bg-[#151822] flex flex-col items-center justify-center gap-3 pointer-events-none">
+        <div className="absolute inset-0 z-20 bg-[#151822] flex flex-col items-center justify-center gap-1 pointer-events-none">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/vx-icon.png"
             alt="VX"
-            className="h-12 w-12 opacity-90 animate-pulse object-contain"
+            className="h-24 w-24 opacity-90 animate-pulse object-contain"
             style={{ animationDuration: '1.4s' }}
             draggable={false}
           />
-          <div className="flex items-center gap-1.5 text-[11px] text-[#8b8f9a]">
+          <div className="flex items-center gap-1.5 text-xs text-[#8b8f9a]">
             <span>Carregando</span>
             <span className="flex gap-0.5">
               <span className="w-1 h-1 rounded-full bg-[#8b8f9a] animate-bounce" style={{ animationDelay: '0ms' }} />
