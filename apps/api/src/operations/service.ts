@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 import type { CreateOperationInput } from './schema.js'
+import { resolveOperationIfExpired } from './worker.js'
 
 export async function createOperation(userId: string, input: CreateOperationInput) {
   const operationId   = randomUUID()
@@ -111,6 +112,12 @@ export async function listOperations(userId: string, accountId?: string) {
 }
 
 export async function getOperation(userId: string, operationId: string) {
+  // JIT resolve so a read right after expiry doesn't have to wait for
+  // the next worker tick (up to 1s). Safe to call always — it's a noop
+  // when the op isn't OPEN or hasn't expired yet, and the atomic claim
+  // inside prevents double-processing if the worker fires concurrently.
+  await resolveOperationIfExpired(operationId)
+
   const op = await prisma.operation.findUnique({
     where: { id: operationId },
     include: { account: { select: { userId: true } } },

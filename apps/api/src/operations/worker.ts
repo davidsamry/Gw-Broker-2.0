@@ -273,6 +273,28 @@ async function tick() {
   }
 }
 
+// JIT resolution — called by GET /operations/:id so a user's read after
+// expiry doesn't have to wait for the next worker tick (~500ms avg).
+// Reuses the same resolveOperation path; the atomic claim inside it
+// ensures we don't double-process if the worker picks the same op
+// concurrently. Returns silently when the op isn't found, isn't OPEN
+// yet, or hasn't expired — nothing to do.
+export async function resolveOperationIfExpired(operationId: string): Promise<void> {
+  const op = await prisma.operation.findFirst({
+    where: {
+      id:        operationId,
+      status:    'OPEN',
+      expiresAt: { lte: new Date() },
+    },
+    select: {
+      id: true, accountId: true, assetId: true, amount: true, payout: true,
+      entryPrice: true, expiresAt: true, direction: true, marketSymbol: true,
+    },
+  })
+  if (!op) return
+  await resolveOperation(op)
+}
+
 let intervalId: ReturnType<typeof setInterval> | null = null
 
 export function startExpirationWorker(): void {
