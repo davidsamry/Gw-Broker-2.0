@@ -36,8 +36,9 @@ export default function LoginPage() {
   const [twoFA,    setTwoFA]    = useState(false)
   const [code,     setCode]     = useState('')
 
-  // Register
-  const [country,    setCountry]    = useState('')
+  // Register — defaults to Brasil + BRL since that's the primary market.
+  // User can change both before submitting if registering from elsewhere.
+  const [country,    setCountry]    = useState('Brasil')
   const [currency,   setCurrency]   = useState('BRL')
   const [rEmail,     setREmail]     = useState('')
   const [rPassword,  setRPassword]  = useState('')
