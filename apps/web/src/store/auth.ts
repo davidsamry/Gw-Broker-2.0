@@ -149,6 +149,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await api.post('/auth/logout').catch(() => {})
     localStorage.removeItem('token')
     localStorage.removeItem(IS_DEMO_KEY)  // next account can be a different user
+    // Clear the "welcome bonus shown" flag so the NEXT login (even in
+    // the same browser tab) sees the promo modal again.
+    try { sessionStorage.removeItem('vx_welcome_bonus_seen') } catch { /* private mode */ }
     saveUserCache(null)
     set({ user: null, token: null, kycSubmission: null, isDemo: true })
     useOperationsStore.getState().reset()

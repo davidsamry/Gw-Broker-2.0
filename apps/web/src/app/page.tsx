@@ -23,6 +23,7 @@ import { RankingPanel } from '@/components/layout/RankingPanel'
 import { BonusPanel } from '@/components/layout/BonusPanel'
 import { ConfiguracoesPanel, type TradeSettings } from '@/components/layout/ConfiguracoesPanel'
 import { DepositoModal } from '@/components/deposito/DepositoModal'
+import { BonusWelcomeModal } from '@/components/layout/BonusWelcomeModal'
 import { AccountDropdown } from '@/components/layout/AccountDropdown'
 import { ASSETS, type Asset, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { useBinanceTicker } from '@/lib/binanceMarket'
@@ -463,6 +464,14 @@ export default function TradingPage() {
       {switchModal && (
         <AccountSwitchModal switchedTo={switchModal} demoBalance={demoBalance} realBalance={realBalance} onClose={() => setSwitchModal(null)} />
       )}
+
+      {/* Welcome bonus — opens once per session AFTER auth hydrates.
+          Self-dismisses on X, backdrop click, or "Depositar agora" (which
+          also pre-fills the deposit modal with the bonus code). */}
+      <BonusWelcomeModal
+        enabled={!!authStore.user && !authStore.loading}
+        onDeposit={(code) => { setDepositoBonusCode(code); setDepositoOpen(true) }}
+      />
     </div>
   )
 }
