@@ -147,6 +147,17 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
   const [tfIndex, setTfIndex] = useState(0)  // 1m default
   const [tfOpen, setTfOpen] = useState(false)
   const [chartReady, setChartReady] = useState(false)
+  // Safety net for the loading overlay — if chartReady stays false for
+  // longer than this (slow OTC backend, candle fetch timeout, network
+  // hiccup), force the overlay off so the user isn't trapped staring
+  // at a spinner forever. Resets whenever the asset changes.
+  const [overlayTimedOut, setOverlayTimedOut] = useState(false)
+  useEffect(() => {
+    setOverlayTimedOut(false)
+    const t = setTimeout(() => setOverlayTimedOut(true), 3000)
+    return () => clearTimeout(t)
+  }, [asset.id])
+  const showLoadingOverlay = !chartReady && !overlayTimedOut
   const [candleSecsLeft, setCandleSecsLeft] = useState(0)
   const [candleTimerY, setCandleTimerY] = useState<number | null>(null)
   const [candleTimerX, setCandleTimerX] = useState<number | null>(null)
@@ -910,7 +921,7 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           z-20 sits above the chart but below the absolute dropdowns.
           Uses /vx-icon.png (project favicon, copied to public/) — the
           icon-only mark, NOT the full wordmark from vx-logo.png. */}
-      {!chartReady && (
+      {showLoadingOverlay && (
         <div className="absolute inset-0 z-20 bg-[#151822] flex flex-col items-center justify-center pointer-events-none">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
