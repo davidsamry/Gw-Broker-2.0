@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useDebounce } from '@/lib/useDebounce'
 
 interface OpRow {
   id:           string
@@ -49,6 +50,8 @@ export default function AdminOperationsPage() {
   const [error, setError]     = useState('')
 
   const [search, setSearch]           = useState('')
+  // 300ms debounce — input stays instant, API only fires after typing pause.
+  const debouncedSearch               = useDebounce(search, 300)
   const [status, setStatus]           = useState<StatusFilter>('ALL')
   // Default to REAL — admin's main interest is real-money activity; DEMO ops
   // are visible via the filter but don't pollute the initial view.
@@ -62,7 +65,7 @@ export default function AdminOperationsPage() {
     setError('')
     try {
       const params: any = { page, pageSize: PAGE_SIZE }
-      if (search.trim())   params.search      = search.trim()
+      if (debouncedSearch.trim())   params.search      = debouncedSearch.trim()
       if (status !== 'ALL') params.status      = status
       if (accountType !== 'ALL') params.accountType = accountType
       const res = await api.get<ListResponse>('/admin/operations', { params })
@@ -72,9 +75,9 @@ export default function AdminOperationsPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, status, accountType, page])
+  }, [debouncedSearch, status, accountType, page])
 
-  useEffect(() => { setPage(1) }, [search, status, accountType])
+  useEffect(() => { setPage(1) }, [debouncedSearch, status, accountType])
   useEffect(() => { load() }, [load])
 
   async function handleCancel(op: OpRow) {

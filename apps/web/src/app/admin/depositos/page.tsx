@@ -8,6 +8,7 @@ import {
 import { api } from '@/lib/api'
 import { KpiCard } from '@/components/admin/KpiCard'
 import { cn } from '@/lib/utils'
+import { useDebounce } from '@/lib/useDebounce'
 
 interface DepositRow {
   id:         string
@@ -52,6 +53,8 @@ export default function AdminDepositsPage() {
   const [error, setError]     = useState('')
 
   const [search, setSearch] = useState('')
+  // 300ms debounce — input stays instant, API only fires after typing pause.
+  const debouncedSearch     = useDebounce(search, 300)
   const [status, setStatus] = useState<StatusFilter>('ALL')
   const [page, setPage]     = useState(1)
 
@@ -61,7 +64,7 @@ export default function AdminDepositsPage() {
     setLoading(true); setError('')
     try {
       const params: any = { page, pageSize: PAGE_SIZE }
-      if (search.trim()) params.search = search.trim()
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim()
       if (status !== 'ALL') params.status = status
       const res = await api.get<ListResponse>('/admin/deposits', { params })
       setData(res.data)
@@ -70,9 +73,9 @@ export default function AdminDepositsPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, status, page])
+  }, [debouncedSearch, status, page])
 
-  useEffect(() => { setPage(1) }, [search, status])
+  useEffect(() => { setPage(1) }, [debouncedSearch, status])
   useEffect(() => { load() }, [load])
 
   async function markPaid(dep: DepositRow) {

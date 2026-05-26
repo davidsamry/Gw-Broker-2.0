@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useDebounce } from '@/lib/useDebounce'
 import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer'
 
 interface UserRow {
@@ -44,6 +45,10 @@ export default function AdminUsersPage() {
 
   // Filters
   const [search, setSearch]   = useState('')
+  // 300ms debounce — input stays instant for typing feedback, but the API
+  // call only fires after the user stops typing. Cuts query count by ~4x
+  // on the typical 4-letter query.
+  const debouncedSearch       = useDebounce(search, 300)
   const [role, setRole]       = useState<RoleFilter>('ALL')
   const [kyc, setKyc]         = useState<KycFilter>('ALL')
   const [blocked, setBlocked] = useState<BlockedFilter>('ALL')
@@ -57,7 +62,7 @@ export default function AdminUsersPage() {
     setError('')
     try {
       const params: any = { page, pageSize: PAGE_SIZE }
-      if (search.trim()) params.search = search.trim()
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim()
       if (role     !== 'ALL') params.role    = role
       if (kyc      !== 'ALL') params.kyc     = kyc
       if (blocked  !== 'ALL') params.blocked = blocked
@@ -68,10 +73,10 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, role, kyc, blocked, page])
+  }, [debouncedSearch, role, kyc, blocked, page])
 
   // Reset to page 1 whenever filters change.
-  useEffect(() => { setPage(1) }, [search, role, kyc, blocked])
+  useEffect(() => { setPage(1) }, [debouncedSearch, role, kyc, blocked])
   useEffect(() => { load() }, [load])
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1

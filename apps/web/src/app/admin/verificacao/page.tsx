@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useDebounce } from '@/lib/useDebounce'
 
 interface KycRow {
   id:               string
@@ -41,6 +42,8 @@ export default function AdminVerificacaoPage() {
   const [error, setError]     = useState('')
 
   const [search, setSearch] = useState('')
+  // 300ms debounce — input stays instant, API only fires after typing pause.
+  const debouncedSearch     = useDebounce(search, 300)
   const [status, setStatus] = useState<StatusFilter>('SUBMITTED')
   const [viewing, setViewing] = useState<KycRow | null>(null)
 
@@ -48,7 +51,7 @@ export default function AdminVerificacaoPage() {
     setLoading(true); setError('')
     try {
       const params: any = { page: 1, pageSize: PAGE_SIZE, status }
-      if (search.trim()) params.search = search.trim()
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim()
       const res = await api.get<ListResponse>('/admin/kyc', { params })
       setData(res.data)
     } catch {
@@ -56,7 +59,7 @@ export default function AdminVerificacaoPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, status])
+  }, [debouncedSearch, status])
 
   useEffect(() => { load() }, [load])
 

@@ -8,6 +8,7 @@ import {
 import { api } from '@/lib/api'
 import { KpiCard } from '@/components/admin/KpiCard'
 import { cn } from '@/lib/utils'
+import { useDebounce } from '@/lib/useDebounce'
 
 interface WithdrawalRow {
   id:          string
@@ -69,6 +70,8 @@ export default function AdminSaquesPage() {
   const [error, setError]     = useState('')
 
   const [search, setSearch] = useState('')
+  // 300ms debounce — input stays instant, API only fires after typing pause.
+  const debouncedSearch     = useDebounce(search, 300)
   const [tab, setTab]       = useState<StatusTab>('ALL')
   const [page, setPage]     = useState(1)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -78,7 +81,7 @@ export default function AdminSaquesPage() {
     setLoading(true); setError('')
     try {
       const params: any = { page, pageSize: PAGE_SIZE }
-      if (search.trim())   params.search = search.trim()
+      if (debouncedSearch.trim())   params.search = debouncedSearch.trim()
       if (tab !== 'ALL')   params.status = tab
       const res = await api.get<ListResponse>('/admin/withdrawals', { params })
       setData(res.data)
@@ -87,9 +90,9 @@ export default function AdminSaquesPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, tab, page])
+  }, [debouncedSearch, tab, page])
 
-  useEffect(() => { setPage(1) }, [search, tab])
+  useEffect(() => { setPage(1) }, [debouncedSearch, tab])
   useEffect(() => { load() }, [load])
 
   async function approve(w: WithdrawalRow) {

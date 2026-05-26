@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useDebounce } from '@/lib/useDebounce'
 
 // ── Types — must match apps/api/src/admin/tickets/service.ts ─────────────────
 type TicketStatus   = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED'
@@ -111,6 +112,8 @@ export default function AdminTicketsPage() {
   const [error, setError]     = useState('')
 
   const [search, setSearch] = useState('')
+  // 300ms debounce — input stays instant, API only fires after typing pause.
+  const debouncedSearch     = useDebounce(search, 300)
   const [status, setStatus] = useState<StatusFilter>('ALL')
 
   const [openId, setOpenId] = useState<string | null>(null)
@@ -119,7 +122,7 @@ export default function AdminTicketsPage() {
     setLoading(true); setError('')
     try {
       const params: any = { page: 1, pageSize: PAGE_SIZE }
-      if (search.trim()) params.search = search.trim()
+      if (debouncedSearch.trim()) params.search = debouncedSearch.trim()
       if (status !== 'ALL') params.status = status
       const res = await api.get<ListResponse>('/admin/tickets', { params })
       setData(res.data)
@@ -128,7 +131,7 @@ export default function AdminTicketsPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, status])
+  }, [debouncedSearch, status])
 
   useEffect(() => { load() }, [load])
 
