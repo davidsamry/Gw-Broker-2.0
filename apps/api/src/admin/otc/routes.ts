@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
+  fullResetAllOtc,
   getAdminOtcAsset,
   getEngineStatus,
   getStreamStats,
@@ -156,6 +157,22 @@ export async function otcAdminRoutes(app: FastifyInstance) {
     try {
       const status = await getEngineStatus()
       return reply.send(status)
+    } catch (err) {
+      app.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Nuclear reset — wipes candle history + snapshot + in-memory state for
+  // EVERY asset. Use when the engine has drifted into a corrupted state
+  // (e.g. price ranges incompatible with the chart auto-scale). Charts
+  // show empty for a few seconds then fill from live ticks at seedPrice.
+  // Past operations are intentionally preserved.
+  app.post('/full-reset', async (req, reply) => {
+    const adminId = ((req as any).user.sub) as string
+    try {
+      const result = await fullResetAllOtc(adminId)
+      return reply.send({ ok: true, ...result })
     } catch (err) {
       app.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })

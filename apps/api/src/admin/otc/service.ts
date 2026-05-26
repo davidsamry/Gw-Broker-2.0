@@ -11,6 +11,7 @@ import {
 import { listClients, clientCount } from '../../otc/v2/stream/registry.js'
 import { gapFillCountLast24h, listRecentGapFills, type GapFillEvent } from '../../otc/v2/runtime/diagnostics.js'
 import { getBootedAt, isEngineRunning } from '../../otc/v2/runtime/state-map.js'
+import { fullResetEngine, type FullResetSummary } from '../../otc/v2/runtime/full-reset.js'
 
 // Admin service for the OTC v2 engine. Joins the on-disk config rows
 // (otc_assets) with two live data sources:
@@ -177,6 +178,86 @@ export async function setAdminOtcAssetTrendBias(
     { bias: after?.live?.trendBias ?? bias },
   )
   return after
+}
+
+// ── Full engine reset ─────────────────────────────────────────────────
+// Nuclear option. Wipes:
+//   • all persisted history (candles, ticks, snapshot)
+//   • DB-side regime + liquidity state tables
+//   • in-memory state for every asset (snap to seedPrice + LATERAL)
+//   • candle cache + builders + pending write buffers
+// Every loaded asset emerges with price=seedPrice within one tick. Used
+// when the engine has drifted into a corrupted state (e.g. multiple dev
+// instances raced on the same DB and produced wild snapshots).
+//
+// Operations history is intentionally NOT touched — the audit trail of
+// past trades must survive any engine reset.
+export interface FullResetResult {
+  inMemory: FullResetSummary
+  db: {
+    snapshotsDeleted:    number
+    candlesDeleted:      number
+    ticksDeleted:        number
+    marketStateReset:    number
+    liquidityStateReset: number
+  }
+}
+
+export async function fullResetAllOtc(adminId: string): Promise<FullResetResult> {
+  // 1. DB-side wipe. TRUNCATE returns no count, so we read it before.
+  const beforeCounts = await prisma.$queryRaw<Array<{
+    snap: bigint; candles: bigint; ticks: bigint
+  }>>`
+    SELECT
+      (SELECT COUNT(*) FROM otc_engine_snapshot)::bigint AS snap,
+      (SELECT COUNT(*) FROM otc_candles)::bigint         AS candles,
+      (SELECT COUNT(*) FROM otc_ticks)::bigint           AS ticks
+  `
+  const snapshotsDeleted = Number(beforeCounts[0]?.snap    ?? 0)
+  const candlesDeleted   = Number(beforeCounts[0]?.candles ?? 0)
+  const ticksDeleted     = Number(beforeCounts[0]?.ticks   ?? 0)
+
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE otc_engine_snapshot RESTART IDENTITY CASCADE')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE otc_candles RESTART IDENTITY')
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE otc_ticks RESTART IDENTITY')
+
+  const marketUpdate = await prisma.$executeRaw`
+    UPDATE otc_market_state
+       SET "currentRegime"   = 'LATERAL'::"OtcRegime",
+           "regimeStartedAt" = NOW(),
+           "regimeDurationS" = 60,
+           "currentDrift"    = 0,
+           "trendBias"       = 0,
+           "updatedAt"       = NOW()
+  `
+  const liquidityUpdate = await prisma.$executeRaw`
+    UPDATE otc_liquidity_state
+       SET spread        = 0.0001,
+           "buyPressure"  = 0.5,
+           "sellPressure" = 0.5,
+           volume         = 1.0,
+           depth          = 1.0,
+           speed          = 1.0,
+           "updatedAt"    = NOW()
+  `
+
+  // 2. In-memory wipe. Snapshot flush (5s) will re-persist seedPrice
+  // values from the reset state — that becomes the new floor.
+  const inMemory = fullResetEngine()
+
+  // 3. Audit log so we know who triggered the nuke.
+  await writeAuditLog(adminId, 'FULL_RESET', null, beforeCounts[0], { inMemory, marketUpdate, liquidityUpdate })
+
+  return {
+    inMemory,
+    db: {
+      snapshotsDeleted,
+      candlesDeleted,
+      ticksDeleted,
+      marketStateReset:    marketUpdate,
+      liquidityStateReset: liquidityUpdate,
+    },
+  }
 }
 
 // ── Logs ──────────────────────────────────────────────────────────────

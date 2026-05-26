@@ -101,6 +101,8 @@ export default function AdminOtcPage() {
   const [error, setError]     = useState('')
   const [editing, setEditing] = useState<OtcAdminAsset | null>(null)
   const [busyId, setBusyId]   = useState<string | null>(null)
+  const [fullResetBusy, setFullResetBusy] = useState(false)
+  const [fullResetMsg,  setFullResetMsg]  = useState('')
 
   // Full reload — fetches assets + engine status in parallel.
   // (Fase 9: status added to the same polling cadence as the cards.)
@@ -153,6 +155,29 @@ export default function AdminOtcPage() {
     return data
   })
 
+  // Nuclear reset — wipes every asset's price history + in-memory state
+  // back to seedPrice. Confirms before firing because it's destructive
+  // (3000+ candles/asset gone) but past operations are preserved.
+  const fullReset = async () => {
+    if (!confirm('Resetar TODOS os ativos OTC?\n\nIsso apaga todo o histórico de candles/ticks e volta cada preço ao seed. Operações passadas são preservadas. Use quando o motor estiver com preços absurdos.')) return
+    setFullResetBusy(true); setError(''); setFullResetMsg('')
+    try {
+      const { data } = await api.post<{
+        ok: boolean
+        inMemory: { assetsReset: number; buildersReset: number; cacheCleared: number; pendingDropped: number }
+        db: { snapshotsDeleted: number; candlesDeleted: number; ticksDeleted: number; marketStateReset: number; liquidityStateReset: number }
+      }>('/admin/otc/full-reset')
+      setFullResetMsg(`Reset OK · ${data.inMemory.assetsReset} ativos · ${data.db.candlesDeleted.toLocaleString('pt-BR')} candles apagados · ${data.db.ticksDeleted.toLocaleString('pt-BR')} ticks apagados`)
+      await load(true)
+      // Clear success message after 10s.
+      setTimeout(() => setFullResetMsg(''), 10_000)
+    } catch {
+      setError('Falha ao resetar o motor inteiro.')
+    } finally {
+      setFullResetBusy(false)
+    }
+  }
+
   return (
     <div className="p-4 md:p-6 max-w-[1600px] mx-auto">
       {/* Header */}
@@ -163,20 +188,38 @@ export default function AdminOtcPage() {
             Motor de precificação server-side. Pause, resete e ajuste cada ativo em tempo real.
           </p>
         </div>
-        <button
-          onClick={() => load()}
-          disabled={loading}
-          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1a1f2e] border border-[#2a2e3b] text-sm text-white hover:border-emerald-500/40 transition-colors disabled:opacity-50"
-        >
-          <RefreshCw size={14} className={cn(loading && 'animate-spin')} />
-          Atualizar
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fullReset}
+            disabled={fullResetBusy || loading}
+            title="Nuclear: limpa todo histórico e volta cada ativo ao seed price"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50"
+          >
+            {fullResetBusy ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+            Resetar Tudo
+          </button>
+          <button
+            onClick={() => load()}
+            disabled={loading}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#1a1f2e] border border-[#2a2e3b] text-sm text-white hover:border-emerald-500/40 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={cn(loading && 'animate-spin')} />
+            Atualizar
+          </button>
+        </div>
       </div>
 
       {error && (
         <div className="mb-4 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-400 flex items-center gap-2">
           <AlertCircle size={14} />
           {error}
+        </div>
+      )}
+
+      {fullResetMsg && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-400 flex items-center gap-2">
+          <Check size={14} />
+          {fullResetMsg}
         </div>
       )}
 
