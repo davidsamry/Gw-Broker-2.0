@@ -7,9 +7,15 @@ interface FlagPairProps {
   size?: number
 }
 
-// Ticker → company domain for Clearbit logo lookup. Add a new line per
-// new stock symbol; the company's main marketing domain is what
-// Clearbit uses to fetch the official logo.
+// Ticker → company domain. Logos are fetched via Google's s2 favicon
+// service (https://www.google.com/s2/favicons?domain=X&sz=64) which:
+//   • is free + no auth + no rate limit
+//   • works for ANY public domain (Google caches favicons globally)
+//   • returns a PNG (not vector but 64px is sharp enough for our 22px badge)
+//
+// Was using Clearbit Logo API (logo.clearbit.com) but it got deprecated
+// in 2024 after the HubSpot acquisition — was returning 404s for most
+// tickers, which is why the user saw blank white circles.
 const STOCK_DOMAINS: Record<string, string> = {
   aapl:  'apple.com',
   msft:  'microsoft.com',
@@ -78,9 +84,11 @@ export function FlagPair({ code1, code2, size = 22 }: FlagPairProps) {
     // neutral placeholder so the row doesn't crash.
   }
 
-  // Stock mode — render the company's official logo via Clearbit. Wraps
-  // the logo on a white circular tile so dark-themed logos and light-
-  // themed logos both pop against the panel's dark background.
+  // Stock mode — fetch the company's official favicon via Google s2 and
+  // pin it on a white circular tile so both light-on-dark and dark-on-light
+  // brand marks render with good contrast on the dark UI background.
+  // Google s2 is free, no auth, and caches favicons for every public
+  // domain — much more reliable than the (now-broken) Clearbit Logo API.
   if (code1.startsWith('stock:')) {
     const ticker = code1.replace('stock:', '')
     const domain = STOCK_DOMAINS[ticker]
@@ -91,17 +99,16 @@ export function FlagPair({ code1, code2, size = 22 }: FlagPairProps) {
           style={{ width: size, height: size }}
         >
           <img
-            src={`https://logo.clearbit.com/${domain}`}
+            src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
             alt={ticker}
             style={{
-              width:     Math.round(size * 0.82),
-              height:    Math.round(size * 0.82),
+              width:     Math.round(size * 0.7),
+              height:    Math.round(size * 0.7),
               objectFit: 'contain',
             }}
-            // If Clearbit ever 404s for a ticker, the broken-image icon
-            // would look worse than the blank tile — swap to a 1px
-            // transparent gif so the white circle stays clean. The
-            // ticker text right next to it identifies the asset anyway.
+            // Defensive fallback — if Google s2 ever fails for a ticker,
+            // swap to a 1×1 transparent gif so the white circle stays
+            // clean. Ticker text right next to it identifies the asset.
             onError={(e) => {
               const img = e.currentTarget
               img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=='
