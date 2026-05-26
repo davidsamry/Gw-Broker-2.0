@@ -132,6 +132,11 @@ export function Header({
                   ? 'bg-[#252a3a] border-blue-500/60'
                   : 'bg-[#252a3a] border-[#2a2e3b] hover:border-blue-500/40'
               )}
+              // isDemo comes from the auth store which rehydrates from
+              // localStorage on the client only. SSR renders the default
+              // (DEMO) icon; client may render the persisted (REAL) icon.
+              // Suppress the (intentional) mismatch on first render.
+              suppressHydrationWarning
             >
               {isDemo
                 ? <GraduationCap size={18} className="text-yellow-400 flex-shrink-0" />

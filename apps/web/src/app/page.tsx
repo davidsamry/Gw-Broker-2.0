@@ -339,11 +339,16 @@ export default function TradingPage() {
           {/* Right: balance + deposit */}
           <div className="flex items-center gap-1.5 min-w-0">
             {/* Balance chip — shrinks if needed; h-10 sets a consistent
-                size with the deposit button alongside it. */}
+                size with the deposit button alongside it.
+                suppressHydrationWarning: isDemo comes from the auth store
+                which rehydrates from localStorage on the client only.
+                Server renders the default (DEMO) icon; client may render
+                the persisted (REAL) icon. The diff is intentional. */}
             <div className="relative min-w-0">
               <button
                 onClick={() => setMobileAccountOpen(v => !v)}
                 className="flex items-center gap-1.5 h-10 px-2.5 rounded-lg bg-[#252a3a] border border-[#2a2e3b] max-w-full"
+                suppressHydrationWarning
               >
                 {isDemo
                   ? <GraduationCap size={18} className="text-yellow-400 flex-shrink-0" />
