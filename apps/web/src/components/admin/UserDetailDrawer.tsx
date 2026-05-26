@@ -79,8 +79,21 @@ export function UserDetailDrawer({ userId, onClose, onChanged }: Props) {
       const res = await api.get<UserDetail>(`/admin/users/${userId}`)
       setData(res.data)
       setForm(toFormState(res.data))
-    } catch {
-      setError('Erro ao carregar detalhe.')
+    } catch (err: any) {
+      // Surface server detail so column-missing errors (migration not
+      // applied yet) are diagnosable from the UI instead of generic
+      // "Erro ao carregar detalhe."
+      const detail = err?.response?.data?.detail
+      const code   = err?.response?.data?.error
+      if (detail && /column .* does not exist/i.test(detail)) {
+        setError('Migration pendente no banco. Rode `prisma migrate deploy` no serviço API (ou reimplante).')
+      } else if (detail) {
+        setError(`Erro: ${detail}`)
+      } else if (code) {
+        setError(`Erro: ${code}`)
+      } else {
+        setError('Erro ao carregar detalhe.')
+      }
     } finally {
       setLoading(false)
     }

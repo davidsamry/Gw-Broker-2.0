@@ -88,7 +88,15 @@ export async function userAdminRoutes(app: FastifyInstance) {
     } catch (err: any) {
       if (err.message === 'USER_NOT_FOUND') return reply.status(404).send({ error: 'USER_NOT_FOUND' })
       req.log.error(err)
-      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+      // Surface details so the admin UI can show "column X does not exist"
+      // when migrations are out of date (instead of a generic "Erro").
+      // Safe to expose — this endpoint is admin-only.
+      return reply.status(500).send({
+        error:   'INTERNAL_ERROR',
+        detail:  err?.message ?? String(err),
+        pgCode:  err?.code,
+        pgMeta:  err?.meta,
+      })
     }
   })
 
