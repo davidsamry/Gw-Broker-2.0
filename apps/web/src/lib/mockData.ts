@@ -28,7 +28,7 @@ export interface ChartTradeEvent {
   profit?: number
 }
 
-// Catalog: 17 Binance-priced crypto + 5 OTC v2 server-priced assets.
+// Catalog: 22 Binance-priced crypto + 5 OTC v2 server-priced assets.
 // Binance entries point at marketSymbol so the chart uses the Binance kline
 // WebSocket. OTC entries have no marketSymbol or source — the chart routes
 // these to the new OTC engine via /otc/stream (Etapa 4 onwards).
@@ -63,6 +63,15 @@ export const ASSETS: Asset[] = [
   { id: 'shib-usdt-binance', symbol: 'SHIB/USDT', label: 'Shiba Inu / USDT', type: 'Crypto', source: 'BINANCE', marketSymbol: 'SHIBUSDT', category: 'Cripto', payout: 91, payout5min: 91, flag1: '🐕', flag2: 'USDT', code1: 'crypto:shib', code2: 'us', price: 0.00002431, change24h: 1.91 },
   { id: 'pepe-usdt-binance', symbol: 'PEPE/USDT', label: 'Pepe / USDT', type: 'Crypto', source: 'BINANCE', marketSymbol: 'PEPEUSDT', category: 'Cripto', payout: 90, payout5min: 90, flag1: '🐸', flag2: 'USDT', code1: 'crypto:pepe', code2: 'us', price: 0.00001128, change24h: 12.42 },
   { id: 'sui-usdt-binance', symbol: 'SUI/USDT', label: 'Sui / USDT', type: 'Crypto', source: 'BINANCE', marketSymbol: 'SUIUSDT', category: 'Cripto', payout: 90, payout5min: 90, flag1: '◉', flag2: 'USDT', code1: 'crypto:sui', code2: 'us', price: 1.72, change24h: 5.33 },
+  // ── New batch: 5 high-liquidity Binance pairs (DeFi + L1/L2) ────────────
+  // All present on data-api.binance.vision (the same endpoint BinanceProvider
+  // already uses) and have coincap icons. No backend changes needed —
+  // catalog is frontend-driven for Binance assets.
+  { id: 'aave-usdt-binance', symbol: 'AAVE/USDT', label: 'Aave / USDT',       type: 'Crypto', source: 'BINANCE', marketSymbol: 'AAVEUSDT', category: 'Cripto', payout: 90, payout5min: 90, flag1: '👻', flag2: 'USDT', code1: 'crypto:aave', code2: 'us', price: 95.40,  change24h: 0 },
+  { id: 'uni-usdt-binance',  symbol: 'UNI/USDT',  label: 'Uniswap / USDT',    type: 'Crypto', source: 'BINANCE', marketSymbol: 'UNIUSDT',  category: 'Cripto', payout: 90, payout5min: 90, flag1: '🦄', flag2: 'USDT', code1: 'crypto:uni',  code2: 'us', price: 8.71,   change24h: 0 },
+  { id: 'near-usdt-binance', symbol: 'NEAR/USDT', label: 'NEAR / USDT',       type: 'Crypto', source: 'BINANCE', marketSymbol: 'NEARUSDT', category: 'Cripto', payout: 89, payout5min: 89, flag1: '◯',  flag2: 'USDT', code1: 'crypto:near', code2: 'us', price: 4.23,   change24h: 0 },
+  { id: 'apt-usdt-binance',  symbol: 'APT/USDT',  label: 'Aptos / USDT',      type: 'Crypto', source: 'BINANCE', marketSymbol: 'APTUSDT',  category: 'Cripto', payout: 89, payout5min: 89, flag1: '🅰',  flag2: 'USDT', code1: 'crypto:apt',  code2: 'us', price: 7.50,   change24h: 0 },
+  { id: 'arb-usdt-binance',  symbol: 'ARB/USDT',  label: 'Arbitrum / USDT',   type: 'Crypto', source: 'BINANCE', marketSymbol: 'ARBUSDT',  category: 'Cripto', payout: 89, payout5min: 89, flag1: '🔷', flag2: 'USDT', code1: 'crypto:arb',  code2: 'us', price: 0.80,   change24h: 0 },
 ]
 
 export const DEFAULT_FAVORITES = [
