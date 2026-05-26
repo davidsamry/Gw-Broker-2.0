@@ -88,7 +88,13 @@ export function DepositoModal({ onClose, initialBonusCode }: DepositoModalProps)
   const profileCpf = authStore.user?.cpf ?? null
 
   const [phase, setPhase]     = useState<Phase>('form')
-  const [amount, setAmount]   = useState<string>('')
+  // When initialBonusCode is set, seed the amount at R$ 100 in initial
+  // state (not in an effect post-fetch). That lets the bonus-validate
+  // call fire IN PARALLEL with /bonuses/available — user sees the
+  // "Você ganha R$ X em bônus" preview in ~one round-trip instead of
+  // waiting sequentially for both fetches. If the bonus has a higher
+  // minDeposit, the available-list handler below bumps it + re-validates.
+  const [amount, setAmount]   = useState<string>(initialBonusCode ? '100' : '')
   const [cpfDigits, setCpfDigits] = useState<string>(profileCpf ?? '')
   const [error, setError]     = useState('')
   const [loading, setLoading] = useState(false)
@@ -127,13 +133,19 @@ export function DepositoModal({ onClose, initialBonusCode }: DepositoModalProps)
           const match = data.bonuses.find(b => b.code === initialBonusCode.toUpperCase())
           if (match) {
             setSelectedDropdown(match.id)
-            // Only pre-fill amount if the user hasn't typed anything yet.
-            if (!amount) setAmount(String(Math.max(100, match.minDeposit)))
-          } else if (!amount) {
-            // Code unknown to us (shouldn't happen via the panel CTA) —
-            // default to 100 so validation has a starting point.
-            setAmount('100')
+            // Bump amount up to the bonus minDeposit if our initial guess
+            // of 100 was too low. We compare against the LIVE state of
+            // `amount` via a functional updater so we don't accidentally
+            // overwrite a value the user typed in the brief window between
+            // mount and this fetch resolving.
+            setAmount((prev) => {
+              const current = parseFloat(prev.replace(',', '.')) || 0
+              const min = Math.max(100, match.minDeposit)
+              return current < min ? String(min) : prev
+            })
           }
+          // Unknown code path: amount is already '100' from initial state,
+          // validation will simply fail downstream — nothing extra to do.
         }
       })
       .catch(() => { /* dropdown stays empty — user can still type code manually */ })
