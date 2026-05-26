@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { Logo } from '@/components/layout/Logo'
 
@@ -14,7 +14,16 @@ const COUNTRIES = [
 const CURRENCIES = ['BRL', 'USD', 'EUR', 'GBP', 'ARS', 'MXN']
 
 export default function LoginPage() {
-  const [tab, setTab] = useState<'login' | 'register'>('login')
+  // Initial tab honours ?tab=register so marketing/landing pages can deep-link
+  // straight to the signup form. Anything else (or no param) → login.
+  const searchParams = useSearchParams()
+  const initialTab: 'login' | 'register' =
+    searchParams?.get('tab') === 'register' ? 'register' : 'login'
+  const [tab, setTab] = useState<'login' | 'register'>(initialTab)
+  // Keep state in sync if the URL changes while the page is mounted
+  // (e.g. user clicks an in-app link that updates the query string).
+  useEffect(() => { setTab(initialTab) }, [initialTab])
+
   const router = useRouter()
   const login    = useAuthStore(s => s.login)
   const register = useAuthStore(s => s.register)
@@ -44,6 +53,18 @@ export default function LoginPage() {
   const filteredCountries = COUNTRIES.filter(c =>
     c.toLowerCase().includes(countrySearch.toLowerCase())
   )
+
+  // Tab switcher that ALSO updates the URL so a copied link reflects
+  // the current view. Used by the top tabs + the footer cross-link.
+  function switchTab(next: 'login' | 'register') {
+    setTab(next)
+    setError('')
+    const params = new URLSearchParams(searchParams?.toString() ?? '')
+    if (next === 'register') params.set('tab', 'register')
+    else params.delete('tab')
+    const qs = params.toString()
+    router.replace(qs ? `/login?${qs}` : '/login', { scroll: false })
+  }
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -131,7 +152,7 @@ export default function LoginPage() {
           {/* Tabs */}
           <div className="flex border-b border-white/10">
             <button
-              onClick={() => { setTab('login'); setError('') }}
+              onClick={() => switchTab('login')}
               className={`flex-1 py-3.5 text-sm font-semibold transition-colors rounded-tl-xl ${
                 tab === 'login' ? 'bg-[#1e2535] text-white' : 'text-[#8b8f9a] hover:text-white'
               }`}
@@ -139,7 +160,7 @@ export default function LoginPage() {
               Entrar
             </button>
             <button
-              onClick={() => { setTab('register'); setError('') }}
+              onClick={() => switchTab('register')}
               className={`flex-1 py-3.5 text-sm font-semibold transition-colors rounded-tr-xl ${
                 tab === 'register' ? 'bg-[#1e2535] text-white' : 'text-[#8b8f9a] hover:text-white'
               }`}
@@ -302,6 +323,36 @@ export default function LoginPage() {
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
                 </svg>
               </button>
+            </div>
+
+            {/* Cross-link to the other tab — prominent below the social row
+                so first-time visitors who only see "Entrar" know they can
+                also create an account here (and vice-versa). Same handler
+                as the top tabs so URL stays in sync. */}
+            <div className="mt-5 pt-4 border-t border-white/10 text-center">
+              {tab === 'login' ? (
+                <p className="text-xs text-[#8b8f9a]">
+                  Não tem conta?{' '}
+                  <button
+                    type="button"
+                    onClick={() => switchTab('register')}
+                    className="text-blue-400 hover:text-blue-300 font-semibold transition-colors"
+                  >
+                    Cadastre-se aqui
+                  </button>
+                </p>
+              ) : (
+                <p className="text-xs text-[#8b8f9a]">
+                  Já tem conta?{' '}
+                  <button
+                    type="button"
+                    onClick={() => switchTab('login')}
+                    className="text-blue-400 hover:text-blue-300 font-semibold transition-colors"
+                  >
+                    Fazer login
+                  </button>
+                </p>
+              )}
             </div>
           </div>
         </div>
