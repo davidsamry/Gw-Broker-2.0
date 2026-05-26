@@ -9,6 +9,7 @@ import { api } from '@/lib/api'
 import { useOperationsStore, type ApiOperation } from '@/store/operations'
 import { useAuthStore } from '@/store/auth'
 import { useOtcLivePrice } from '@/lib/otcMarket'
+import { useBinanceTicker } from '@/lib/binanceMarket'
 
 interface TradingPanelProps {
   asset: Asset
@@ -76,6 +77,27 @@ function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: bool
     return () => clearInterval(t)
   }, [trade.expiryTime])
 
+  // Live P&L — subscribes to the same price feed the chart uses so the
+  // row updates in real time. Hooks must be called unconditionally, so
+  // we pass null/undefined to the one that doesn't match this asset.
+  const isBinance      = trade.asset.source === 'BINANCE'
+  const otcLivePrice   = useOtcLivePrice(isBinance ? null : trade.asset.id)
+  const binanceTicker  = useBinanceTicker(isBinance ? trade.asset.marketSymbol : undefined)
+  const currentPrice   = isBinance
+    ? (binanceTicker?.price ?? trade.entryPrice)
+    : (otcLivePrice ?? trade.entryPrice)
+
+  // Binary option settlement: CALL wins if price ABOVE entry, PUT wins
+  // if BELOW. Tie (==) is a loss server-side, but while open we show 0
+  // — easier on the eyes than flashing -R$ when ticks land exactly on
+  // entry. Final result is decided at expiry by the operations worker.
+  const pnlIsLive = trade.direction === 'CALL'
+    ? currentPrice > trade.entryPrice
+    : currentPrice < trade.entryPrice
+  const pnlIsTied = currentPrice === trade.entryPrice
+  const pnl       = pnlIsTied ? 0 : pnlIsLive ? trade.amount * (trade.asset.payout / 100) : -trade.amount
+  const pnlSign   = pnl > 0 ? '+' : ''
+
   const m = Math.floor(remaining / 60).toString().padStart(2, '0')
   const s = (remaining % 60).toString().padStart(2, '0')
 
@@ -111,8 +133,11 @@ function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: bool
               : <ArrowDown size={9} strokeWidth={3} />}
           </span>
           <span className="text-[11px] text-[#8b8f9a] flex-1">R$ {fmtMoney(trade.amount)}</span>
-          <span className="text-[11px] font-bold text-[#8b8f9a]">
-            R$ 0,00
+          <span className={cn(
+            'text-[11px] font-bold',
+            pnl > 0 ? 'text-green-400' : pnl < 0 ? 'text-red-400' : 'text-[#8b8f9a]',
+          )}>
+            {pnlSign}R$ {pnl.toFixed(2).replace('.', ',')}
           </span>
         </div>
       </div>
