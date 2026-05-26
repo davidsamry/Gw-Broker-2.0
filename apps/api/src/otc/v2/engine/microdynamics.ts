@@ -67,13 +67,20 @@ const DURATION_RANGES: Record<MicroSubRegime, [number, number]> = {
 }
 
 // Multiplier applied to per-tick effectiveVol to size the jitter shock.
-// CALM/CONSOLIDATION are tiny; BURST is the only one above 1×.
+// 2026-05-25 — multipliers bumped ~2.7× after the original numbers
+// produced jitter that was too quiet against the macro trend: a strong
+// TREND_DOWN_STRONG was creating 6+ consecutive bodies with virtually
+// no wicks. New scale targets ~0.3% wick magnitude at 3-sigma during
+// the BURST sub-regime — visible against typical 0.5-1% bodies.
+// Math at phi=0.88: jitter equilibrium std = sigma / √(1 - phi²) =
+// 2.1 × sigma, so per-tick shock std 2.7× larger → equilibrium ~3×
+// larger → wicks ~3× more visible.
 const VOL_MULT: Record<MicroSubRegime, number> = {
-  CALM:          0.18,
-  ACTIVE:        0.50,
-  CONSOLIDATION: 0.10,
-  BURST:         1.30,
-  ABSORPTION:    0.30,
+  CALM:          0.50,
+  ACTIVE:        1.40,
+  CONSOLIDATION: 0.28,
+  BURST:         3.50,
+  ABSORPTION:    0.80,
 }
 
 // AR(1) coefficient (decay rate). Higher = jitter lingers longer between
