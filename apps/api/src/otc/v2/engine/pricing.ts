@@ -25,24 +25,28 @@ import { applyMicroDynamics } from './microdynamics.js'
 const NATURAL_V2 = process.env.OTC_NATURAL_V2 !== 'false'
 
 // Per-tick chance of starting a "pullback" cycle during a trend.
-// 0.005 = 0.5%, so ~1 pullback per 200 ticks (~20s) during trending
-// regimes. Lateral regimes never trigger pullbacks (no trend to
-// pull back against).
-const PULLBACK_TRIGGER_CHANCE  = 0.005
-// Pullback duration range (ticks). 10-30 ticks = 1-3 seconds of
-// counter-trend drift.
-const PULLBACK_MIN_TICKS       = 10
-const PULLBACK_MAX_TICKS       = 30
-// During a pullback, drift is flipped and amplified to make the
-// counter-move visible (1.5× the regime's normal drift, negated).
-const PULLBACK_DRIFT_MULT      = -1.5
+// 2026-05-25 bumped 0.005 → 0.025 (5× more frequent ~ 1 per 4s) and
+// duration extended so M1 candles in strong trends consistently show
+// mid-trend rejection wicks instead of marching as solid bodies. Was
+// previously ~1 per 20s, which left 3-4 candles between counter-moves
+// — the "staircase" pattern the founder flagged on the chart.
+const PULLBACK_TRIGGER_CHANCE  = 0.025
+// Pullback duration range (ticks). Was 10-30 (1-3s). Stretched to
+// 15-45 ticks (1.5-4.5s) so each counter-move carves a visible wick
+// AND occasionally drags into a body reversal.
+const PULLBACK_MIN_TICKS       = 15
+const PULLBACK_MAX_TICKS       = 45
+// During a pullback, drift is flipped and amplified. Was -1.5×; bumped
+// to -2.0× so the counter-move is strong enough to register as a
+// distinct rejection (visible wick at minimum, occasionally a small
+// reversal candle) against the macro trend.
+const PULLBACK_DRIFT_MULT      = -2.0
 
 // Per-tick chance of a single-tick "micro pullback" (only counts
-// when not already inside a pullback). 1% = ~6 micro pullbacks per
-// 60s candle. Adds breath to otherwise-straight trend lines without
-// adding noise.
-const MICRO_PULLBACK_CHANCE    = 0.01
-const MICRO_PULLBACK_MULT      = -0.4    // soft counter-trend
+// when not already inside a pullback). 2% = ~12 per M1 candle. Adds
+// short jagged texture INSIDE candles even between formal pullbacks.
+const MICRO_PULLBACK_CHANCE    = 0.02
+const MICRO_PULLBACK_MULT      = -0.6    // counter-trend, slightly stronger
 
 // Counter-trend bias for the random spike. 70% of spikes during
 // trends go AGAINST the trend, which is what creates the natural
