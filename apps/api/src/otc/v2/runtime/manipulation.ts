@@ -89,6 +89,28 @@ export function stopManipulationRefresh(): void {
   }
 }
 
+// Returns whether the engine should consider any of the slot-shaping
+// helpers (wick injection, streak break) at this tick. When true, those
+// helpers should skip — they'd overwrite the carefully-blended
+// manipulation tick and create a visible gap on the chart.
+export function isSlotUnderManipulation(
+  assetId:      string,
+  candleOpenMs: number,
+  timeframe:    number,
+): boolean {
+  if (!masterEnabled) return false
+  const signals = cache.get(assetId)
+  if (!signals || signals.length === 0) return false
+  const slotEndMs = candleOpenMs + timeframe * 1000
+  for (const s of signals) {
+    if (s.timeframe !== timeframe) continue
+    if (s.scheduledAt < candleOpenMs) continue
+    if (s.scheduledAt >= slotEndMs)   break
+    return true
+  }
+  return false
+}
+
 // ── Per-tick application ─────────────────────────────────────────────────
 // Given the current asset, the in-progress M1 candle's slot, and the
 // raw price the engine just produced, returns the (possibly nudged)

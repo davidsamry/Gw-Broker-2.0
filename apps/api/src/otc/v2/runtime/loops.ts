@@ -18,7 +18,7 @@ import {
   otcPendingTicksSize, otcPendingCandlesSize,
   timedDbOp,
 } from '../../../metrics/registry.js'
-import { maybeManipulatePrice } from './manipulation.js'
+import { maybeManipulatePrice, isSlotUnderManipulation } from './manipulation.js'
 
 // ── Boot-grace window — suppresses random spikes in the first
 // BOOT_SPIKE_GRACE_MS so the first ticks post-restart can't introduce
@@ -91,7 +91,7 @@ export function startAssetLoop(assetId: string): void {
     const mBuilder = (builders.get(assetId) ?? []).find((b) => b.timeframe === M1_TIMEFRAME_SEC)
     const mCur     = mBuilder?.getCurrent()
     if (mCur) {
-      price = maybeManipulatePrice(
+      const nudged = maybeManipulatePrice(
         assetId,
         mCur.openTime.getTime(),
         mCur.open,
@@ -100,6 +100,18 @@ export function startAssetLoop(assetId: string): void {
         now,
         price,
       )
+      // If the nudge actually moved the price, also sync the engine's
+      // internal state to the nudged value. Without this, the engine's
+      // smoothedPrice keeps evolving naturally during the window, then
+      // when manipulation ends the next tick snaps back to the engine's
+      // internal state — a visible gap on the chart. Pulling the
+      // internal state along behind the emitted value keeps continuity
+      // through the slot boundary.
+      if (nudged !== price) {
+        s.price         = nudged
+        s.smoothedPrice = nudged
+      }
+      price = nudged
     }
 
     // ── Rule 2 — guarantee ≥90% of M1 candles have a wick ──────────
@@ -108,14 +120,20 @@ export function startAssetLoop(assetId: string): void {
     // poked outside its body, push the emitted price beyond the body so
     // the candle finalises with a visible upper or lower shadow.
     // One injection per slot (guarded by m1WickCheckedSlot).
+    //
+    // SKIPS when the slot is under admin manipulation — wick injection
+    // would push counter-body, overwriting the manipulation tick and
+    // creating a visible gap on the chart. The manipulation already
+    // produces enough body movement to be visible.
     const m1Builder = (builders.get(assetId) ?? []).find((b) => b.timeframe === M1_TIMEFRAME_SEC)
     const m1Cur     = m1Builder?.getCurrent() ?? null
     if (m1Cur) {
       const slotOpenMs   = m1Cur.openTime.getTime()
       const slotProgress = (now - slotOpenMs) / (M1_TIMEFRAME_SEC * 1000)
+      const underManipulation = isSlotUnderManipulation(assetId, slotOpenMs, M1_TIMEFRAME_SEC)
       // New slot started — clear the "checked" marker so we can inject again.
       if (slotProgress < 0.05) s.m1WickCheckedSlot = undefined
-      if (slotProgress >= WICK_INJECT_AFTER_PCT && s.m1WickCheckedSlot !== slotOpenMs) {
+      if (!underManipulation && slotProgress >= WICK_INJECT_AFTER_PCT && s.m1WickCheckedSlot !== slotOpenMs) {
         const bodyHigh     = Math.max(m1Cur.open, m1Cur.close)
         const bodyLow      = Math.min(m1Cur.open, m1Cur.close)
         const hasUpperWick = m1Cur.high > bodyHigh + 1e-9
