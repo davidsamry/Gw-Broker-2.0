@@ -110,10 +110,13 @@ export function BonusWelcomeModal({ enabled, onDeposit }: BonusWelcomeModalProps
     >
       <div
         onClick={(e) => e.stopPropagation()}   // keep clicks inside from closing
-        className="relative w-full max-w-sm rounded-2xl p-5 overflow-hidden bg-gradient-to-br from-[#6b46c1] via-[#7c3aed] to-[#5b21b6] shadow-2xl shadow-purple-900/40"
+        // Brand gradient — matches the Vx Global logo's blue. Same depth
+        // as the original purple but anchored to the broker's palette so
+        // it reads as "the platform" rather than a third-party promo.
+        className="relative w-full max-w-sm rounded-2xl p-5 overflow-hidden bg-gradient-to-br from-[#1d4ed8] via-[#2563eb] to-[#1e40af] shadow-2xl shadow-blue-900/50"
       >
         {/* Subtle glow accent — purely decorative */}
-        <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-purple-400/20 blur-2xl pointer-events-none" />
+        <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-blue-300/25 blur-2xl pointer-events-none" />
 
         {/* Close X — top right, slightly larger tap target than the chart
             result card since this is a top-level interruption. */}
@@ -141,10 +144,10 @@ export function BonusWelcomeModal({ enabled, onDeposit }: BonusWelcomeModalProps
 
         <button
           onClick={() => { onDeposit(hero.code); dismiss() }}
-          className="w-full flex items-center justify-center gap-2 bg-white text-[#3a2a5a] font-bold text-sm py-3 rounded-xl hover:bg-white/90 transition-colors relative"
+          className="w-full flex items-center justify-center gap-2 bg-white text-[#1e3a8a] font-bold text-sm py-3 rounded-xl hover:bg-white/90 transition-colors relative"
         >
           <span>Depositar agora</span>
-          <ArrowRight size={14} className="text-[#3a2a5a]" />
+          <ArrowRight size={14} className="text-[#1e3a8a]" />
         </button>
       </div>
     </div>
