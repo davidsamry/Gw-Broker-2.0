@@ -54,7 +54,9 @@ interface AuthState {
   // account has 2FA on, the API throws REQUIRES_2FA — callers can catch
   // and re-prompt.
   login:              (email: string, password: string, code?: string) => Promise<void>
-  register:           (name: string, email: string, password: string) => Promise<void>
+  /** CPF is required as of 2026-05-26 — 11 raw digits (no mask). Caller
+   *  is responsible for stripping `.` and `-` before invocation. */
+  register:           (name: string, email: string, password: string, cpf: string) => Promise<void>
   logout:             () => Promise<void>
   init:               () => Promise<void>
   setIsDemo:          (v: boolean) => void
@@ -138,8 +140,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ user: data.user, token: data.token })
   },
 
-  register: async (name, email, password) => {
-    const { data } = await api.post('/auth/register', { name, email, password })
+  register: async (name, email, password, cpf) => {
+    const { data } = await api.post('/auth/register', { name, email, password, cpf })
     localStorage.setItem('token', data.token)
     saveUserCache(data.user)
     set({ user: data.user, token: data.token })

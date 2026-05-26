@@ -10,6 +10,12 @@ export async function registerUser(input: RegisterInput) {
   const existing = await prisma.user.findUnique({ where: { email: input.email } })
   if (existing) throw new Error('EMAIL_TAKEN')
 
+  // CPF uniqueness — soft check (no DB constraint yet so we don't block on
+  // a migration). One person = one account. The schema validated the CPF
+  // checksum already, so input.cpf is 11 raw digits.
+  const cpfTaken = await prisma.user.findFirst({ where: { cpf: input.cpf } })
+  if (cpfTaken) throw new Error('CPF_TAKEN')
+
   const hash = await bcrypt.hash(input.password, 10)
 
   const user = await prisma.user.create({
@@ -17,6 +23,7 @@ export async function registerUser(input: RegisterInput) {
       name:     input.name,
       email:    input.email,
       password: hash,
+      cpf:      input.cpf,
       accounts: {
         create: [
           { type: 'DEMO', balance: DEMO_BALANCE, currency: 'BRL' },

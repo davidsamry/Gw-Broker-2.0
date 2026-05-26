@@ -1,10 +1,36 @@
 import { z } from 'zod'
 
+// CPF stored as 11 raw digits — frontend strips the mask before sending.
+// We re-strip server-side defensively in case a client forgets, then
+// validate the checksum so typos (000.000.000-00 style) are rejected.
 export const registerSchema = z.object({
   name:     z.string().min(2).max(80).trim(),
   email:    z.string().email().toLowerCase().trim(),
   password: z.string().min(6).max(72),
+  cpf:      z.string()
+              .transform(s => s.replace(/\D/g, ''))
+              .refine(s => s.length === 11, 'CPF deve ter 11 dígitos.')
+              .refine(isValidCpfChecksum, 'CPF inválido.'),
 })
+
+// Standard Brazilian CPF mod-11 checksum. Rejects strings of repeated
+// digits (00000000000, 11111111111…) which pass the formula but are
+// commonly used as placeholders.
+function isValidCpfChecksum(cpf: string): boolean {
+  if (cpf.length !== 11) return false
+  if (/^(\d)\1{10}$/.test(cpf)) return false
+  const calcDigit = (slice: string, start: number) => {
+    let sum = 0
+    for (let i = 0; i < slice.length; i++) {
+      sum += parseInt(slice[i], 10) * (start - i)
+    }
+    const r = (sum * 10) % 11
+    return r === 10 ? 0 : r
+  }
+  const d1 = calcDigit(cpf.substring(0, 9),  10)
+  const d2 = calcDigit(cpf.substring(0, 10), 11)
+  return d1 === parseInt(cpf[9], 10) && d2 === parseInt(cpf[10], 10)
+}
 
 export const loginSchema = z.object({
   email:    z.string().email().toLowerCase().trim(),

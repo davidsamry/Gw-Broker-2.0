@@ -42,6 +42,9 @@ export default function LoginPage() {
   const [rEmail,     setREmail]     = useState('')
   const [rPassword,  setRPassword]  = useState('')
   const [showRPass,  setShowRPass]  = useState(false)
+  // CPF kept as display-formatted string ("000.000.000-00") for the input,
+  // stripped to 11 raw digits when sent to the API.
+  const [cpf,        setCpf]        = useState('')
   const [terms18,    setTerms18]    = useState(false)
   const [termsNoUS,  setTermsNoUS]  = useState(false)
   const [countrySearch, setCountrySearch] = useState('')
@@ -100,18 +103,36 @@ export default function LoginPage() {
     setError('')
     if (!terms18) { setError('Confirme que você tem 18 anos ou mais.'); return }
     if (rPassword.length < 8) { setError('A senha deve ter pelo menos 8 caracteres.'); return }
+    const cpfDigits = cpf.replace(/\D/g, '')
+    if (cpfDigits.length !== 11) { setError('CPF inválido — preencha os 11 dígitos.'); return }
     setLoading(true)
     try {
       // Use email prefix as name since we don't ask for name
       const name = rEmail.split('@')[0]
-      await register(name, rEmail, rPassword)
+      await register(name, rEmail, rPassword, cpfDigits)
       router.replace('/')
     } catch (err: any) {
       const code = err.response?.data?.error
-      setError(code === 'EMAIL_TAKEN' ? 'Este e-mail já está em uso.' : 'Erro ao criar conta. Tente novamente.')
+      if      (code === 'EMAIL_TAKEN') setError('Este e-mail já está em uso.')
+      else if (code === 'CPF_TAKEN')   setError('Este CPF já está cadastrado.')
+      else if (code === 'VALIDATION_ERROR') setError('CPF inválido. Verifique e tente novamente.')
+      else                              setError('Erro ao criar conta. Tente novamente.')
     } finally {
       setLoading(false)
     }
+  }
+
+  // Applies the 000.000.000-00 mask as the user types — strips any non-digit
+  // they paste, caps at 11 digits, then re-inserts dots/dash at fixed
+  // positions. Stored value is always the masked string; we strip again
+  // before submit.
+  function maskCpf(raw: string): string {
+    const d = raw.replace(/\D/g, '').slice(0, 11)
+    let out = d
+    if (d.length > 9)  out = `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`
+    else if (d.length > 6) out = `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6)}`
+    else if (d.length > 3) out = `${d.slice(0,3)}.${d.slice(3)}`
+    return out
   }
 
   return (
@@ -283,6 +304,20 @@ export default function LoginPage() {
                 <FloatingInput label="Senha" type={showRPass ? 'text' : 'password'} value={rPassword} onChange={setRPassword} required
                   rightIcon={<EyeIcon show={showRPass} onClick={() => setShowRPass(v => !v)} />}
                 />
+                {/* CPF — required for KYC + PIX. Mask is applied as the
+                    user types; submit strips back to 11 raw digits.
+                    inputMode='numeric' opens the digit keypad on mobile;
+                    maxLength=14 caps at the formatted length so paste
+                    of long strings still gets truncated client-side. */}
+                <FloatingInput
+                  label="CPF"
+                  type="text"
+                  value={cpf}
+                  onChange={(v) => setCpf(maskCpf(v))}
+                  required
+                  inputMode="numeric"
+                  maxLength={14}
+                />
 
                 {/* Checkboxes */}
                 <label className="flex items-start gap-2.5 cursor-pointer select-none">
@@ -361,13 +396,16 @@ export default function LoginPage() {
   )
 }
 
-function FloatingInput({ label, type, value, onChange, required, rightIcon }: {
+function FloatingInput({ label, type, value, onChange, required, rightIcon, inputMode, maxLength }: {
   label: string
   type: string
   value: string
   onChange: (v: string) => void
   required?: boolean
   rightIcon?: React.ReactNode
+  /** Mobile keyboard hint — 'numeric' for CPF/phone, 'email' on email, etc. */
+  inputMode?: 'numeric' | 'tel' | 'email' | 'decimal' | 'text'
+  maxLength?: number
 }) {
   return (
     <div className="relative">
@@ -377,6 +415,8 @@ function FloatingInput({ label, type, value, onChange, required, rightIcon }: {
         value={value}
         onChange={e => onChange(e.target.value)}
         required={required}
+        inputMode={inputMode}
+        maxLength={maxLength}
         className="w-full bg-transparent border border-[#2a2e4a] rounded-lg px-3 py-3 pr-10 text-white text-sm outline-none focus:border-blue-500 transition-colors"
       />
       {rightIcon && (

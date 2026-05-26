@@ -27,6 +27,9 @@ export async function authRoutes(app: FastifyInstance) {
       if (err.message === 'EMAIL_TAKEN') {
         return reply.status(409).send({ error: 'EMAIL_TAKEN' })
       }
+      if (err.message === 'CPF_TAKEN') {
+        return reply.status(409).send({ error: 'CPF_TAKEN' })
+      }
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }
