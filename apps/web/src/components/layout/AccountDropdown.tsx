@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, RefreshCw, Pencil, LogOut, ArrowRightLeft, BarChart2, User, Gem, PiggyBank, Wallet, Award } from 'lucide-react'
+import { X, RefreshCw, Pencil, LogOut, ArrowRightLeft, BarChart2, User, PiggyBank, Wallet, Award } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { getAccountLevel } from '@/lib/accountLevel'
 
 function handleCardKeyDown(e: React.KeyboardEvent<HTMLDivElement>, action: () => void) {
   if (e.key === 'Enter' || e.key === ' ') {
@@ -108,11 +109,21 @@ export function AccountDropdown({
     >
       <div className="bg-[#1a1e2e] w-full md:w-[272px] md:flex-shrink-0 p-4 flex flex-col gap-3">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Gem size={16} className="text-purple-400" />
-            <span className="text-xs text-[#8b8f9a] font-medium">VIP:</span>
-            <span className="text-xs text-white font-semibold">+4% de lucro</span>
-          </div>
+          {(() => {
+            // Real level driven by the REAL balance — was hardcoded as
+            // VIP/+4% before, which lied to users below the threshold.
+            const lvl = getAccountLevel(realBalance)
+            const { Icon } = lvl
+            return (
+              <div className="flex items-center gap-2">
+                <Icon size={16} className={lvl.color} />
+                <span className="text-xs text-[#8b8f9a] font-medium">{lvl.name}:</span>
+                <span className="text-xs text-white font-semibold">
+                  {lvl.payoutBonus > 0 ? `+${lvl.payoutBonus}% de lucro` : 'Nível básico'}
+                </span>
+              </div>
+            )
+          })()}
           <button
             onClick={onClose}
             className="w-7 h-7 -mr-1 flex items-center justify-center rounded-md text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors"
