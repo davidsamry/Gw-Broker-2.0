@@ -163,13 +163,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     // ── Stale-while-revalidate ───────────────────────────────────────────────
     // 1. Hydrate from cache immediately (0 RTT) so the user sees their balance
-    //    on screen as soon as the JS bundle parses.
+    //    + last-seen operations on screen as soon as the JS bundle parses.
     // 2. Always revalidate against /auth/me in the background — server is the
     //    source of truth. Fresh data replaces the cache silently.
     const cachedUser = get().user ?? loadUserCache()
     if (cachedUser) {
       set({ user: cachedUser, token, loading: false })
     }
+    // Also restore operations cache so the FECHADAS list + Histórico paint
+    // instantly. Same SWR contract — /auth/me below overwrites on success.
+    useOperationsStore.getState().loadFromCache()
 
     try {
       const { data } = await api.get('/auth/me')
