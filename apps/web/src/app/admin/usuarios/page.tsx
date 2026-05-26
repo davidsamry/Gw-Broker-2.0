@@ -17,6 +17,7 @@ interface UserRow {
   role:             'USER' | 'ADMIN'
   kycStatus:        string
   blocked:          boolean
+  isFake:           boolean
   twoFactorEnabled: boolean
   createdAt:        string
   realBalance:      string
@@ -159,7 +160,14 @@ export default function AdminUsersPage() {
                   {initials(u.name || u.email)}
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-white truncate">{u.name || '—'}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-semibold text-white truncate">{u.name || '—'}</span>
+                    {u.isFake && (
+                      <span className="px-1 py-0 rounded text-[8px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40 flex-shrink-0">
+                        FAKE
+                      </span>
+                    )}
+                  </div>
                   <div className="text-[11px] text-[#8b8f9a] truncate">{u.email}</div>
                 </div>
               </div>

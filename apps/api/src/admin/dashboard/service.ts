@@ -62,10 +62,18 @@ function startOfDay(d: Date) {
 export async function getDashboard(from: Date, to: Date): Promise<DashboardResponse> {
   const todayStart = startOfDay(new Date())
 
-  // All operation + transaction queries below filter by account.type = 'REAL'
-  // so the admin dashboard reflects only real-money activity. DEMO trades
-  // and DEMO credits never influence platform P/L or wager totals.
-  const realAccount = { account: { type: 'REAL' as const } }
+  // All operation + transaction queries below filter by:
+  //   account.type = 'REAL'  (DEMO never counted)
+  //   account.user.isFake = false  (fake users marked by admin are excluded
+  //                                  from every KPI, P/L and chart — so
+  //                                  admin can stage demo flows without
+  //                                  polluting the real-money dashboard)
+  // `as any` cast: the local Prisma client may be regenerated lazily
+  // on Windows (EPERM dll lock); runtime is fine because the migration
+  // already added the column. Prod build regenerates from schema.prisma.
+  const realNonFakeAccount: any = {
+    account: { type: 'REAL', user: { isFake: false } },
+  }
 
   const [
     depAgg,
@@ -80,60 +88,61 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
     closedOpsWindow,
     lucrativeRaw,
   ] = await Promise.all([
-    // KPI: total deposits in window (REAL only)
+    // KPI: total deposits in window (REAL + non-fake)
     prisma.transaction.aggregate({
       _sum:  { amount: true },
       _avg:  { amount: true },
       _count: true,
-      where: { type: 'DEPOSIT', createdAt: { gte: from, lte: to }, ...realAccount },
+      where: { type: 'DEPOSIT', createdAt: { gte: from, lte: to }, ...realNonFakeAccount },
     }),
-    // KPI: total withdrawals in window (REAL only — sum of -amount → flip sign)
+    // KPI: total withdrawals in window (REAL + non-fake — sum of -amount → flip sign)
     prisma.transaction.aggregate({
       _sum: { amount: true },
-      where: { type: 'WITHDRAWAL', createdAt: { gte: from, lte: to }, ...realAccount },
+      where: { type: 'WITHDRAWAL', createdAt: { gte: from, lte: to }, ...realNonFakeAccount },
     }),
-    // KPI: total REAL balance (all-time)
+    // KPI: total REAL balance (all-time, non-fake users only)
     prisma.account.aggregate({
       _sum: { balance: true },
-      where: { type: 'REAL' },
+      where: { type: 'REAL', user: { isFake: false } as any },
     }),
-    // KPI: total BONUS credited to REAL accounts (all-time)
+    // KPI: total BONUS credited to REAL accounts (all-time, non-fake)
     prisma.transaction.aggregate({
       _sum: { amount: true },
-      where: { type: 'BONUS', ...realAccount },
+      where: { type: 'BONUS', ...realNonFakeAccount },
     }),
-    // KPI: total users (all-time)
-    prisma.user.count({ where: { role: 'USER' } }),
-    // KPI: new users today
-    prisma.user.count({ where: { role: 'USER', createdAt: { gte: todayStart } } }),
-    // KPI: total wagered in window — REAL ops only
+    // KPI: total users (all-time, excluding fakes)
+    prisma.user.count({ where: { role: 'USER', isFake: false } as any }),
+    // KPI: new users today (excluding fakes)
+    prisma.user.count({ where: { role: 'USER', isFake: false, createdAt: { gte: todayStart } } as any }),
+    // KPI: total wagered in window — REAL + non-fake ops only
     prisma.operation.aggregate({
       _sum: { amount: true },
-      where: { openedAt: { gte: from, lte: to }, ...realAccount },
+      where: { openedAt: { gte: from, lte: to }, ...realNonFakeAccount },
     }),
-    // KPI: WON ops in window (we paid out the profit) — REAL ops only
+    // KPI: WON ops in window (we paid out the profit) — REAL + non-fake
     prisma.operation.aggregate({
       _sum:   { profit: true, amount: true },
       _count: true,
-      where:  { status: 'WON', closedAt: { gte: from, lte: to }, ...realAccount },
+      where:  { status: 'WON', closedAt: { gte: from, lte: to }, ...realNonFakeAccount },
     }),
-    // KPI: LOST ops in window (we kept the stake) — REAL ops only
+    // KPI: LOST ops in window (we kept the stake) — REAL + non-fake
     prisma.operation.aggregate({
       _sum:   { amount: true },
       _count: true,
-      where:  { status: 'LOST', closedAt: { gte: from, lte: to }, ...realAccount },
+      where:  { status: 'LOST', closedAt: { gte: from, lte: to }, ...realNonFakeAccount },
     }),
-    // Chart: closed REAL ops in last 7 days for the daily series
+    // Chart: closed REAL + non-fake ops in last 7 days for the daily series
     prisma.operation.findMany({
       where: {
         status:   { in: ['WON', 'LOST'] },
         closedAt: { gte: new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000), lte: to },
-        ...realAccount,
+        ...realNonFakeAccount,
       },
       select: { status: true, amount: true, profit: true, closedAt: true },
     }),
     // Lucrative users: SUM deposits vs SUM profits per user. Returns users
-    // whose net (profit - deposited) is positive.
+    // whose net (profit - deposited) is positive. Fake users excluded so
+    // staged accounts don't appear in the "users beating us" list.
     prisma.$queryRaw<Array<{
       id:         string
       name:       string
@@ -151,7 +160,7 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
       FROM users u
       LEFT JOIN accounts a     ON a."userId" = u.id AND a.type = 'REAL'::"AccountType"
       LEFT JOIN transactions t ON t."accountId" = a.id
-      WHERE u.role = 'USER'::"UserRole"
+      WHERE u.role = 'USER'::"UserRole" AND u."isFake" = false
       GROUP BY u.id, u.name, u.email
       HAVING
         COALESCE(SUM(CASE WHEN t.type = 'TRADE_WIN'::"TransactionType" THEN t.amount END), 0) -

@@ -15,6 +15,7 @@ export interface UserListRow {
   role:             'USER' | 'ADMIN'
   kycStatus:        string
   blocked:          boolean
+  isFake:           boolean
   twoFactorEnabled: boolean
   createdAt:        Date
   realBalance:      string  // Decimal stringified
@@ -80,7 +81,7 @@ export async function listUsers(params: ListUsersParams): Promise<UserListRespon
       WITH page_users AS (
         SELECT u.id, u.name, u.email, u.role::text AS role,
                u."kycStatus"::text AS "kycStatus",
-               u.blocked, u."twoFactorEnabled", u."createdAt"
+               u.blocked, u."isFake", u."twoFactorEnabled", u."createdAt"
         FROM users u
         ${whereSql}
         ORDER BY u."createdAt" DESC
