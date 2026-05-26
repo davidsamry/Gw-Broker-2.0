@@ -46,7 +46,9 @@ function fmtBRL(v: number) {
 }
 
 export default function AdminDashboardPage() {
-  const [preset, setPreset]   = useState<PeriodPreset>('30d')
+  // Default to "Hoje" — admin wants to see today's activity first.
+  // Users can switch to 7d/30d/custom from the PeriodFilter chips.
+  const [preset, setPreset]   = useState<PeriodPreset>('hoje')
   const [data, setData]       = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
