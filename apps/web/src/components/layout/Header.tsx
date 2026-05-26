@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Bell, ChevronDown, Plus, X, GraduationCap } from 'lucide-react'
 import { type Asset } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
@@ -61,7 +61,16 @@ export function Header({
   const [accountOpen, setAccountOpen] = useState(false)
   // Level icon for the REAL chip — PADRÃO=Send, PRO=Trophy, VIP=Gem.
   // For DEMO accounts we keep the GraduationCap regardless of balance.
-  const level = getAccountLevel(realBalance)
+  //
+  // The `mounted` gate prevents a hydration mismatch: SSR renders with
+  // realBalance=0 (no auth on the server), client may render with the
+  // persisted balance, which would swap the icon component itself
+  // (different SVG tree). Render with PADRÃO until mounted, then swap
+  // to the real level — no visible flash because the icon position is
+  // identical and the swap happens in the same tick as auth hydration.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+  const level = getAccountLevel(mounted ? realBalance : 0)
 
   return (
     <div className="flex-shrink-0">

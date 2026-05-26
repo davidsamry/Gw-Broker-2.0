@@ -927,6 +927,8 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           <img
             src="/vx-icon.png"
             alt="VX"
+            width={96}
+            height={96}
             className="h-24 w-24 opacity-90 animate-pulse object-contain"
             style={{ animationDuration: '1.4s' }}
             draggable={false}

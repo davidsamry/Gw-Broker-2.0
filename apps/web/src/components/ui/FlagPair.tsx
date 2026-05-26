@@ -101,6 +101,8 @@ export function FlagPair({ code1, code2, size = 22 }: FlagPairProps) {
           <img
             src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
             alt={ticker}
+            width={Math.round(size * 0.7)}
+            height={Math.round(size * 0.7)}
             style={{
               width:     Math.round(size * 0.7),
               height:    Math.round(size * 0.7),
