@@ -24,6 +24,22 @@ import {
 // a visible discontinuity. ─────────────────────────────────────────────
 const BOOT_SPIKE_GRACE_MS = 10_000
 
+// ── M1 candle rules (founder-requested 2026-05-26) ────────────────────
+// 1. No more than MAX_M1_SAME_DIRECTION consecutive same-direction
+//    M1 candles. When hit, runtime arms a 60s force-reverse window
+//    (drift overridden by FORCE_REVERSE_DRIFT_PER_TICK in pricing.ts).
+// 2. ≥WICK_TARGET_PROB of M1 candles must have at least one wick.
+//    Runtime checks the in-progress M1 near the end of the slot
+//    (WICK_INJECT_AFTER_PCT through it) and, if wick-less, pushes
+//    the emitted price beyond the body to create one.
+const MAX_M1_SAME_DIRECTION = 5
+const FORCE_REVERSE_DURATION_MS = 60_000
+const WICK_TARGET_PROB        = 0.9
+const WICK_INJECT_AFTER_PCT   = 0.85   // inject if 85%+ through the M1
+const WICK_MIN_SIZE_PCT       = 0.0005 // 5bp minimum wick
+const WICK_BODY_RATIO         = 0.4    // wick = max(40% of body, MIN)
+const M1_TIMEFRAME_SEC        = 60
+
 export function msSinceBoot(): number {
   const bootedAt = getBootedAt()
   return bootedAt === 0 ? Number.MAX_SAFE_INTEGER : Date.now() - bootedAt
@@ -62,9 +78,42 @@ export function startAssetLoop(assetId: string): void {
       otcRegimeTransitionsTotal.inc({ assetId, from: fromRegime, to: s.regime })
     }
 
-    const price = stepPrice(s)
+    let price = stepPrice(s)
     // Track tick freshness for the Fase 3 snapshot.
     s.lastTickAt = now
+
+    // ── Rule 2 — guarantee ≥90% of M1 candles have a wick ──────────
+    // Peek at the in-progress M1 builder. If we're past
+    // WICK_INJECT_AFTER_PCT through the slot and the candle hasn't yet
+    // poked outside its body, push the emitted price beyond the body so
+    // the candle finalises with a visible upper or lower shadow.
+    // One injection per slot (guarded by m1WickCheckedSlot).
+    const m1Builder = (builders.get(assetId) ?? []).find((b) => b.timeframe === M1_TIMEFRAME_SEC)
+    const m1Cur     = m1Builder?.getCurrent() ?? null
+    if (m1Cur) {
+      const slotOpenMs   = m1Cur.openTime.getTime()
+      const slotProgress = (now - slotOpenMs) / (M1_TIMEFRAME_SEC * 1000)
+      // New slot started — clear the "checked" marker so we can inject again.
+      if (slotProgress < 0.05) s.m1WickCheckedSlot = undefined
+      if (slotProgress >= WICK_INJECT_AFTER_PCT && s.m1WickCheckedSlot !== slotOpenMs) {
+        const bodyHigh     = Math.max(m1Cur.open, m1Cur.close)
+        const bodyLow      = Math.min(m1Cur.open, m1Cur.close)
+        const hasUpperWick = m1Cur.high > bodyHigh + 1e-9
+        const hasLowerWick = m1Cur.low  < bodyLow  - 1e-9
+        if (!hasUpperWick && !hasLowerWick && Math.random() < WICK_TARGET_PROB) {
+          const bodySize    = Math.abs(m1Cur.close - m1Cur.open)
+          const minWick     = m1Cur.close * WICK_MIN_SIZE_PCT
+          const wickSize    = Math.max(bodySize * WICK_BODY_RATIO, minWick)
+          // Direction: counter to the current body (realistic — wicks
+          // typically form on rejection of an extension). For doji
+          // (close == open) we default to a lower wick (-1).
+          const dir = m1Cur.close >= m1Cur.open ? -1 : 1
+          price = m1Cur.open + dir * wickSize
+        }
+        s.m1WickCheckedSlot = slotOpenMs
+      }
+    }
+
     const tick: OtcTick = { assetId: s.config.id, price: round5(price), recordedAt: new Date(now) }
     pendingTicks.push(tick)
 
@@ -111,6 +160,37 @@ export function startAssetLoop(assetId: string): void {
           open: finalized.open, high: finalized.high, low: finalized.low, close: finalized.close,
           isClosed: true,
         })
+
+        // ── Rule 1 — cap M1 same-direction streak at MAX_M1_SAME_DIRECTION ──
+        // On every M1 finalize, classify direction. If we hit the cap,
+        // arm a 60s force-reverse window so the next M1 swings the other
+        // way (regardless of regime FSM). Doji resets the streak — neither
+        // up nor down — so a 4-up-then-doji-then-up sequence is fine.
+        if (cb.timeframe === M1_TIMEFRAME_SEC) {
+          const dir: 'UP' | 'DOWN' | null =
+            finalized.close > finalized.open ? 'UP'
+            : finalized.close < finalized.open ? 'DOWN'
+            : null
+
+          if (dir == null) {
+            s.m1DirectionStreak = 0
+            s.m1LastDirection   = undefined
+          } else if (dir === s.m1LastDirection) {
+            s.m1DirectionStreak = (s.m1DirectionStreak ?? 1) + 1
+            if (s.m1DirectionStreak >= MAX_M1_SAME_DIRECTION) {
+              s.forceReverseUntilMs = Date.now() + FORCE_REVERSE_DURATION_MS
+              s.forceReverseDir     = dir
+              // Reset so the reversal doesn't re-trigger every subsequent
+              // candle — let the streak rebuild naturally if the trend
+              // resumes after the forced window expires.
+              s.m1DirectionStreak = 0
+              s.m1LastDirection   = undefined
+            }
+          } else {
+            s.m1DirectionStreak = 1
+            s.m1LastDirection   = dir
+          }
+        }
       }
     }
   }, period)

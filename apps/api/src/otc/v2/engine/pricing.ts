@@ -58,6 +58,13 @@ const COUNTER_TREND_SPIKE_PROB = 0.7
 // to [0.3, 0.7] so max contribution is ±0.4 × effectiveVol.
 const LIQUIDITY_BIAS_WEIGHT    = 1.0
 
+// Force-reversal drift (per tick) applied when the runtime detects
+// 5+ consecutive same-direction M1 candles. Set to 1.33× the STRONG
+// regime drift (0.000015) so it reliably overrides ANY regime — even
+// if the engine is in TREND_UP_STRONG and decides to keep pulling up,
+// the counter-bias dominates. 0.00002/tick = ~1.2%/min counter-drift.
+const FORCE_REVERSE_DRIFT_PER_TICK = 0.00002
+
 // Session-based volatility multiplier — rough approximation of real
 // market activity windows. Helps the chart "feel" different at
 // different times of day rather than looking the same 24/7.
@@ -257,10 +264,18 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
     }
   }
 
+  // Force-reverse bias — set by the runtime when the M1 direction streak
+  // hits 5 in a row. Dominates the regime's natural drift so the streak
+  // breaks regardless of FSM state. Auto-expires after forceReverseUntilMs.
+  let forceBias = 0
+  if (s.forceReverseUntilMs && Date.now() < s.forceReverseUntilMs && s.forceReverseDir) {
+    forceBias = (s.forceReverseDir === 'UP' ? -1 : 1) * FORCE_REVERSE_DRIFT_PER_TICK
+  }
+
   // trendBias max ±1 → max ±0.000005 per tick = ±0.3%/min — same
   // scale as a STRONG regime drift, so a slammed bias has noticeable
   // but bounded effect, not an instant runaway.
-  const drift = params.driftPerTick * effectiveDriftMult + s.trendBias * 0.000005
+  const drift = params.driftPerTick * effectiveDriftMult + s.trendBias * 0.000005 + forceBias
 
   // ── Session vol multiplier ───────────────────────────────────────
   const sessionMult = NATURAL_V2 ? sessionVolMultiplier() : 1

@@ -60,6 +60,23 @@ export interface OtcAssetState {
   // trends. Not persisted in the snapshot — on restart the engine
   // just enters a fresh pullback cycle when the FSM decides.
   pullbackTicksRemaining?: number
+  // M1 direction-streak tracker — enforces "max 5 consecutive same-
+  // direction M1 candles" rule. Updated by the runtime when a 60s
+  // candle finalises. When the streak reaches MAX_M1_SAME_DIRECTION,
+  // the runtime arms a forceReverse window for the next M1.
+  m1DirectionStreak?: number
+  m1LastDirection?:   'UP' | 'DOWN'
+  // Time-bounded counter-drift window. While Date.now() < this, stepPrice
+  // injects a fixed counter-direction drift regardless of the regime's
+  // own drift. Used by the streak-break rule above.
+  forceReverseUntilMs?: number
+  forceReverseDir?:     'UP' | 'DOWN'   // the direction we're reversing AWAY FROM
+  // Per-M1-slot wick-injection guard. Stores the openTime (ms) of the
+  // M1 candle we last evaluated; prevents double-injecting a wick into
+  // the same slot. The runtime guarantees ≥90% of M1 candles have at
+  // least one wick by checking near the end of each slot and pushing
+  // the tick outside the body when no wick is present yet.
+  m1WickCheckedSlot?: number
 }
 
 // Output of one engine step. Worker feeds this into candle builders +
