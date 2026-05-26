@@ -9,6 +9,7 @@ import {
   getBinanceTicker,
   listBinanceAssets,
   listInternalAssets,
+  listDisabledAssetIds,
 } from './service.js'
 
 export async function marketRoutes(app: FastifyInstance) {
@@ -25,6 +26,15 @@ export async function marketRoutes(app: FastifyInstance) {
     ])
 
     return reply.send({ assets: [...internalAssets, ...binanceAssets] })
+  })
+
+  // Public list of disabled asset IDs so the frontend can filter OTC
+  // entries out of the selector. Binance entries are already filtered
+  // server-side inside listBinanceAssets, but OTC entries live in
+  // mockData.ts on the frontend.
+  app.get('/disabled-asset-ids', async (_req, reply) => {
+    const ids = await listDisabledAssetIds()
+    return reply.send({ ids })
   })
 
   app.get('/binance/ticker', async (req, reply) => {

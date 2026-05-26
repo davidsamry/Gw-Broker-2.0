@@ -15,6 +15,15 @@ export async function fetchMarketAssets(source?: 'BINANCE' | 'INTERNAL') {
   return data.assets
 }
 
+// IDs the admin has disabled in /admin/ativos. Used by the asset
+// selector to hide OTC entries (Binance entries get filtered
+// server-side inside listBinanceAssets; OTC lives in mockData.ts so
+// the frontend needs this list to filter them).
+export async function fetchDisabledAssetIds(): Promise<string[]> {
+  const { data } = await api.get<{ ids: string[] }>('/market/disabled-asset-ids')
+  return data.ids
+}
+
 export async function fetchBinanceTicker(symbol: string) {
   const { data } = await api.get<{ ticker: MarketTicker }>('/market/binance/ticker', {
     params: { symbol },

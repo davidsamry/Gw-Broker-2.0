@@ -25,7 +25,7 @@ import { DepositoModal } from '@/components/deposito/DepositoModal'
 import { AccountDropdown } from '@/components/layout/AccountDropdown'
 import { ASSETS, type Asset, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { useBinanceTicker } from '@/lib/binanceMarket'
-import { fetchMarketAssets } from '@/lib/marketApi'
+import { fetchMarketAssets, fetchDisabledAssetIds } from '@/lib/marketApi'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -90,10 +90,20 @@ export default function TradingPage() {
 
     async function loadMarketAssets() {
       try {
-        const binanceAssets = await fetchMarketAssets('BINANCE')
+        // Parallel: Binance assets come pre-filtered by admin status
+        // (handled server-side in listBinanceAssets). OTC entries live
+        // in mockData.ts on the frontend, so we also fetch the list of
+        // admin-disabled IDs to hide them client-side.
+        const [binanceAssets, disabledIds] = await Promise.all([
+          fetchMarketAssets('BINANCE'),
+          fetchDisabledAssetIds().catch(() => [] as string[]),
+        ])
         if (!active || binanceAssets.length === 0) return
 
-        const internalAssets = ASSETS.filter((asset) => asset.source !== 'BINANCE')
+        const disabled = new Set(disabledIds)
+        const internalAssets = ASSETS.filter(
+          (asset) => asset.source !== 'BINANCE' && !disabled.has(asset.id),
+        )
         const nextAssets = [...internalAssets, ...binanceAssets]
 
         setAssets(nextAssets)

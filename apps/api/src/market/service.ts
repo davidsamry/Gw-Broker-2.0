@@ -70,3 +70,18 @@ export async function getBinanceCandles(symbol: string, interval: string, limit:
 export function listInternalAssets(): Asset[] {
   return []
 }
+
+// Returns the IDs of every asset the admin has disabled in /admin/ativos.
+// The frontend uses this to hide OTC assets from the selector (Binance
+// already gets filtered server-side inside listBinanceAssets — but OTC
+// entries live in mockData.ts on the frontend, so they need a list of
+// disabled IDs to filter client-side).
+//
+// Single query, < 1ms in practice — runs once on app mount + on every
+// admin toggle (frontend can refetch this).
+export async function listDisabledAssetIds(): Promise<string[]> {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM assets WHERE enabled = FALSE
+  `
+  return rows.map((r) => r.id)
+}
