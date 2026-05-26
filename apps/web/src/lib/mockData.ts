@@ -43,7 +43,7 @@ export const ASSETS: Asset[] = [
   { id: 'eur-usd-otc', symbol: 'EUR/USD', label: 'EUR/USD (OTC)', type: 'OTC', category: 'Moedas',          payout: 85, payout5min: 85, flag1: '🇪🇺', flag2: '🇺🇸', code1: 'eu', code2: 'us', price: 1.08500,  change24h: 0 },
   { id: 'gbp-jpy-otc', symbol: 'GBP/JPY', label: 'GBP/JPY (OTC)', type: 'OTC', category: 'Moedas',          payout: 87, payout5min: 87, flag1: '🇬🇧', flag2: '🇯🇵', code1: 'gb', code2: 'jp', price: 198.50,   change24h: 0 },
   { id: 'btc-usd-otc', symbol: 'BTC/USD', label: 'BTC/USD (OTC)', type: 'OTC', category: 'Cripto',          payout: 82, payout5min: 82, flag1: '₿',  flag2: '🇺🇸', code1: 'crypto:btc', code2: 'us', price: 68000, change24h: 0 },
-  { id: 'gold-otc',    symbol: 'GOLD',    label: 'GOLD (OTC)',    type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🥇', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 2350,    change24h: 0 },
+  { id: 'gold-otc',    symbol: 'GOLD',    label: 'GOLD (OTC)',    type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🥇', flag2: '🇺🇸', code1: 'asset:gold', code2: '', price: 2350,    change24h: 0 },
   { id: 'nasdaq-otc',  symbol: 'NASDAQ',  label: 'NASDAQ (OTC)',  type: 'OTC', category: 'Ações',           payout: 78, payout5min: 78, flag1: '📊', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 18450,   change24h: 0 },
 
   // ── OTC v2 — expansion batch (29 new, migration 20260526020000) ─────────
@@ -67,13 +67,13 @@ export const ASSETS: Asset[] = [
   { id: 'link-usd-otc', symbol: 'LINK/USD', label: 'LINK/USD (OTC)', type: 'OTC', category: 'Cripto', payout: 80, payout5min: 80, flag1: '⬡', flag2: '🇺🇸', code1: 'crypto:link', code2: 'us', price: 14.30,  change24h: 0 },
 
   // 7 Matérias-Primas
-  { id: 'silver-otc',   symbol: 'SILVER',   label: 'SILVER (OTC)',   type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🥈', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 28.50,  change24h: 0 },
-  { id: 'oil-otc',      symbol: 'OIL',      label: 'OIL (OTC)',      type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🛢', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 78.50,  change24h: 0 },
-  { id: 'brent-otc',    symbol: 'BRENT',    label: 'BRENT (OTC)',    type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🛢', flag2: '🇬🇧', code1: 'gb', code2: 'us', price: 82.30,  change24h: 0 },
-  { id: 'copper-otc',   symbol: 'COPPER',   label: 'COPPER (OTC)',   type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '🟤', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 4.20,   change24h: 0 },
-  { id: 'platinum-otc', symbol: 'PLATINUM', label: 'PLATINUM (OTC)', type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '⚪', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 950,    change24h: 0 },
-  { id: 'natgas-otc',   symbol: 'NATGAS',   label: 'NATGAS (OTC)',   type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '🔥', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 2.80,   change24h: 0 },
-  { id: 'wheat-otc',    symbol: 'WHEAT',    label: 'WHEAT (OTC)',    type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '🌾', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 540,    change24h: 0 },
+  { id: 'silver-otc',   symbol: 'SILVER',   label: 'SILVER (OTC)',   type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🥈', flag2: '🇺🇸', code1: 'asset:silver',   code2: '', price: 28.50,  change24h: 0 },
+  { id: 'oil-otc',      symbol: 'OIL',      label: 'OIL (OTC)',      type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🛢', flag2: '🇺🇸', code1: 'asset:oil',      code2: '', price: 78.50,  change24h: 0 },
+  { id: 'brent-otc',    symbol: 'BRENT',    label: 'BRENT (OTC)',    type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🛢', flag2: '🇬🇧', code1: 'asset:brent',    code2: '', price: 82.30,  change24h: 0 },
+  { id: 'copper-otc',   symbol: 'COPPER',   label: 'COPPER (OTC)',   type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '🟤', flag2: '🇺🇸', code1: 'asset:copper',   code2: '', price: 4.20,   change24h: 0 },
+  { id: 'platinum-otc', symbol: 'PLATINUM', label: 'PLATINUM (OTC)', type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '⚪', flag2: '🇺🇸', code1: 'asset:platinum', code2: '', price: 950,    change24h: 0 },
+  { id: 'natgas-otc',   symbol: 'NATGAS',   label: 'NATGAS (OTC)',   type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '🔥', flag2: '🇺🇸', code1: 'asset:natgas',   code2: '', price: 2.80,   change24h: 0 },
+  { id: 'wheat-otc',    symbol: 'WHEAT',    label: 'WHEAT (OTC)',    type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '🌾', flag2: '🇺🇸', code1: 'asset:wheat',    code2: '', price: 540,    change24h: 0 },
 
   // 7 Ações (stocks)
   { id: 'aapl-otc',  symbol: 'AAPL',  label: 'AAPL (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🍎', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 215,  change24h: 0 },
