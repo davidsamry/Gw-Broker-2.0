@@ -920,9 +920,8 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
             style={{ animationDuration: '1.4s' }}
             draggable={false}
           />
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <span className="font-bold text-white">{asset.label}</span>
-            <span className="text-[#8b8f9a]">· Carregando</span>
+          <div className="flex items-center gap-1.5 text-[11px] text-[#8b8f9a]">
+            <span>Carregando</span>
             <span className="flex gap-0.5">
               <span className="w-1 h-1 rounded-full bg-[#8b8f9a] animate-bounce" style={{ animationDelay: '0ms' }} />
               <span className="w-1 h-1 rounded-full bg-[#8b8f9a] animate-bounce" style={{ animationDelay: '150ms' }} />
