@@ -904,17 +904,19 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           or asset switch). chartReady flips false on cleanup of the chart-
           init effect and back to true once the series is created, so this
           covers the brief blank period during which the previous chart is
-          torn down + the new asset's candles are fetched. Pulsing logo +
+          torn down + the new asset's candles are fetched. Pulsing icon +
           asset name + "Carregando..." gives the user feedback that the
           transition is happening (was just a flash of empty bg before).
-          z-20 sits above the chart but below the absolute dropdowns. */}
+          z-20 sits above the chart but below the absolute dropdowns.
+          Uses /vx-icon.png (project favicon, copied to public/) — the
+          icon-only mark, NOT the full wordmark from vx-logo.png. */}
       {!chartReady && (
         <div className="absolute inset-0 z-20 bg-[#151822] flex flex-col items-center justify-center gap-3 pointer-events-none">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/vx-logo.png"
-            alt="VX Global"
-            className="h-12 w-auto opacity-90 animate-pulse"
+            src="/vx-icon.png"
+            alt="VX"
+            className="h-12 w-12 opacity-90 animate-pulse object-contain"
             style={{ animationDuration: '1.4s' }}
             draggable={false}
           />
