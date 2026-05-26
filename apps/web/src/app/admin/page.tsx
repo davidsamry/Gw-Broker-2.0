@@ -59,8 +59,17 @@ export default function AdminDashboardPage() {
       const params = { from: range.from.toISOString(), to: range.to.toISOString() }
       const res    = await api.get<DashboardData>('/admin/dashboard', { params })
       setData(res.data)
-    } catch {
-      setError('Erro ao carregar o dashboard.')
+    } catch (err: any) {
+      // Surface the backend detail so column-missing errors (migration
+      // not applied yet) are diagnosable instead of a generic message.
+      const detail = err?.response?.data?.detail
+      if (detail && /column .* does not exist/i.test(detail)) {
+        setError('Migration pendente no banco. Rode o SQL no Supabase ou reimplante a API.')
+      } else if (detail) {
+        setError(`Erro: ${detail}`)
+      } else {
+        setError('Erro ao carregar o dashboard.')
+      }
     } finally {
       setLoading(false)
     }

@@ -22,7 +22,14 @@ export async function dashboardRoutes(app: FastifyInstance) {
       return reply.send(data)
     } catch (err: any) {
       req.log.error(err)
-      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+      // Surface details so the admin UI can show "column X does not
+      // exist" when migrations are stale instead of generic "Erro".
+      // Safe — endpoint is admin-only.
+      return reply.status(500).send({
+        error:   'INTERNAL_ERROR',
+        detail:  err?.message ?? String(err),
+        pgCode:  err?.code,
+      })
     }
   })
 }
