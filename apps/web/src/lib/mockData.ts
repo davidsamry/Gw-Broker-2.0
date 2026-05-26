@@ -28,7 +28,8 @@ export interface ChartTradeEvent {
   profit?: number
 }
 
-// Catalog: 22 Binance-priced crypto + 5 OTC v2 server-priced assets.
+// Catalog: 22 Binance-priced crypto + 34 OTC v2 server-priced assets
+// (5 launch + 29 expansion from migration 20260526020000).
 // Binance entries point at marketSymbol so the chart uses the Binance kline
 // WebSocket. OTC entries have no marketSymbol or source — the chart routes
 // these to the new OTC engine via /otc/stream (Etapa 4 onwards).
@@ -44,6 +45,44 @@ export const ASSETS: Asset[] = [
   { id: 'btc-usd-otc', symbol: 'BTC/USD', label: 'BTC/USD (OTC)', type: 'OTC', category: 'Cripto',          payout: 82, payout5min: 82, flag1: '₿',  flag2: '🇺🇸', code1: 'crypto:btc', code2: 'us', price: 68000, change24h: 0 },
   { id: 'gold-otc',    symbol: 'GOLD',    label: 'GOLD (OTC)',    type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🥇', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 2350,    change24h: 0 },
   { id: 'nasdaq-otc',  symbol: 'NASDAQ',  label: 'NASDAQ (OTC)',  type: 'OTC', category: 'Ações',           payout: 78, payout5min: 78, flag1: '📊', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 18450,   change24h: 0 },
+
+  // ── OTC v2 — expansion batch (29 new, migration 20260526020000) ─────────
+  // 8 Moedas
+  { id: 'usd-jpy-otc',  symbol: 'USD/JPY',  label: 'USD/JPY (OTC)',  type: 'OTC', category: 'Moedas', payout: 90, payout5min: 90, flag1: '🇺🇸', flag2: '🇯🇵', code1: 'us', code2: 'jp', price: 155.20, change24h: 0 },
+  { id: 'aud-usd-otc',  symbol: 'AUD/USD',  label: 'AUD/USD (OTC)',  type: 'OTC', category: 'Moedas', payout: 89, payout5min: 89, flag1: '🇦🇺', flag2: '🇺🇸', code1: 'au', code2: 'us', price: 0.65,   change24h: 0 },
+  { id: 'usd-cad-otc',  symbol: 'USD/CAD',  label: 'USD/CAD (OTC)',  type: 'OTC', category: 'Moedas', payout: 88, payout5min: 88, flag1: '🇺🇸', flag2: '🇨🇦', code1: 'us', code2: 'ca', price: 1.38,   change24h: 0 },
+  { id: 'usd-chf-otc',  symbol: 'USD/CHF',  label: 'USD/CHF (OTC)',  type: 'OTC', category: 'Moedas', payout: 87, payout5min: 87, flag1: '🇺🇸', flag2: '🇨🇭', code1: 'us', code2: 'ch', price: 0.91,   change24h: 0 },
+  { id: 'eur-gbp-otc',  symbol: 'EUR/GBP',  label: 'EUR/GBP (OTC)',  type: 'OTC', category: 'Moedas', payout: 86, payout5min: 86, flag1: '🇪🇺', flag2: '🇬🇧', code1: 'eu', code2: 'gb', price: 0.86,   change24h: 0 },
+  { id: 'nzd-usd-otc',  symbol: 'NZD/USD',  label: 'NZD/USD (OTC)',  type: 'OTC', category: 'Moedas', payout: 85, payout5min: 85, flag1: '🇳🇿', flag2: '🇺🇸', code1: 'nz', code2: 'us', price: 0.59,   change24h: 0 },
+  { id: 'usd-brl-otc',  symbol: 'USD/BRL',  label: 'USD/BRL (OTC)',  type: 'OTC', category: 'Moedas', payout: 90, payout5min: 90, flag1: '🇺🇸', flag2: '🇧🇷', code1: 'us', code2: 'br', price: 5.50,   change24h: 0 },
+  { id: 'eur-aud-otc',  symbol: 'EUR/AUD',  label: 'EUR/AUD (OTC)',  type: 'OTC', category: 'Moedas', payout: 85, payout5min: 85, flag1: '🇪🇺', flag2: '🇦🇺', code1: 'eu', code2: 'au', price: 1.65,   change24h: 0 },
+
+  // 7 Cripto
+  { id: 'eth-usd-otc',  symbol: 'ETH/USD',  label: 'ETH/USD (OTC)',  type: 'OTC', category: 'Cripto', payout: 82, payout5min: 82, flag1: 'Ξ', flag2: '🇺🇸', code1: 'crypto:eth',  code2: 'us', price: 3500,   change24h: 0 },
+  { id: 'sol-usd-otc',  symbol: 'SOL/USD',  label: 'SOL/USD (OTC)',  type: 'OTC', category: 'Cripto', payout: 82, payout5min: 82, flag1: '◎', flag2: '🇺🇸', code1: 'crypto:sol',  code2: 'us', price: 170,    change24h: 0 },
+  { id: 'xrp-usd-otc',  symbol: 'XRP/USD',  label: 'XRP/USD (OTC)',  type: 'OTC', category: 'Cripto', payout: 80, payout5min: 80, flag1: '◉', flag2: '🇺🇸', code1: 'crypto:xrp',  code2: 'us', price: 0.51,   change24h: 0 },
+  { id: 'bnb-usd-otc',  symbol: 'BNB/USD',  label: 'BNB/USD (OTC)',  type: 'OTC', category: 'Cripto', payout: 82, payout5min: 82, flag1: '🪙', flag2: '🇺🇸', code1: 'crypto:bnb',  code2: 'us', price: 610,    change24h: 0 },
+  { id: 'doge-usd-otc', symbol: 'DOGE/USD', label: 'DOGE/USD (OTC)', type: 'OTC', category: 'Cripto', payout: 80, payout5min: 80, flag1: 'Ð', flag2: '🇺🇸', code1: 'crypto:doge', code2: 'us', price: 0.16,   change24h: 0 },
+  { id: 'ada-usd-otc',  symbol: 'ADA/USD',  label: 'ADA/USD (OTC)',  type: 'OTC', category: 'Cripto', payout: 80, payout5min: 80, flag1: '₳', flag2: '🇺🇸', code1: 'crypto:ada',  code2: 'us', price: 0.45,   change24h: 0 },
+  { id: 'link-usd-otc', symbol: 'LINK/USD', label: 'LINK/USD (OTC)', type: 'OTC', category: 'Cripto', payout: 80, payout5min: 80, flag1: '⬡', flag2: '🇺🇸', code1: 'crypto:link', code2: 'us', price: 14.30,  change24h: 0 },
+
+  // 7 Matérias-Primas
+  { id: 'silver-otc',   symbol: 'SILVER',   label: 'SILVER (OTC)',   type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🥈', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 28.50,  change24h: 0 },
+  { id: 'oil-otc',      symbol: 'OIL',      label: 'OIL (OTC)',      type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🛢', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 78.50,  change24h: 0 },
+  { id: 'brent-otc',    symbol: 'BRENT',    label: 'BRENT (OTC)',    type: 'OTC', category: 'Matérias-Primas', payout: 80, payout5min: 80, flag1: '🛢', flag2: '🇬🇧', code1: 'gb', code2: 'us', price: 82.30,  change24h: 0 },
+  { id: 'copper-otc',   symbol: 'COPPER',   label: 'COPPER (OTC)',   type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '🟤', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 4.20,   change24h: 0 },
+  { id: 'platinum-otc', symbol: 'PLATINUM', label: 'PLATINUM (OTC)', type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '⚪', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 950,    change24h: 0 },
+  { id: 'natgas-otc',   symbol: 'NATGAS',   label: 'NATGAS (OTC)',   type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '🔥', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 2.80,   change24h: 0 },
+  { id: 'wheat-otc',    symbol: 'WHEAT',    label: 'WHEAT (OTC)',    type: 'OTC', category: 'Matérias-Primas', payout: 78, payout5min: 78, flag1: '🌾', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 540,    change24h: 0 },
+
+  // 7 Ações (stocks)
+  { id: 'aapl-otc',  symbol: 'AAPL',  label: 'AAPL (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🍎', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 215,  change24h: 0 },
+  { id: 'msft-otc',  symbol: 'MSFT',  label: 'MSFT (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🪟', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 425,  change24h: 0 },
+  { id: 'googl-otc', symbol: 'GOOGL', label: 'GOOGL (OTC)', type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🔵', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 170,  change24h: 0 },
+  { id: 'amzn-otc',  symbol: 'AMZN',  label: 'AMZN (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '📦', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 185,  change24h: 0 },
+  { id: 'tsla-otc',  symbol: 'TSLA',  label: 'TSLA (OTC)',  type: 'OTC', category: 'Ações', payout: 76, payout5min: 76, flag1: '🚗', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 220,  change24h: 0 },
+  { id: 'meta-otc',  symbol: 'META',  label: 'META (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🔷', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 510,  change24h: 0 },
+  { id: 'nvda-otc',  symbol: 'NVDA',  label: 'NVDA (OTC)',  type: 'OTC', category: 'Ações', payout: 78, payout5min: 78, flag1: '🟢', flag2: '🇺🇸', code1: 'us', code2: 'us', price: 130,  change24h: 0 },
 
   // ── Binance crypto (live kline WS) ──────────────────────────────────────
   { id: 'btc-usdt-binance', symbol: 'BTC/USDT', label: 'Bitcoin / USDT', type: 'Crypto', source: 'BINANCE', marketSymbol: 'BTCUSDT', category: 'Cripto', payout: 95, payout5min: 95, flag1: '₿', flag2: 'USDT', code1: 'crypto:btc', code2: 'us', price: 67420.15, change24h: 1.24 },
