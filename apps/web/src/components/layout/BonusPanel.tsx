@@ -195,8 +195,8 @@ function BonusCard({ bonus, onDeposit }: {
   const title   = buildTitle(bonus)
   const bullets = buildBullets(bonus)
   return (
-    <div className="relative rounded-2xl p-4 overflow-hidden bg-gradient-to-br from-[#6b46c1] via-[#7c3aed] to-[#5b21b6] shadow-xl shadow-purple-900/30">
-      <div className="absolute -top-8 -right-8 w-32 h-32 rounded-full bg-purple-400/20 blur-2xl pointer-events-none" />
+    <div className="relative rounded-2xl p-4 overflow-hidden bg-gradient-to-br from-[#1d4ed8] via-[#2563eb] to-[#1e40af] shadow-xl shadow-blue-900/40">
+      <div className="absolute -top-8 -right-8 w-32 h-32 rounded-full bg-blue-300/25 blur-2xl pointer-events-none" />
 
       <div className="flex items-start justify-between gap-2 mb-3 relative">
         <h3 className="text-[15px] font-bold text-white leading-snug">{title}</h3>
@@ -214,10 +214,10 @@ function BonusCard({ bonus, onDeposit }: {
 
       <button
         onClick={onDeposit}
-        className="w-full flex items-center justify-center gap-2 bg-white text-[#3a2a5a] font-bold text-sm py-3 rounded-xl hover:bg-white/90 transition-colors relative"
+        className="w-full flex items-center justify-center gap-2 bg-white text-[#1e3a8a] font-bold text-sm py-3 rounded-xl hover:bg-white/90 transition-colors relative"
       >
         <span>Depositar agora</span>
-        <ArrowRight size={14} className="text-[#3a2a5a]" />
+        <ArrowRight size={14} className="text-[#1e3a8a]" />
       </button>
     </div>
   )
