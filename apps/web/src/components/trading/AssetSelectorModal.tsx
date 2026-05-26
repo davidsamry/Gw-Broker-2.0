@@ -88,10 +88,17 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
           right below this row, and the current asset is visible in the
           main top bar. Was a redundant control. */}
 
-      {/* Panel header */}
-      <div className="flex items-center justify-between px-4 pb-3">
-        <h2 className="text-sm font-bold text-white">Selecione o par de negociação</h2>
-        <button onClick={onClose} className="text-[#8b8f9a] hover:text-white transition-colors">
+      {/* Panel header — proper breathing room now that the chip above
+          was removed. pt-5 gives 20px from the modal's top edge, pb-4
+          separates from the tabs below. Heading bumped to text-[15px]
+          so it doesn't feel undersized at this padding. Close button
+          gets a rounded hit area matching other modals in the app. */}
+      <div className="flex items-center justify-between px-4 pt-5 pb-4">
+        <h2 className="text-[15px] font-bold text-white">Selecione o par de negociação</h2>
+        <button
+          onClick={onClose}
+          className="w-7 h-7 flex items-center justify-center rounded-full text-[#8b8f9a] hover:text-white hover:bg-white/10 transition-colors"
+        >
           <X size={16} />
         </button>
       </div>
