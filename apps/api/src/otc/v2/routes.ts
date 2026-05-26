@@ -106,8 +106,13 @@ export async function otcV2Routes(app: FastifyInstance) {
     const client = registerClient({ assets: allowAssets, timeframe: onlyTf })
     reply.raw.write(`: connected id=${client.id}\n\n`)
 
-    const TICK_THROTTLE_MS   = 200    // ≈ 5Hz
-    const CANDLE_THROTTLE_MS = 1000   // 1Hz
+    // 2026-05-25 — user reported "movement feels slow". Was 200ms/1000ms
+    // which capped the visible rate at 5Hz (ticks) and 1Hz (candle
+    // updates) regardless of how fast the engine produces. Dropped to
+    // match (and pace with) the engine running at 10-20Hz. Pair with
+    // the asset config migration that bumps speedMultiplier 1→2.
+    const TICK_THROTTLE_MS   = 50     // ≈ 20Hz max to client
+    const CANDLE_THROTTLE_MS = 250    // 4Hz candle in-progress updates
 
     // Fase 6 backpressure: when reply.raw.write returns false the
     // kernel's TCP send buffer is full. Subsequent writes get queued
