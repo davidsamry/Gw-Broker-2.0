@@ -209,6 +209,7 @@ export default function CadastroOtcPage() {
           </p>
         </div>
         <button
+          type="button"
           onClick={toggleMaster}
           disabled={busy}
           className={cn(
@@ -216,9 +217,14 @@ export default function CadastroOtcPage() {
             settings.enabled ? 'bg-emerald-500' : 'bg-[#2a2e3b]',
           )}
         >
+          {/* Explicit left-0.5 + standard translate-x-6 (24px) — same fix
+              as the UserDetailDrawer toggle. Implicit `left: auto` made
+              the knob render outside the pill in some browser/layout
+              combos. Math: button 48px, knob 20px, 2px inset on each
+              side → translate 24px when ON. */}
           <span className={cn(
-            'absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform',
-            settings.enabled ? 'translate-x-[26px]' : 'translate-x-0.5',
+            'absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform',
+            settings.enabled ? 'translate-x-6' : 'translate-x-0',
           )} />
         </button>
       </div>
@@ -341,6 +347,7 @@ export default function CadastroOtcPage() {
                   </td>
                   <td className="px-4 py-3">
                     <button
+                      type="button"
                       onClick={() => toggleSignal(s)}
                       className={cn(
                         'w-10 h-5 rounded-full relative transition-colors',
@@ -348,8 +355,8 @@ export default function CadastroOtcPage() {
                       )}
                     >
                       <span className={cn(
-                        'absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform',
-                        s.enabled ? 'translate-x-5' : 'translate-x-0.5',
+                        'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform',
+                        s.enabled ? 'translate-x-5' : 'translate-x-0',
                       )} />
                     </button>
                   </td>
