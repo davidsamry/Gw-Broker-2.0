@@ -16,6 +16,7 @@
 // shim for back-compat.
 
 import type { OtcAssetState, OtcRegime } from '../types.js'
+import { applyMicroDynamics } from './microdynamics.js'
 
 // Fase 5 naturalidade — set OTC_NATURAL_V2=false to disable all of
 // pullback / micro pullback / session multiplier / counter-trend
@@ -333,7 +334,17 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
 
   s.price         = clamped
   s.smoothedPrice = smoothed
-  return smoothed
+  // Macro state is finalised. The MICRO layer (Fase M1-Naturalization)
+  // perturbs the EMITTED price with tick-scale wiggle that creates
+  // visible wicks + body variation on M1 candles. CRITICAL: do NOT
+  // store this back into s.smoothedPrice — the macro EMA needs clean
+  // continuity across ticks, and the micro layer has its own state
+  // (mean-reverting AR(1), 5-sub-regime FSM) inside microdynamics.ts.
+  // Multiplicative, mean-zero — bounded contribution well under the
+  // catastrophic clamp protection enforced above on `clamped`.
+  return NATURAL_V2
+    ? applyMicroDynamics(s.config.id, smoothed, effectiveVol, Date.now(), rand)
+    : smoothed
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

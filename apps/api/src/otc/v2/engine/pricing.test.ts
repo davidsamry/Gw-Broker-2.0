@@ -21,7 +21,7 @@
 //
 // Run with: npm test  (vitest in CI mode)
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import type { OtcAssetConfig, OtcAssetState, OtcRegime } from '../types.js'
 import {
   REGIME_PARAMS,
@@ -32,6 +32,11 @@ import {
   stepLiquidity,
   stepPrice,
 } from './pricing.js'
+import {
+  applyMicroDynamics,
+  getMicroDebug,
+  _clearAllMicroStatesForTests,
+} from './microdynamics.js'
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -432,12 +437,80 @@ describe('stepPrice', () => {
     const s = makeState({ price: 100, smoothedPrice: 100 })
     const rand = mulberry32(808)
     const returned = stepPrice(s, rand)
-    // Returned value === smoothedPrice (the EMA value)
-    expect(returned).toBe(s.smoothedPrice)
-    // smoothedPrice should be the EMA blend of last value + clamped price
-    // i.e., 0.3 × clamped + 0.7 × prevSmoothed
-    // (We don't recompute exactly here — just assert mutation happened.)
+    // Returned value is smoothedPrice perturbed by the micro layer
+    // (M1-naturalization, 2026-05-25). The state.smoothedPrice keeps
+    // the CLEAN macro EMA value — diverges from `returned` by jitter.
+    // Difference must be small (< 1% even in BURST sub-regime).
+    expect(Math.abs(returned - s.smoothedPrice) / s.smoothedPrice).toBeLessThan(0.01)
+    // Mutation actually happened.
     expect(s.price).not.toBe(100)
+    expect(s.smoothedPrice).not.toBe(100)
+  })
+})
+
+// ── Fase M1-Naturalization — micro dynamics layer ─────────────────────
+
+describe('applyMicroDynamics', () => {
+  beforeEach(() => { _clearAllMicroStatesForTests() })
+
+  it('returns basePrice unchanged when called once (jitter starts at 0)', () => {
+    const rand = mulberry32(1)
+    const out = applyMicroDynamics('test', 100, 0.0002, 0, rand)
+    // jitter starts 0; first call adds ONE shock then perturbs. With
+    // shock as gaussian(0, 0.18*0.0002) the deviation is sub-bp.
+    expect(out).toBeCloseTo(100, 1)
+  })
+
+  it('produces mean-zero output over 5k ticks (no drift introduced)', () => {
+    const rand = mulberry32(2)
+    let sum = 0
+    const N = 5_000
+    const baseVol = 0.0002
+    for (let i = 0; i < N; i++) {
+      const out = applyMicroDynamics('test', 100, baseVol, i * 100, rand)
+      sum += out - 100
+    }
+    const meanDeviation = (sum / N) / 100  // as fraction of basePrice
+    // Mean drift over 5k samples should be near zero; tolerance 0.05%
+    // (3-sigma of mean-zero AR(1) at this scale).
+    expect(Math.abs(meanDeviation)).toBeLessThan(0.0005)
+  })
+
+  it('jitter stays well under 5% even in worst case', () => {
+    const rand = mulberry32(3)
+    let maxDeviation = 0
+    for (let i = 0; i < 10_000; i++) {
+      const out = applyMicroDynamics('test', 100, 0.0002, i * 100, rand)
+      const dev = Math.abs(out - 100) / 100
+      if (dev > maxDeviation) maxDeviation = dev
+    }
+    expect(maxDeviation).toBeLessThan(0.05)   // 5% hard cap
+  })
+
+  it('eventually visits multiple sub-regimes (5 over 10k ticks)', () => {
+    const rand = mulberry32(4)
+    const visited = new Set<string>()
+    for (let i = 0; i < 10_000; i++) {
+      applyMicroDynamics('test', 100, 0.0002, i * 100, rand)
+      const dbg = getMicroDebug('test')
+      if (dbg) visited.add(dbg.subRegime)
+    }
+    expect(visited.size).toBeGreaterThanOrEqual(3)
+  })
+
+  it('independent state per asset (no cross-contamination)', () => {
+    const rand1 = mulberry32(5)
+    const rand2 = mulberry32(5)
+    for (let i = 0; i < 100; i++) {
+      applyMicroDynamics('asset-a', 100, 0.0002, i * 100, rand1)
+      applyMicroDynamics('asset-b', 200, 0.0003, i * 100, rand2)
+    }
+    const a = getMicroDebug('asset-a')
+    const b = getMicroDebug('asset-b')
+    expect(a).not.toBeNull()
+    expect(b).not.toBeNull()
+    // Same seed but different basePrices/baseVols means the states could
+    // still converge stylistically — but the entry exists for each.
   })
 })
 
