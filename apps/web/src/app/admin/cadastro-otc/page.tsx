@@ -50,23 +50,48 @@ export default function CadastroOtcPage() {
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
-    try {
-      const [sigRes, setRes, otcRes] = await Promise.all([
-        api.get<{ signals: Signal[] }>('/admin/manipulation/signals'),
-        api.get<Settings>('/admin/manipulation/settings'),
-        api.get<{ assets: any[] }>('/admin/otc'),
-      ])
-      setSignals(sigRes.data.signals)
-      setSettings(setRes.data)
-      // Engine assets list — same source the OTC admin panel uses.
-      setAssets((otcRes.data.assets ?? []).map((a: any) => ({
+    // Independent fetches — partial success is OK. If signals fails (e.g.,
+    // migration not applied yet) the page still shows the master toggle
+    // + asset list + form, so the admin can diagnose / retry without
+    // the whole page being broken.
+    const [sigRes, setRes, otcRes] = await Promise.allSettled([
+      api.get<{ signals: Signal[] }>('/admin/manipulation/signals'),
+      api.get<Settings>('/admin/manipulation/settings'),
+      api.get<{ assets: any[] }>('/admin/otc'),
+    ])
+
+    const errs: string[] = []
+    if (sigRes.status === 'fulfilled') {
+      setSignals(sigRes.value.data.signals)
+    } else {
+      const detail = (sigRes.reason as any)?.response?.data?.detail
+                  ?? (sigRes.reason as any)?.response?.data?.error
+                  ?? (sigRes.reason as any)?.message
+      if (detail && /relation .* does not exist|does not exist/i.test(detail)) {
+        errs.push('Migration pendente: tabela otc_manipulation_signals não existe. Aplique a migration no Supabase (ou reimplante a API).')
+      } else {
+        errs.push(`Sinais: ${detail ?? 'falha'}`)
+      }
+    }
+    if (setRes.status === 'fulfilled') {
+      setSettings(setRes.value.data)
+    } else {
+      const detail = (setRes.reason as any)?.response?.data?.detail
+                  ?? (setRes.reason as any)?.message
+      if (!errs.some((e) => e.startsWith('Migration'))) {
+        errs.push(`Configuração: ${detail ?? 'falha'}`)
+      }
+    }
+    if (otcRes.status === 'fulfilled') {
+      setAssets((otcRes.value.data.assets ?? []).map((a: any) => ({
         id: a.id, symbol: a.symbol, name: a.name,
       })))
-    } catch {
-      setError('Erro ao carregar dados.')
-    } finally {
-      setLoading(false)
+    } else {
+      errs.push(`Lista de ativos: ${(otcRes.reason as any)?.message ?? 'falha'}`)
     }
+
+    if (errs.length > 0) setError(errs.join(' · '))
+    setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])

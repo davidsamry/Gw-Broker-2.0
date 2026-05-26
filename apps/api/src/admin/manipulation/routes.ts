@@ -31,9 +31,17 @@ const settingsBody = z.object({
 
 export async function manipulationAdminRoutes(app: FastifyInstance) {
   // ── Master toggle ──
-  app.get('/settings', async (_req, reply) => {
-    const data = await getManipulationSettings()
-    return reply.send(data)
+  app.get('/settings', async (req, reply) => {
+    try {
+      const data = await getManipulationSettings()
+      return reply.send(data)
+    } catch (err: any) {
+      req.log.error(err)
+      return reply.status(500).send({
+        error: 'INTERNAL_ERROR',
+        detail: err?.message ?? String(err),
+      })
+    }
   })
 
   app.patch('/settings', async (req, reply) => {
@@ -41,14 +49,27 @@ export async function manipulationAdminRoutes(app: FastifyInstance) {
     if (!parsed.success) {
       return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
     }
-    const data = await setManipulationEnabled(parsed.data.enabled)
-    return reply.send(data)
+    try {
+      const data = await setManipulationEnabled(parsed.data.enabled)
+      return reply.send(data)
+    } catch (err: any) {
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR', detail: err?.message })
+    }
   })
 
   // ── Signals CRUD ──
-  app.get('/signals', async (_req, reply) => {
-    const data = await listManipulationSignals()
-    return reply.send({ signals: data })
+  app.get('/signals', async (req, reply) => {
+    try {
+      const data = await listManipulationSignals()
+      return reply.send({ signals: data })
+    } catch (err: any) {
+      req.log.error(err)
+      return reply.status(500).send({
+        error: 'INTERNAL_ERROR',
+        detail: err?.message ?? String(err),
+      })
+    }
   })
 
   app.post('/signals', async (req, reply) => {
