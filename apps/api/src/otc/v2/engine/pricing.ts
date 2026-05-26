@@ -120,7 +120,10 @@ export const REGIME_PARAMS: Record<OtcRegime, RegimeParams> = {
     },
   },
   TREND_UP_STRONG: {
-    driftPerTick: 0.000015,        // ~0.9% per minute
+    // 2026-05-26 calibration — was 0.000015 (~0.9%/min). Cut to 0.000010
+    // (~0.6%/min). Combined with the strengthened reversion below, this
+    // keeps strong trends from running 40%+ off seed within 15 min.
+    driftPerTick: 0.000010,
     volMultiplier: 1.2,
     durMinMs: 10_000, durMaxMs: 30_000,
     transitions: {
@@ -138,7 +141,8 @@ export const REGIME_PARAMS: Record<OtcRegime, RegimeParams> = {
     },
   },
   TREND_DOWN_STRONG: {
-    driftPerTick: -0.000015,
+    // 2026-05-26 calibration — symmetric with TREND_UP_STRONG above.
+    driftPerTick: -0.000010,
     volMultiplier: 1.2,
     durMinMs: 10_000, durMaxMs: 30_000,
     transitions: {
@@ -281,33 +285,35 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
   const sessionMult = NATURAL_V2 ? sessionVolMultiplier() : 1
   const effectiveVol = s.config.volatilityBase * params.volMultiplier * s.volume * sessionMult
 
-  // Reversion anchors the price to seed over minutes/hours. Was bumped
-  // 0.0002 → 0.0004 in M4 then softened to 0.00015 in Etapa B (2026-05-25)
-  // after observing the chart felt "over-anchored" — every trend got
-  // snapped back too fast. The soft barrier (added in M4) is now the
-  // primary safety net against runaway; reversion is back to a gentle
-  // pull that lets trends sustain for minutes before retracing.
+  // Reversion anchors the price to seed over minutes/hours. History:
+  //   0.0002 → 0.0004 (M4, M4 over-corrected) → 0.00015 (Etapa B, too weak,
+  //   let prices drift 40%+ off seed in 15 min — task #113) → 0.0005
+  //   (2026-05-26, 3× the Etapa B strength). With reversion this strong,
+  //   prices snap back toward seed by 0.3%/tick when 1% off, 30%/tick when
+  //   off the catastrophic clamp — enough that strong trends bend before
+  //   they break the chart's auto-scale.
   const distRatio = (s.price - s.config.seedPrice) / s.config.seedPrice
-  const reversion = -0.00015 * distRatio
+  const reversion = -0.0005 * distRatio
 
-  // Fase M4 — soft barrier; Etapa B threshold raised 0.30 → 0.35.
-  // Engages later so trends can extend into "wide range" territory
-  // (±35% from seed) before the engine starts pulling back. Quadratic
-  // growth past the threshold still guarantees the hard clamp at ±50%
-  // is virtually never reached in normal operation.
+  // Fase M4 soft barrier; 2026-05-26 task #113 calibration: threshold
+  // lowered 0.35 → 0.20 (engages MUCH earlier so prices don't get a free
+  // pass past ±35%) and scale bumped 0.05 → 0.15 (3× stronger pull).
+  // Combined with the strengthened reversion above, this keeps the chart
+  // visually within a ±20% band most of the time. The hard clamp at ±50%
+  // is now genuinely unreachable.
   //
   //   distRatio   barrier per tick    per-second pull
-  //   0.35        0                   0
-  //   0.40        ±0.000125           ±0.13%/sec
-  //   0.45        ±0.0005             ±0.5%/sec
-  //   0.50        ±0.001125           ±1.1%/sec
+  //   0.20        0                   0
+  //   0.25        ±0.000375           ±0.4%/sec
+  //   0.30        ±0.0015             ±1.5%/sec
+  //   0.40        ±0.006              ±6%/sec       (catastrophic snap-back)
   //
   // Smooth onset (= 0 at boundary) prevents the chart from "jolting"
   // the moment the barrier activates.
   let softBarrier = 0
   if (NATURAL_V2) {
-    const SOFT_BARRIER_THRESHOLD = 0.35
-    const SOFT_BARRIER_SCALE     = 0.05
+    const SOFT_BARRIER_THRESHOLD = 0.20
+    const SOFT_BARRIER_SCALE     = 0.15
     const absDist = Math.abs(distRatio)
     if (absDist > SOFT_BARRIER_THRESHOLD) {
       const over = absDist - SOFT_BARRIER_THRESHOLD

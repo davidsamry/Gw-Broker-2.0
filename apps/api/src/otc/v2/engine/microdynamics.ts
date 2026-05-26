@@ -67,20 +67,18 @@ const DURATION_RANGES: Record<MicroSubRegime, [number, number]> = {
 }
 
 // Multiplier applied to per-tick effectiveVol to size the jitter shock.
-// 2026-05-25 — multipliers bumped ~2.7× after the original numbers
-// produced jitter that was too quiet against the macro trend: a strong
-// TREND_DOWN_STRONG was creating 6+ consecutive bodies with virtually
-// no wicks. New scale targets ~0.3% wick magnitude at 3-sigma during
-// the BURST sub-regime — visible against typical 0.5-1% bodies.
-// Math at phi=0.88: jitter equilibrium std = sigma / √(1 - phi²) =
-// 2.1 × sigma, so per-tick shock std 2.7× larger → equilibrium ~3×
-// larger → wicks ~3× more visible.
+// History:
+//   • Original: tuned for "BURST is barely visible" — caused flat bodies
+//   • 2026-05-25: bumped 2.7× to get visible wicks (~0.3% at 3-sigma)
+//   • 2026-05-26 (task #113): cut BURST 3.5 → 2.0 + trim others. The 2.7×
+//     bump combined with the macro trend produced 5-15% intra-minute
+//     wicks across all assets — far above any realistic OTC range.
 const VOL_MULT: Record<MicroSubRegime, number> = {
-  CALM:          0.50,
-  ACTIVE:        1.40,
-  CONSOLIDATION: 0.28,
-  BURST:         3.50,
-  ABSORPTION:    0.80,
+  CALM:          0.40,
+  ACTIVE:        1.00,
+  CONSOLIDATION: 0.25,
+  BURST:         2.00,
+  ABSORPTION:    0.60,
 }
 
 // AR(1) coefficient (decay rate). Higher = jitter lingers longer between
