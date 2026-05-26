@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { Logo } from '@/components/layout/Logo'
@@ -16,7 +16,18 @@ const COUNTRIES = [
 // BRL-only. Add entries here when those rails support new currencies.
 const CURRENCIES = ['BRL']
 
+// Next.js 16 prerender bailout — any client component reading from
+// useSearchParams() must live inside a <Suspense> boundary, otherwise
+// the static export fails. We wrap the real implementation here.
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#0d1117]" />}>
+      <LoginPageInner />
+    </Suspense>
+  )
+}
+
+function LoginPageInner() {
   // Initial tab honours ?tab=register so marketing/landing pages can deep-link
   // straight to the signup form. Anything else (or no param) → login.
   const searchParams = useSearchParams()

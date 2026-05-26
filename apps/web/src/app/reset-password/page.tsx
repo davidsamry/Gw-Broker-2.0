@@ -4,14 +4,24 @@
 // URL: /reset-password?token=<64-hex>
 // User types new password (twice), submits, gets bounced to /login.
 
-import { useState, useEffect, type FormEvent } from 'react'
+import { useState, useEffect, Suspense, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Lock, Check, AlertCircle } from 'lucide-react'
 import { api } from '@/lib/api'
 import { Logo } from '@/components/layout/Logo'
 
+// Next.js 16 prerender bailout — useSearchParams must live in a Suspense
+// boundary or the static export fails. Wrap the real page here.
 export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#0d1117]" />}>
+      <ResetPasswordInner />
+    </Suspense>
+  )
+}
+
+function ResetPasswordInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const token = searchParams?.get('token') ?? ''
