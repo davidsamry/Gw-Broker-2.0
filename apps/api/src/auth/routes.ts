@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
+import { z } from 'zod'
 import { loginSchema, registerSchema, updateProfileSchema, twoFactorCodeSchema, kycSubmitSchema } from './schema.js'
 import { getKycSubmission, getUserById, loginUser, registerUser, submitKyc, updateUserProfile } from './service.js'
+import { requestPasswordReset, resetPasswordWithToken } from './passwordReset.js'
 import { listOperations } from '../operations/service.js'
 import { listWithdrawals } from '../withdrawals/service.js'
 import { listTransactions } from '../transactions/service.js'
@@ -79,6 +81,50 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/logout', async (_req, reply) => {
     reply.clearCookie(REFRESH_COOKIE, { path: '/' })
     return reply.send({ ok: true })
+  })
+
+  // ── Password reset (forgot + confirm) ────────────────────────────────
+  // ALWAYS 200 on /forgot-password to avoid the user-enumeration oracle.
+  // /reset-password returns explicit error codes so the page can show
+  // "link expirado" vs "link inválido" distinctly.
+  const forgotSchema = z.object({
+    email: z.string().email().toLowerCase().trim(),
+  })
+  app.post('/forgot-password', async (req, reply) => {
+    const parsed = forgotSchema.safeParse(req.body)
+    if (!parsed.success) {
+      // Even invalid email shape returns 200 — same enumeration concern.
+      return reply.send({ ok: true })
+    }
+    try {
+      await requestPasswordReset(parsed.data.email)
+    } catch (err) {
+      req.log.error(err)
+      // Still 200 — never leak that the request failed mid-flight.
+    }
+    return reply.send({ ok: true })
+  })
+
+  const resetSchema = z.object({
+    token:    z.string().length(64).regex(/^[a-f0-9]+$/, 'token inválido'),
+    password: z.string().min(8).max(72),
+  })
+  app.post('/reset-password', async (req, reply) => {
+    const parsed = resetSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
+    }
+    try {
+      await resetPasswordWithToken(parsed.data.token, parsed.data.password)
+      return reply.send({ ok: true })
+    } catch (err: any) {
+      const code = err.message
+      if (code === 'TOKEN_INVALID' || code === 'TOKEN_USED' || code === 'TOKEN_EXPIRED' || code === 'PASSWORD_TOO_SHORT') {
+        return reply.status(400).send({ error: code })
+      }
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
   })
 
   app.get('/me', { preHandler: [(app as any).authenticate] }, async (req, reply) => {

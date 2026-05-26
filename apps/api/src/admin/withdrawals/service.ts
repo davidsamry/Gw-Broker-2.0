@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../prisma.js'
+import { sendEmailAsync } from '../../email/service.js'
 
 // Admin withdrawals management. Raw SQL (consistent with other admin modules).
 // User-side cancel still lives in apps/api/src/withdrawals/service.ts — this
@@ -150,6 +151,7 @@ export async function approveWithdrawal(adminId: string, withdrawalId: string) {
       AND status = 'PENDING'::"WithdrawalStatus"
   `
   if (result === 0) throw new Error('WITHDRAWAL_NOT_PENDING')
+  await notifyWithdrawalResult(withdrawalId, 'APPROVED')
 }
 
 // Reject a PENDING withdrawal: refund balance + insert refund transaction
@@ -190,4 +192,33 @@ export async function rejectWithdrawal(adminId: string, withdrawalId: string, re
     SELECT id FROM upd_wd
   `
   if (rows.length === 0) throw new Error('WITHDRAWAL_NOT_PENDING')
+  await notifyWithdrawalResult(withdrawalId, 'REJECTED', reason)
+}
+
+async function notifyWithdrawalResult(withdrawalId: string, outcome: 'APPROVED' | 'REJECTED', reason?: string): Promise<void> {
+  try {
+    const info = await prisma.$queryRaw<Array<{
+      email: string; name: string; amount: string
+    }>>`
+      SELECT u.email, u.name, w.amount::text AS amount
+      FROM withdrawals w
+      JOIN accounts a ON a.id = w."accountId"
+      JOIN users    u ON u.id = a."userId"
+      WHERE w.id = ${withdrawalId}
+      LIMIT 1
+    `
+    const row = info[0]
+    if (!row) return
+    sendEmailAsync({
+      templateKey: outcome === 'APPROVED' ? 'WITHDRAWAL_APPROVED' : 'WITHDRAWAL_REJECTED',
+      to:          row.email,
+      vars:        {
+        name:   row.name,
+        amount: Number(row.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        reason: reason ?? '',
+      },
+    })
+  } catch (err) {
+    console.error(`[admin/withdrawals] notify ${outcome} email lookup failed`, err)
+  }
 }

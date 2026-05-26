@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../prisma.js'
+import { sendEmailAsync } from '../../email/service.js'
 
 // KYC admin operations — list/filter/approve/reject submissions. Raw SQL so
 // we don't depend on the regenerated Prisma client (kycSubmission model is
@@ -122,6 +123,8 @@ export async function approveKyc(adminId: string, submissionId: string) {
     `
     return true
   })
+
+  await notifyKycResult(submissionId, 'APPROVED')
   return result
 }
 
@@ -145,5 +148,30 @@ export async function rejectKyc(adminId: string, submissionId: string, reason: s
     `
     return true
   })
+
+  await notifyKycResult(submissionId, 'REJECTED', reason)
   return result
+}
+
+// Helper: fires KYC_APPROVED or KYC_REJECTED to the submission's owner.
+// Async + fire-and-forget — email failure never affects admin's action.
+async function notifyKycResult(submissionId: string, outcome: 'APPROVED' | 'REJECTED', reason?: string): Promise<void> {
+  try {
+    const info = await prisma.$queryRaw<Array<{ email: string; name: string }>>`
+      SELECT u.email, u.name
+      FROM kyc_submissions k
+      JOIN users u ON u.id = k."userId"
+      WHERE k.id = ${submissionId}
+      LIMIT 1
+    `
+    const row = info[0]
+    if (!row) return
+    sendEmailAsync({
+      templateKey: outcome === 'APPROVED' ? 'KYC_APPROVED' : 'KYC_REJECTED',
+      to:          row.email,
+      vars:        { name: row.name, reason: reason ?? '' },
+    })
+  } catch (err) {
+    console.error(`[admin/kyc] notify ${outcome} email lookup failed`, err)
+  }
 }

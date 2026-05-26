@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { sendEmailAsync } from '../email/service.js'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 import { createCashin, isConfigured } from '../payments/bspay.js'
@@ -201,6 +202,34 @@ export async function confirmDepositById(depositId: string) {
     }
   } catch (err) {
     console.error(`[deposits] activateForPaidDeposit failed for deposit=${depositId}`, err)
+  }
+
+  // Notification email — fire-and-forget. Pull user + amount in a single
+  // join so we don't pay an extra RTT just for the recipient.
+  try {
+    const info = await prisma.$queryRaw<Array<{
+      email: string; name: string; amount: string
+    }>>`
+      SELECT u.email, u.name, d.amount::text AS amount
+      FROM deposits d
+      JOIN accounts a ON a.id = d."accountId"
+      JOIN users    u ON u.id = a."userId"
+      WHERE d.id = ${depositId}
+      LIMIT 1
+    `
+    const row = info[0]
+    if (row) {
+      sendEmailAsync({
+        templateKey: 'DEPOSIT_CONFIRMED',
+        to:          row.email,
+        vars:        {
+          name:   row.name,
+          amount: Number(row.amount).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        },
+      })
+    }
+  } catch (err) {
+    console.error('[deposits] confirmation email lookup failed', err)
   }
 
   return true

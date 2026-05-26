@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../prisma.js'
+import { sendEmailAsync } from '../../email/service.js'
 
 // Admin tickets management — raw SQL throughout (consistent with the other
 // admin services + tolerant of stale Prisma client during schema iterations).
@@ -204,6 +205,31 @@ export async function replyAsAdmin(adminId: string, ticketId: string, body: stri
     SELECT id FROM ins_msg
   `
   if (rows.length === 0) throw new Error('TICKET_NOT_FOUND')
+
+  // Email the user that there's a new reply waiting. Fire-and-forget —
+  // ticket reply must succeed even if email is down.
+  try {
+    const info = await prisma.$queryRaw<Array<{
+      email: string; name: string; subject: string
+    }>>`
+      SELECT u.email, u.name, t.subject
+      FROM tickets t
+      JOIN users   u ON u.id = t."userId"
+      WHERE t.id = ${ticketId}
+      LIMIT 1
+    `
+    const row = info[0]
+    if (row) {
+      sendEmailAsync({
+        templateKey: 'TICKET_REPLIED',
+        to:          row.email,
+        vars:        { name: row.name, ticket_subject: row.subject, message: body },
+      })
+    }
+  } catch (err) {
+    console.error('[admin/tickets] reply notification lookup failed', err)
+  }
+
   return rows[0].id
 }
 

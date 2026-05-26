@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { prisma } from '../prisma.js'
 import type { LoginInput, RegisterInput, UpdateProfileInput, KycSubmitInput } from './schema.js'
 import { verifyTotp } from './twoFactor.js'
+import { sendEmailAsync } from '../email/service.js'
 
 const DEMO_BALANCE = Number(process.env.DEMO_INITIAL_BALANCE ?? 10000)
 
@@ -41,6 +42,14 @@ export async function registerUser(input: RegisterInput) {
       amount:      DEMO_BALANCE,
       description: 'Saldo inicial da conta demo',
     },
+  })
+
+  // Fire-and-forget welcome email. Failure (provider down, template
+  // disabled) logs to stderr but never blocks the registration flow.
+  sendEmailAsync({
+    templateKey: 'WELCOME',
+    to:          user.email,
+    vars:        { name: user.name },
   })
 
   return sanitizeUser(user)

@@ -235,7 +235,11 @@ export default function LoginPage() {
                         <input type="checkbox" className="accent-blue-500 w-3.5 h-3.5" />
                         Lembrar-me
                       </label>
-                      <button type="button" className="text-blue-400 hover:text-blue-300 transition-colors">
+                      <button
+                        type="button"
+                        onClick={() => router.push('/forgot-password')}
+                        className="text-blue-400 hover:text-blue-300 transition-colors"
+                      >
                         Esqueceu sua senha?
                       </button>
                     </div>

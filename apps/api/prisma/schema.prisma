@@ -204,10 +204,11 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  accounts        Account[]
-  kycSubmission   KycSubmission?
-  tickets         Ticket[]
-  ticketMessages  TicketMessage[]
+  accounts            Account[]
+  kycSubmission       KycSubmission?
+  tickets             Ticket[]
+  ticketMessages      TicketMessage[]
+  passwordResetTokens PasswordResetToken[]
 
   @@map("users")
 }
@@ -755,4 +756,40 @@ model ForexEngineSnapshot {
   updatedAt    DateTime  @default(now())
 
   @@map("forex_engine_snapshot")
+}
+
+// ── Email system ───────────────────────────────────────────────────────
+// Admin-editable templates rendered with Handlebars-style {{var}}
+// substitution. `key` is the stable identifier the backend looks up
+// (e.g. WELCOME, PASSWORD_RESET); `name` is the friendly label shown
+// in the admin panel. `active=false` short-circuits the send so admin
+// can disable a category without losing the template body.
+model EmailTemplate {
+  key         String    @id              // 'WELCOME', 'PASSWORD_RESET', etc.
+  name        String                     // 'Boas-vindas'
+  description String                     // 'Enviado após cadastro concluído'
+  subject     String                     // 'Bem-vindo à Vx Global!'
+  htmlBody    String                     // full HTML, supports {{vars}}
+  variables   String[]  @default([])     // ['name', 'cpf'] — for admin UI hints
+  active      Boolean   @default(true)
+  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime  @default(now())
+
+  @@map("email_templates")
+}
+
+// One-shot tokens for the forgot-password flow. Stored hashed (sha256)
+// so a DB dump can't be replayed; expire after 1h and burn on use.
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique             // sha256 of the raw token sent in the email
+  expiresAt  DateTime
+  usedAt     DateTime?                     // null = still valid; non-null = burned
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
