@@ -193,10 +193,10 @@ export default function TradingPage() {
       setActiveTrades(prev => prev.filter(t => t.id !== trade.id))
     } else { // RESOLVED
       setActiveTrades(prev => prev.filter(t => t.id !== trade.id))
+      // Persist the result card on the chart until the user clicks its X.
+      // (Previously auto-dismissed after 4s — founder feedback: traders want
+      // to keep the result visible while they analyse the next setup.)
       setChartTradeEvents(prev => [...prev.filter(t => t.id !== trade.id), trade])
-      setTimeout(() => {
-        setChartTradeEvents(prev => prev.filter(t => t.id !== trade.id))
-      }, 4000)
     }
 
     // No refreshAccounts() — balance is now mutated locally by the trading

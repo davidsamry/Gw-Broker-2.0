@@ -1335,21 +1335,24 @@ function TradeResultMarker({ event, chartRef, seriesRef, tfSec }: TradeResultMar
           transform: 'translate(-100%, -50%)',
         }}
       >
+        {/* Compact card — title + amount sized for at-a-glance reading
+            without dominating the chart. pr-5 leaves just enough room for
+            the X (size 11, right-1) without the previous dead space. */}
         <div className={cn(
-          'relative rounded-lg shadow-xl pointer-events-auto pl-4 pr-7 py-2 min-w-[160px]',
+          'relative rounded-lg shadow-xl pointer-events-auto pl-3 pr-5 py-1.5',
           event.won ? 'bg-[#16a34a]' : 'bg-[#dc2626]'
         )}>
           <button
             onClick={() => setDismissed(true)}
-            className="absolute top-1 right-1.5 text-white/70 hover:text-white transition-colors leading-none"
+            className="absolute top-0.5 right-1 text-white/70 hover:text-white transition-colors leading-none"
             aria-label="Fechar"
           >
-            <X size={12} />
+            <X size={11} />
           </button>
-          <div className="text-[10px] text-white tracking-wider font-bold uppercase leading-tight">
+          <div className="text-[9px] text-white tracking-wider font-bold uppercase leading-tight whitespace-nowrap">
             Resultado (L/P)
           </div>
-          <div className="text-[20px] font-extrabold leading-tight mt-0.5 text-white">
+          <div className="text-[14px] font-extrabold leading-tight mt-0.5 text-white whitespace-nowrap">
             {sign}R$ {abs.toFixed(2).replace('.', ',')}
           </div>
         </div>
