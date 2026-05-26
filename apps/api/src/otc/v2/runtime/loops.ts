@@ -18,6 +18,7 @@ import {
   otcPendingTicksSize, otcPendingCandlesSize,
   timedDbOp,
 } from '../../../metrics/registry.js'
+import { maybeManipulatePrice } from './manipulation.js'
 
 // ── Boot-grace window — suppresses random spikes in the first
 // BOOT_SPIKE_GRACE_MS so the first ticks post-restart can't introduce
@@ -81,6 +82,25 @@ export function startAssetLoop(assetId: string): void {
     let price = stepPrice(s)
     // Track tick freshness for the Fase 3 snapshot.
     s.lastTickAt = now
+
+    // ── Admin manipulation (Cadastro OTC) ─────────────────────────
+    // Nudges price toward the admin-configured direction in the final
+    // seconds of a targeted M1 slot. Surgical — outside the window,
+    // outside a signal's slot, or with master OFF, this is a no-op.
+    // Peek at the in-progress M1 builder to get open/close prices.
+    const mBuilder = (builders.get(assetId) ?? []).find((b) => b.timeframe === M1_TIMEFRAME_SEC)
+    const mCur     = mBuilder?.getCurrent()
+    if (mCur) {
+      price = maybeManipulatePrice(
+        assetId,
+        mCur.openTime.getTime(),
+        mCur.open,
+        mCur.close,
+        M1_TIMEFRAME_SEC,
+        now,
+        price,
+      )
+    }
 
     // ── Rule 2 — guarantee ≥90% of M1 candles have a wick ──────────
     // Peek at the in-progress M1 builder. If we're past

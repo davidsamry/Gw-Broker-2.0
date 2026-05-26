@@ -161,6 +161,11 @@ export async function startOtcV2Worker(): Promise<void> {
     }, STATE_FLUSH_INTERVAL_MS)
     intervals.gapSweep   = setInterval(() => { void sweepAllGaps() }, GAP_SWEEP_INTERVAL_MS)
 
+    // Manipulation cache — admin signals + master toggle. Refreshes
+    // every 5s in background so per-tick application is in-memory only.
+    const { startManipulationRefresh } = await import('./manipulation.js')
+    startManipulationRefresh()
+
     // Fase 7: prune cycle. Chunked + budgeted; logs retention config
     // on first boot so an operator can verify env overrides at a
     // glance. Toggleable via OTC_PRUNE_ENABLED=false for emergency.

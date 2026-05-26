@@ -443,15 +443,47 @@ model OtcAsset {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  state           OtcMarketState?
-  liquidity       OtcLiquidityState?
-  snapshot        OtcEngineSnapshot?
-  ticks           OtcTick[]
-  candles         OtcCandle[]
-  events          OtcScheduledEvent[]
+  state               OtcMarketState?
+  liquidity           OtcLiquidityState?
+  snapshot            OtcEngineSnapshot?
+  ticks               OtcTick[]
+  candles             OtcCandle[]
+  events              OtcScheduledEvent[]
+  manipulationSignals OtcManipulationSignal[]
 
   @@index([category, displayOrder])
   @@map("otc_assets")
+}
+
+// Admin-scheduled forced candle outcome. Engine reads on every tick;
+// when the current building candle's slot matches an active signal,
+// nudges the price near slot end so the candle closes with the
+// configured direction (CALL = up, PUT = down). Surgical — affects
+// only the targeted slot, regime FSM continues normally before + after.
+model OtcManipulationSignal {
+  id          String   @id @default(cuid())
+  assetId     String
+  scheduledAt DateTime
+  timeframe   Int      @default(60)
+  direction   String   // 'CALL' | 'PUT' — DB CHECK constraint enforces
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  asset       OtcAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId, scheduledAt(sort: Desc)])
+  @@map("otc_manipulation_signals")
+}
+
+// Single-row settings table for the manipulation master kill switch.
+// id is always 'global'; UI flips `enabled` without a redeploy.
+model OtcManipulationSettings {
+  id        String   @id @default("global")
+  enabled   Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@map("otc_manipulation_settings")
 }
 
 // Append-only tick stream. Engine writes batched (~1s) to keep DB
