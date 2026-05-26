@@ -57,7 +57,7 @@ export default function CadastroOtcPage() {
     const [sigRes, setRes, otcRes] = await Promise.allSettled([
       api.get<{ signals: Signal[] }>('/admin/manipulation/signals'),
       api.get<Settings>('/admin/manipulation/settings'),
-      api.get<{ assets: any[] }>('/admin/otc'),
+      api.get<{ assets: any[] }>('/admin/otc/assets'),
     ])
 
     const errs: string[] = []
