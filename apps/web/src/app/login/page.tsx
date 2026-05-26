@@ -301,15 +301,13 @@ export default function LoginPage() {
                   </svg>
                 </div>
 
-                <FloatingInput label="E-mail" type="email" value={rEmail} onChange={setREmail} required />
-                <FloatingInput label="Senha" type={showRPass ? 'text' : 'password'} value={rPassword} onChange={setRPassword} required
-                  rightIcon={<EyeIcon show={showRPass} onClick={() => setShowRPass(v => !v)} />}
-                />
-                {/* CPF — required for KYC + PIX. Mask is applied as the
-                    user types; submit strips back to 11 raw digits.
-                    inputMode='numeric' opens the digit keypad on mobile;
-                    maxLength=14 caps at the formatted length so paste
-                    of long strings still gets truncated client-side. */}
+                {/* CPF — placed FIRST among credential fields. KYC-anchor
+                    of the account; the live mask shows BR-resident users
+                    they're in the right form before they bother typing
+                    email/password. Mask is applied as they type; submit
+                    strips back to 11 raw digits. inputMode='numeric'
+                    opens the digit keypad on mobile; maxLength=14 caps
+                    at the formatted length. */}
                 <FloatingInput
                   label="CPF"
                   type="text"
@@ -318,6 +316,10 @@ export default function LoginPage() {
                   required
                   inputMode="numeric"
                   maxLength={14}
+                />
+                <FloatingInput label="E-mail" type="email" value={rEmail} onChange={setREmail} required />
+                <FloatingInput label="Senha" type={showRPass ? 'text' : 'password'} value={rPassword} onChange={setRPassword} required
+                  rightIcon={<EyeIcon show={showRPass} onClick={() => setShowRPass(v => !v)} />}
                 />
 
                 {/* Checkboxes */}
