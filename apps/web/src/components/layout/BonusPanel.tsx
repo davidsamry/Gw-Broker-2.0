@@ -37,20 +37,59 @@ function formatBrl(n: number): string {
   return n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 }
 
+// ── Cache (localStorage) — SWR so the card paints instantly when the user
+// reopens the BÔNUS tab. The list rarely changes (admin-managed), so a
+// 5-min TTL is plenty fresh. Inline here instead of a zustand store —
+// only one consumer.
+const BONUS_CACHE_KEY = 'vx_bonuses_available_cache_v1'
+const BONUS_CACHE_TTL = 5 * 60 * 1000
+
+interface BonusCache { bonuses: AvailableBonus[]; savedAt: number }
+
+function loadBonusCache(): AvailableBonus[] | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(BONUS_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as BonusCache
+    if (Date.now() - parsed.savedAt > BONUS_CACHE_TTL) return null
+    return Array.isArray(parsed.bonuses) ? parsed.bonuses : null
+  } catch {
+    return null
+  }
+}
+
+function saveBonusCache(bonuses: AvailableBonus[]) {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(BONUS_CACHE_KEY, JSON.stringify({ bonuses, savedAt: Date.now() }))
+  } catch { /* quota / private mode — ignore */ }
+}
+
 export function BonusPanel({ onClose, onDeposit }: BonusPanelProps) {
   const [tab, setTab]       = useState<Tab>('DISPONIVEL')
-  const [bonuses, setBonuses] = useState<AvailableBonus[]>([])
-  const [loading, setLoading] = useState(true)
+  // Seed from cache so the card appears in <16ms on reopen. If cache is
+  // empty/expired we start with [] + loading=true (original behavior).
+  const [bonuses, setBonuses] = useState<AvailableBonus[]>(() => loadBonusCache() ?? [])
+  const [loading, setLoading] = useState(() => loadBonusCache() == null)
   const [error,   setError]   = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true); setError(false)
+    setError(false)
     api.get<{ bonuses: AvailableBonus[] }>('/bonuses/available')
-      .then(({ data }) => { if (!cancelled) setBonuses(data.bonuses) })
-      .catch(() => { if (!cancelled) setError(true) })
+      .then(({ data }) => {
+        if (cancelled) return
+        setBonuses(data.bonuses)
+        saveBonusCache(data.bonuses)
+      })
+      .catch(() => {
+        // Only show the error state if we have nothing cached to fall back on.
+        if (!cancelled && bonuses.length === 0) setError(true)
+      })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function startDeposit(code: string) {
