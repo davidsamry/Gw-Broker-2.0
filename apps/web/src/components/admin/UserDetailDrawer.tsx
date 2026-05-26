@@ -452,8 +452,17 @@ function Input({ value, onChange, type, inputMode }: {
 }
 
 function Toggle({ value, onChange, disabled }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  // Geometry: button 40px wide × 20px tall (w-10 h-5). Knob 16px × 16px
+  // (w-4 h-4) absolutely positioned with explicit left-0.5 / top-0.5
+  // (2px inset on both sides). When ON, translate-x-5 (20px) puts the
+  // knob's left edge at 22px → right edge at 38px → still 2px gap from
+  // the button's right edge. The previous version relied on implicit
+  // `left: auto` + translate-x-[22px], which rendered the knob outside
+  // the pill in some browser/layout combos. type="button" prevents
+  // form-submit if a parent ever wraps these in a <form>.
   return (
     <button
+      type="button"
       onClick={() => !disabled && onChange(!value)}
       disabled={disabled}
       className={cn(
@@ -464,8 +473,8 @@ function Toggle({ value, onChange, disabled }: { value: boolean; onChange: (v: b
     >
       <span
         className={cn(
-          'absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform',
-          value ? 'translate-x-[22px]' : 'translate-x-0.5',
+          'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform',
+          value ? 'translate-x-5' : 'translate-x-0',
         )}
       />
     </button>
