@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Activity, Search, RefreshCw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  ArrowUp, ArrowDown, Eye, X, ChevronDown,
+  ArrowUp, ArrowDown, Eye, X, ChevronDown, Trash2,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -59,6 +59,7 @@ export default function AdminOperationsPage() {
   const [page, setPage]               = useState(1)
   const [viewing, setViewing]         = useState<OpRow | null>(null)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
+  const [deletingId,   setDeletingId]   = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -95,6 +96,40 @@ export default function AdminOperationsPage() {
       }
     } finally {
       setCancellingId(null)
+    }
+  }
+
+  async function handleDelete(op: OpRow) {
+    if (deletingId) return
+    // Preview the balance reversal per status — keeps the admin from
+    // accidentally deleting a WON op without realizing it'll claw back
+    // the user's profit credit.
+    const stake  = parseFloat(op.amount)
+    const profit = parseFloat(op.profit ?? '0')
+    let impact = ''
+    switch (op.status) {
+      case 'OPEN':
+      case 'LOST':
+        impact = `Saldo de ${op.userEmail} será CREDITADO em R$ ${fmtBRL(String(stake))} (devolução do stake).`
+        break
+      case 'WON':
+        impact = `Saldo de ${op.userEmail} será DEBITADO em R$ ${fmtBRL(String(stake + profit))} (estorno do stake + lucro pago).`
+        break
+      case 'CANCELLED':
+        impact = 'Saldo não será alterado (cancelamento já tinha devolvido o stake).'
+        break
+    }
+    if (!confirm(`Excluir permanentemente a operação ${op.id.slice(0, 8).toUpperCase()}?\n\n${impact}\n\nIsso não pode ser desfeito.`)) return
+    setDeletingId(op.id)
+    try {
+      await api.delete(`/admin/operations/${op.id}`)
+      await load()
+    } catch (err: any) {
+      const code = err?.response?.data?.error
+      if (code === 'OPERATION_NOT_FOUND') alert('Operação não encontrada (já excluída?).')
+      else                                alert('Erro ao excluir.')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -214,6 +249,14 @@ export default function AdminOperationsPage() {
                             tone="red"
                           >
                             <X size={13} />
+                          </IconBtn>
+                          <IconBtn
+                            title="Excluir permanentemente (reverte saldo)"
+                            onClick={() => handleDelete(op)}
+                            disabled={deletingId === op.id}
+                            tone="red"
+                          >
+                            <Trash2 size={13} />
                           </IconBtn>
                         </div>
                       </td>

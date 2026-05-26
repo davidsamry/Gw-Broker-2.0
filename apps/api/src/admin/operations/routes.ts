@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { cancelAdminOperation, listAdminOperations } from './service.js'
+import { cancelAdminOperation, deleteAdminOperation, listAdminOperations } from './service.js'
 
 const listQuerySchema = z.object({
   page:        z.coerce.number().int().min(1).optional(),
@@ -34,6 +34,23 @@ export async function operationsAdminRoutes(app: FastifyInstance) {
     } catch (err: any) {
       if (err.message === 'OPERATION_NOT_CANCELLABLE') {
         return reply.status(409).send({ error: 'OPERATION_NOT_CANCELLABLE' })
+      }
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Hard-delete an op + reverse balance impact. Response includes the
+  // computed delta so the UI can confirm what happened.
+  app.delete('/:id', async (req, reply) => {
+    const { id }  = req.params as { id: string }
+    const adminId = ((req as any).user.sub) as string
+    try {
+      const result = await deleteAdminOperation(adminId, id)
+      return reply.send({ ok: true, ...result })
+    } catch (err: any) {
+      if (err.message === 'OPERATION_NOT_FOUND') {
+        return reply.status(404).send({ error: 'OPERATION_NOT_FOUND' })
       }
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
