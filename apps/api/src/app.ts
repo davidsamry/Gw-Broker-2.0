@@ -14,7 +14,6 @@ import { bspayWebhookRoutes } from './webhooks/bspay.js'
 import { ticketRoutes } from './tickets/routes.js'
 import { otcV2Routes } from './otc/v2/routes.js'
 import { bonusRoutes } from './bonuses/routes.js'
-import { forexRoutes } from './forex/routes.js'
 import { rankingRoutes } from './ranking/routes.js'
 import { botRoutes } from './bot/routes.js'
 import { metricsRoute } from './metrics/route.js'
@@ -119,7 +118,6 @@ export async function buildApp() {
   await app.register(ticketRoutes,       { prefix: '/tickets'  })
   await app.register(otcV2Routes,        { prefix: '/otc/v2'   })
   await app.register(bonusRoutes,        { prefix: '/bonuses'  })
-  await app.register(forexRoutes,        { prefix: '/forex/v1' })
   await app.register(rankingRoutes,      { prefix: '/ranking'  })
   // Bot API — public REST surface for external bots & automations.
   // Auth is JWT with `kind: 'bot'` claim so web tokens can't be reused.

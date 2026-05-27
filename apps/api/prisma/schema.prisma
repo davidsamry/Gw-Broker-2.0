@@ -701,64 +701,6 @@ model OtcAdminLog {
   @@map("otc_admin_logs")
 }
 
-// ─── Forex provider (F1 — scaffolding, cTrader integration WIP) ───────────
-// Brand-new module, fully isolated from OTC and Binance. All forex-related
-// tables prefixed `forex_*` so there's zero risk of name collision with the
-// `otc_*` family or the legacy `assets` table.
-//
-// Provider abstraction lives in code (apps/api/src/forex/providers/types.ts);
-// the DB schema is provider-agnostic. cTrader symbolId is stored on the
-// asset row so the connector knows how to map our canonical name to the
-// broker's numeric id at boot.
-
-model ForexAsset {
-  id              String    @id                           // 'eur-usd', 'gbp-usd'
-  symbol          String    @unique                       // 'EURUSD' (cTrader convention, no slash)
-  name            String                                  // 'Euro / US Dollar'
-  digits          Int                                     // price decimals (5 for EURUSD, 3 for USDJPY)
-  pipSize         Decimal   @db.Decimal(18, 10)           // 0.0001 for EURUSD, 0.01 for USDJPY
-  enabled         Boolean   @default(true)
-  // cTrader symbolId per broker (different across Pepperstone/IC/etc.).
-  // Resolved at boot via GetSymbolsListReq and cached on this row.
-  ctraderSymbolId Int?
-  displayOrder    Int       @default(0)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  @@index([enabled, displayOrder])
-  @@map("forex_assets")
-}
-
-model ForexCandle {
-  id          BigInt    @id @default(autoincrement())
-  assetId     String
-  timeframe   Int                                          // seconds: 60, 300, 900, 3600
-  openTime    DateTime  @db.Timestamptz(3)
-  openPrice   Decimal   @db.Decimal(18, 6)
-  highPrice   Decimal   @db.Decimal(18, 6)
-  lowPrice    Decimal   @db.Decimal(18, 6)
-  closePrice  Decimal   @db.Decimal(18, 6)
-  tickCount   Int
-  finalizedAt DateTime? @db.Timestamptz(3)
-
-  @@unique([assetId, timeframe, openTime])
-  @@index([assetId, timeframe, openTime(sort: Desc)])
-  @@map("forex_candles")
-}
-
-// One row per asset. Mirrors the OTC snapshot pattern — lets boot recovery
-// resume the latest known bid/ask without needing the provider to be live.
-model ForexEngineSnapshot {
-  assetId      String   @id
-  ctraderSymbolId Int?
-  lastBid      Decimal?  @db.Decimal(18, 6)
-  lastAsk      Decimal?  @db.Decimal(18, 6)
-  lastTickAt   DateTime? @db.Timestamptz(3)
-  updatedAt    DateTime  @default(now())
-
-  @@map("forex_engine_snapshot")
-}
-
 // ── Platform settings ──────────────────────────────────────────────────
 // Singleton (always one row with id='global') that holds the broker-wide
 // limits + toggles editable from /admin/configuracoes. The API reads
