@@ -209,6 +209,7 @@ model User {
   tickets             Ticket[]
   ticketMessages      TicketMessage[]
   passwordResetTokens PasswordResetToken[]
+  botRefreshTokens    BotRefreshToken[]
 
   @@map("users")
 }
@@ -844,4 +845,27 @@ model PasswordResetToken {
   @@index([userId])
   @@index([expiresAt])
   @@map("password_reset_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bot API refresh tokens — see apps/api/src/bot/
+//
+// Only the SHA-256 hash of the raw refresh token is persisted, so a DB
+// leak doesn't compromise live sessions. Rotation on each /refresh call
+// (mark old row revoked, insert new row) means a stolen-but-rotated
+// token stops working as soon as the legitimate client refreshes.
+model BotRefreshToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  ip         String?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("bot_refresh_tokens")
 }
