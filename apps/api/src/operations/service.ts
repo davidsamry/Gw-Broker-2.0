@@ -4,6 +4,7 @@ import { prisma } from '../prisma.js'
 import type { CreateOperationInput } from './schema.js'
 import { resolveOperationIfExpired } from './worker.js'
 import { getSettings } from '../settings/service.js'
+import { publishOperationEvent } from './events.js'
 
 export async function createOperation(userId: string, input: CreateOperationInput) {
   // Min-interval guard — admin-configurable on /admin/configuracoes.
@@ -102,6 +103,36 @@ export async function createOperation(userId: string, input: CreateOperationInpu
 
   // Resolution is handled by the expiration worker (polls DB every second) —
   // no in-memory setTimeout, so operations survive API restarts.
+
+  // Broadcast 'created' to every connected session of this user — multi-
+  // device sync + Bot API → web instant feedback. Best-effort; a publish
+  // failure shouldn't fail the trade (the DB row is already committed).
+  try {
+    const row = rows[0] as Record<string, any>
+    publishOperationEvent({
+      kind:   'created',
+      userId,
+      op: {
+        id:          String(row.id),
+        accountId:   String(row.accountId),
+        assetId:     String(row.assetId),
+        assetSymbol: String(row.assetSymbol ?? ''),
+        direction:   row.direction as 'CALL' | 'PUT',
+        amount:      String(row.amount),
+        payout:      Number(row.payout),
+        profit:      row.profit == null ? null : String(row.profit),
+        status:      'OPEN',
+        entryPrice:  String(row.entryPrice),
+        exitPrice:   row.exitPrice == null ? null : String(row.exitPrice),
+        expiresAt:   (row.expiresAt as Date).toISOString(),
+        openedAt:    (row.openedAt as Date).toISOString(),
+        closedAt:    row.closedAt == null ? null : (row.closedAt as Date).toISOString(),
+      },
+    })
+  } catch (err) {
+    console.error('[operations] publish created event failed', err)
+  }
+
   return rows[0]
 }
 

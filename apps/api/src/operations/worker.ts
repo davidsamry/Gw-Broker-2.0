@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
+import { publishOperationEvent } from './events.js'
 
 // Polls the DB for OPEN operations whose expiresAt has passed and resolves
 // them. Survives restarts: on boot it catches up on any backlog from downtime.
@@ -166,10 +167,12 @@ async function resolveOperation(op: {
   id:           string
   accountId:    string
   assetId:      string
+  assetSymbol:  string
   amount:       Prisma.Decimal
   payout:       number
   entryPrice:   Prisma.Decimal
   expiresAt:    Date
+  openedAt:     Date
   direction:    'CALL' | 'PUT'
   marketSymbol: string | null
 }) {
@@ -233,6 +236,41 @@ async function resolveOperation(op: {
       ])
     }
 
+    // Broadcast 'resolved' so every connected session updates its
+    // open-trades list + closed-trades list + balance live. Best-effort
+    // (a publish failure doesn't unwind the resolution).
+    try {
+      const account = await prisma.account.findUnique({
+        where:  { id: op.accountId },
+        select: { userId: true },
+      })
+      if (account) {
+        const now = new Date()
+        publishOperationEvent({
+          kind:   'resolved',
+          userId: account.userId,
+          op: {
+            id:          op.id,
+            accountId:   op.accountId,
+            assetId:     op.assetId,
+            assetSymbol: op.assetSymbol,
+            direction:   op.direction,
+            amount:      amount.toFixed(2),
+            payout:      op.payout,
+            profit:      profit.toFixed(2),
+            status:      won ? 'WON' : 'LOST',
+            entryPrice:  entry.toFixed(5),
+            exitPrice:   exitPrice.toFixed(5),
+            expiresAt:   op.expiresAt.toISOString(),
+            openedAt:    op.openedAt.toISOString(),
+            closedAt:    now.toISOString(),
+          },
+        })
+      }
+    } catch (err) {
+      console.error('[operations] publish resolved event failed', err)
+    }
+
     // Single structured log per resolution — grepable for auditing
     // resolution quality. Should see ~0% source=random in healthy runs.
     const tfStr = exit.candleTf ? ` candle_tf=${exit.candleTf}` : ''
@@ -257,8 +295,8 @@ async function tick() {
       orderBy: { expiresAt: 'asc' },
       take:    BATCH_SIZE,
       select:  {
-        id: true, accountId: true, assetId: true, amount: true, payout: true,
-        entryPrice: true, expiresAt: true, direction: true, marketSymbol: true,
+        id: true, accountId: true, assetId: true, assetSymbol: true, amount: true, payout: true,
+        entryPrice: true, expiresAt: true, openedAt: true, direction: true, marketSymbol: true,
       },
     })
 
@@ -287,8 +325,8 @@ export async function resolveOperationIfExpired(operationId: string): Promise<vo
       expiresAt: { lte: new Date() },
     },
     select: {
-      id: true, accountId: true, assetId: true, amount: true, payout: true,
-      entryPrice: true, expiresAt: true, direction: true, marketSymbol: true,
+      id: true, accountId: true, assetId: true, assetSymbol: true, amount: true, payout: true,
+      entryPrice: true, expiresAt: true, openedAt: true, direction: true, marketSymbol: true,
     },
   })
   if (!op) return

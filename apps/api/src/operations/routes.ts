@@ -2,12 +2,74 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { createOperationSchema } from './schema.js'
 import { createOperation, getOperation, listOperations } from './service.js'
+import { subscribeToUserOperations } from './events.js'
 
 const listQuerySchema = z.object({
   accountId: z.string().cuid().optional(),
 })
 
+const streamQuerySchema = z.object({
+  // EventSource can't set custom headers, so the access token rides in
+  // a query param. Acceptable risk: tokens expire in 15min and only
+  // grant the same access an authenticated user already has.
+  token: z.string().min(20),
+})
+
 export async function operationRoutes(app: FastifyInstance) {
+  // SSE stream must be registered BEFORE the bearer-auth preHandler so
+  // we can read the token from the query string instead.
+  app.get('/stream', async (req, reply) => {
+    const q = streamQuerySchema.safeParse(req.query)
+    if (!q.success) return reply.status(400).send({ error: 'VALIDATION_ERROR' })
+
+    // Validate the JWT manually — `app.jwt.verify` accepts a raw token
+    // string. We accept both web tokens (no `kind`) and bot tokens
+    // (kind: 'bot') since both represent the same authenticated user.
+    let userId: string
+    try {
+      const decoded = await app.jwt.verify(q.data.token) as { sub?: string }
+      if (!decoded?.sub) return reply.status(401).send({ error: 'UNAUTHORIZED' })
+      userId = decoded.sub
+    } catch {
+      return reply.status(401).send({ error: 'UNAUTHORIZED' })
+    }
+
+    // CORS — SSE writes direct to reply.raw, bypassing the cors plugin's
+    // onSend hook, so we mirror the headers manually (same pattern as
+    // /otc/v2/stream).
+    const origin = (req.headers.origin as string | undefined) ?? ''
+    if (origin) {
+      reply.raw.setHeader('Access-Control-Allow-Origin', origin)
+      reply.raw.setHeader('Access-Control-Allow-Credentials', 'true')
+      reply.raw.setHeader('Vary', 'Origin')
+    }
+    reply.raw.setHeader('Content-Type',      'text/event-stream')
+    reply.raw.setHeader('Cache-Control',     'no-cache, no-transform')
+    reply.raw.setHeader('Connection',        'keep-alive')
+    reply.raw.setHeader('X-Accel-Buffering', 'no')
+    reply.raw.flushHeaders?.()
+    reply.raw.write(`: connected user=${userId}\n\n`)
+
+    // Heartbeat every 25s — keeps the connection alive through proxy
+    // idle timeouts (Cloudflare 100s, Traefik 60s default).
+    const heartbeat = setInterval(() => {
+      try { reply.raw.write(`: hb ${Date.now()}\n\n`) } catch { /* socket closing */ }
+    }, 25_000)
+
+    const unsubscribe = subscribeToUserOperations(userId, (event) => {
+      try {
+        reply.raw.write(`event: ${event.kind}\ndata: ${JSON.stringify(event.op)}\n\n`)
+      } catch { /* client gone — disconnect handler cleans up */ }
+    })
+
+    // Cleanup on client disconnect — covers both clean close and
+    // network drop (Node fires 'close' for both).
+    req.raw.on('close', () => {
+      clearInterval(heartbeat)
+      unsubscribe()
+    })
+  })
+
   app.addHook('preHandler', (app as any).authenticate)
 
   app.post('/', async (req, reply) => {
