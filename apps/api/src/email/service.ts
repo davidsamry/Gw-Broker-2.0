@@ -22,7 +22,7 @@ const FRONTEND_URL = process.env.FRONTEND_URL    ?? 'https://vx-global.com'
 // External CDN by default (ibb.co) so the image loads in any inbox
 // regardless of whether FRONTEND_URL is set or publicly reachable.
 // Override with EMAIL_LOGO_URL env if you self-host the file.
-const LOGO_URL     = process.env.EMAIL_LOGO_URL  ?? 'https://i.ibb.co/C3bn1qn1/Logo.png'
+const LOGO_URL     = process.env.EMAIL_LOGO_URL  ?? 'https://i.ibb.co/LXxCkMCk/Logo.png'
 
 // Brand variables injected into every template render — keeps the logo
 // URL and CTA targets in one place and lets us swap them via env without

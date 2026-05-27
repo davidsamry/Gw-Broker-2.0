@@ -107,10 +107,14 @@ export async function sendTestEmail(
   const tpl = await prisma.emailTemplate.findUnique({ where: { key } })
   if (!tpl) return { ok: false, reason: 'TEMPLATE_NOT_FOUND' }
 
-  // Fill every declared variable with a clearly-fake value so the admin
-  // can see what each one means in context.
+  // Fill every declared variable with a clearly-fake value — but SKIP
+  // keys that BRAND_VARS already provides (logo_url, brand_name, app_url).
+  // Otherwise the sampleValueFor fallback returns `[logo_url]` etc. which
+  // overrides the real values in sendEmail's `{ ...BRAND_VARS, ...vars }`
+  // merge → broken <img src="[logo_url]"> + literal "[brand_name]" text.
   const sampleVars: Record<string, string> = {}
   for (const v of tpl.variables) {
+    if (v in BRAND_VARS) continue
     sampleVars[v] = sampleValueFor(v)
   }
 
@@ -136,12 +140,12 @@ export async function previewEmailTemplate(key: string): Promise<{
 } | null> {
   const tpl = await prisma.emailTemplate.findUnique({ where: { key } })
   if (!tpl) return null
+  // Same skip-BRAND_VARS-keys logic as sendTestEmail — see comment there.
   const sampleVars: Record<string, string> = {}
   for (const v of tpl.variables) {
+    if (v in BRAND_VARS) continue
     sampleVars[v] = sampleValueFor(v)
   }
-  // Merge BRAND_VARS so {{logo_url}} renders to a real PNG in the preview
-  // iframe (matches what sendEmail() does for real sends).
   const mergedVars = { ...BRAND_VARS, ...sampleVars }
   return {
     subject: renderTemplate(tpl.subject, mergedVars),
