@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore, useCurrentAccount } from '@/store/auth'
 import { GraduationCap, Plus, Bell, ChevronDown, X } from 'lucide-react'
@@ -37,37 +37,16 @@ type SidebarTab = 'TRADE' | 'HISTORICO' | 'RANKING' | 'SUPORTE' | 'CONTA' | 'COP
 // IDs only — full Asset objects are resolved against ASSETS on read so a
 // catalog change (asset removed / renamed) doesn't crash; missing IDs are
 // silently dropped.
+//
+// IMPORTANT: localStorage is read inside a useEffect, NOT inside the
+// useState initializer. Reading from useState would diverge between SSR
+// (typeof window === 'undefined' → defaults) and the client's first
+// render (reads persisted values), causing a hydration mismatch on the
+// asset tabs (FlagPair tree differs).
 const OPEN_ASSETS_KEY     = 'vx:openAssetIds'
 const SELECTED_ASSET_KEY  = 'vx:selectedAssetId'
 const DEFAULT_OPEN_ASSETS = [ASSETS[0], ASSETS[3]]
 const DEFAULT_SELECTED    = ASSETS[3]
-
-function resolveOpenFromStorage(): Asset[] {
-  if (typeof window === 'undefined') return DEFAULT_OPEN_ASSETS
-  try {
-    const raw = localStorage.getItem(OPEN_ASSETS_KEY)
-    if (!raw) return DEFAULT_OPEN_ASSETS
-    const ids = JSON.parse(raw) as unknown
-    if (!Array.isArray(ids)) return DEFAULT_OPEN_ASSETS
-    const resolved = ids
-      .map((id) => ASSETS.find((a) => a.id === id))
-      .filter((a): a is Asset => !!a)
-    return resolved.length > 0 ? resolved : DEFAULT_OPEN_ASSETS
-  } catch {
-    return DEFAULT_OPEN_ASSETS
-  }
-}
-
-function resolveSelectedFromStorage(): Asset {
-  if (typeof window === 'undefined') return DEFAULT_SELECTED
-  try {
-    const id = localStorage.getItem(SELECTED_ASSET_KEY)
-    if (!id) return DEFAULT_SELECTED
-    return ASSETS.find((a) => a.id === id) ?? DEFAULT_SELECTED
-  } catch {
-    return DEFAULT_SELECTED
-  }
-}
 
 export default function TradingPage() {
   const router        = useRouter()
@@ -123,22 +102,57 @@ export default function TradingPage() {
   const [assets, setAssets] = useState<Asset[]>(ASSETS)
   // openAssets + selectedAsset persist across sessions in localStorage so
   // the user comes back to the same tabs they last had open. Stored as
-  // bare IDs and re-resolved against ASSETS on mount; IDs that don't
-  // resolve (catalog change) are silently dropped.
-  const [selectedAsset, setSelectedAsset] = useState<Asset>(() => resolveSelectedFromStorage())
-  const [openAssets,    setOpenAssets]    = useState<Asset[]>(() => resolveOpenFromStorage())
+  // bare IDs and re-resolved against ASSETS after mount (NOT in the
+  // useState initializer — that would cause a hydration mismatch since
+  // SSR can't read localStorage and the asset tab tree would diverge).
+  const [selectedAsset, setSelectedAsset] = useState<Asset>(DEFAULT_SELECTED)
+  const [openAssets,    setOpenAssets]    = useState<Asset[]>(DEFAULT_OPEN_ASSETS)
 
-  // Persist on every change. localStorage writes are sync but cheap; the
-  // alternative (debouncing) wouldn't matter since the user rarely flips
-  // tabs faster than once per second.
+  // After hydration, restore the user's last-seen tabs. Defaults render
+  // for ~16ms before this fires, but the swap is invisible because the
+  // chart and trading panel hide until auth.init resolves anyway.
+  // `restoredRef` flips to true after the restore completes — the persist
+  // effects below check it to avoid overwriting the persisted state with
+  // the defaults on initial mount (effects fire even when state hasn't
+  // changed yet, so without the guard the defaults would clobber the
+  // user's saved tabs on every page load).
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') { restoredRef.current = true; return }
+    try {
+      const raw = localStorage.getItem(OPEN_ASSETS_KEY)
+      if (raw) {
+        const ids = JSON.parse(raw) as unknown
+        if (Array.isArray(ids)) {
+          const resolved = ids
+            .map((id) => ASSETS.find((a) => a.id === id))
+            .filter((a): a is Asset => !!a)
+          if (resolved.length > 0) setOpenAssets(resolved)
+        }
+      }
+      const selId = localStorage.getItem(SELECTED_ASSET_KEY)
+      if (selId) {
+        const sel = ASSETS.find((a) => a.id === selId)
+        if (sel) setSelectedAsset(sel)
+      }
+    } catch { /* quota / parse / disabled */ }
+    restoredRef.current = true
+  }, [])
+
+  // Persist on every change. Guarded by restoredRef so the initial mount
+  // (still rendering defaults) doesn't write defaults to localStorage
+  // before the restore effect above has had a chance to read the
+  // previously persisted values.
   useEffect(() => {
     if (typeof window === 'undefined') return
-    try { localStorage.setItem('vx:openAssetIds', JSON.stringify(openAssets.map(a => a.id))) }
+    if (!restoredRef.current) return
+    try { localStorage.setItem(OPEN_ASSETS_KEY, JSON.stringify(openAssets.map(a => a.id))) }
     catch { /* quota / disabled */ }
   }, [openAssets])
   useEffect(() => {
     if (typeof window === 'undefined') return
-    try { localStorage.setItem('vx:selectedAssetId', selectedAsset.id) }
+    if (!restoredRef.current) return
+    try { localStorage.setItem(SELECTED_ASSET_KEY, selectedAsset.id) }
     catch { /* quota / disabled */ }
   }, [selectedAsset])
   const [switchModal, setSwitchModal] = useState<'demo' | 'real' | null>(null)

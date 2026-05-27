@@ -322,6 +322,7 @@ export function DepositoModal({ onClose, initialBonusCode }: DepositoModalProps)
                                      validatingBonus={validatingBonus}
                                      onApplyManual={() => applyBonusCode(bonusInput)}
                                      onRemoveBonus={removeBonus}
+                                     min={MIN} max={MAX}
                                    />}
           {phase === 'qrcode'  && deposit && <QrStep
                                      deposit={deposit} amountNum={amountNum}
@@ -352,6 +353,10 @@ interface FormStepProps {
   validatingBonus: boolean
   onApplyManual: () => void
   onRemoveBonus: () => void
+  // Admin-editable deposit limits forwarded from parent so the info bar
+  // and the implicit min/max validation stay in sync with PlatformSettings.
+  min: number
+  max: number
 }
 
 function FormStep({
@@ -361,6 +366,7 @@ function FormStep({
   availableBonuses, selectedDropdown, onDropdownChange,
   bonusInput, setBonusInput, bonusInfo, bonusError, validatingBonus,
   onApplyManual, onRemoveBonus,
+  min, max,
 }: FormStepProps) {
   return (
     <div className="flex flex-col gap-4">
@@ -368,8 +374,8 @@ function FormStep({
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#222637] border border-[#2a2e3b]">
         <AlertCircle size={13} className="text-[#7c8195] flex-shrink-0" />
         <span className="text-[11px] text-[#bdc1cf]">
-          Mín: <strong className="text-white">R$ {formatBrl(MIN)}</strong>{' '}·{' '}
-          Máx: <strong className="text-white">R$ {formatBrl(MAX)}</strong>
+          Mín: <strong className="text-white">R$ {formatBrl(min)}</strong>{' '}·{' '}
+          Máx: <strong className="text-white">R$ {formatBrl(max)}</strong>
         </span>
       </div>
 
