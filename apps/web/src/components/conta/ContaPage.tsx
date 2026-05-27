@@ -670,8 +670,6 @@ function RetiradaTab() {
               <p className="text-[12px] text-amber-200 leading-snug">
                 Saldo insuficiente para sacar. Mínimo:{' '}
                 <strong className="text-white">R$ {formatBRL(WD_MIN)}</strong>
-                {' '}· Disponível na conta REAL:{' '}
-                <strong className="text-white">R$ {formatBRL(Math.max(0, balance))}</strong>
               </p>
             </div>
           )}
