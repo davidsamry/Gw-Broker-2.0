@@ -223,16 +223,15 @@ export class CTraderClient implements MarketProvider {
       if (ids.length === 0) {
         this.log('WARNING: no symbols matched — nothing to poll')
       } else {
-        // Bootstrap THEN start polling. ProtoOAGetTrendbarsReq is
-        // rate-limited at ~5/s per account by cTrader; running bootstrap
-        // (which uses the same payload type) concurrent with polling
-        // burst-trips the limit and yields BLOCKED_PAYLOAD_TYPE errors.
-        // Sequencing them = ~15-25s of no live price after a restart,
-        // but with full chart history available right after. Worth it.
-        void this.bootstrapHistory().finally(() => {
-          this.log(`polling ${ids.length} symbols every ${POLL_INTERVAL_MS}ms`)
-          this.startPolling()
-        })
+        // Start polling immediately — live price within ~1.5s of boot.
+        this.log(`polling ${ids.length} symbols every ${POLL_INTERVAL_MS}ms`)
+        this.startPolling()
+        // Bootstrap runs in parallel but throttled to 1 req/s so the
+        // combined load (5 polls every 1.5s = 3.3 req/s + 1 req/s) stays
+        // under cTrader's ~5 req/s ProtoOAGetTrendbarsReq cap. Also
+        // skipped entirely on reconnect when forex_candles already has
+        // a healthy backlog (see shouldSkipBootstrap below).
+        void this.bootstrapHistory()
       }
 
       // Reset reconnect backoff on a clean connection.
@@ -371,16 +370,27 @@ export class CTraderClient implements MarketProvider {
   // logged but don't poison the rest.
   private async bootstrapHistory(): Promise<void> {
     if (!this.connection) return
+
+    // Skip when forex_candles already has a healthy backlog — restarts
+    // shouldn't pay the bootstrap cost again. Threshold: 500 M1 bars
+    // for the first asset (chart needs 1000 ideally; 500 = "enough to
+    // look populated"). Polling will keep adding new bars from here.
+    if (await this.shouldSkipBootstrap()) {
+      this.log('history bootstrap skipped — forex_candles already has data')
+      return
+    }
+
     const startedAt = Date.now()
     this.log('history bootstrap starting…')
 
     let okCount = 0
     let failCount = 0
     // cTrader rate-limits ProtoOAGetTrendbarsReq at ~5 req/s per account.
-    // Bootstrap runs BEFORE polling starts (see start() above) so we
-    // have the full budget — 250ms = 4 req/s, comfortably under the
-    // cap and keeps total bootstrap time around 5s for 20 calls.
-    const PACE_MS = 250
+    // Polling already eats ~3.3 req/s (5 pairs / 1.5s in bursts), so we
+    // pace bootstrap at 1 req/s to keep combined load ≤ ~4.5 req/s.
+    // Bootstrap is slower (~20s total for 20 calls) but runs in parallel
+    // with polling so live price is available throughout.
+    const PACE_MS = 1000
     for (const asset of this.assets) {
       const symbolId = this.symbolMap.get(asset.id)
       if (!symbolId) continue
@@ -401,6 +411,29 @@ export class CTraderClient implements MarketProvider {
       }
     }
     this.log(`history bootstrap done in ${Date.now() - startedAt}ms (ok=${okCount} fail=${failCount})`)
+  }
+
+  /** Cheap pre-check: do we already have a healthy candle backlog?
+   *  Returns true when the first asset's M1 series has ≥ 500 rows —
+   *  enough that the chart looks populated; polling will keep adding
+   *  new bars from this baseline. Avoids paying the ~20s bootstrap
+   *  cost on every reconnect. */
+  private async shouldSkipBootstrap(): Promise<boolean> {
+    try {
+      const firstAsset = this.assets[0]
+      if (!firstAsset) return false
+      const rows = await prisma.$queryRaw<Array<{ c: number }>>`
+        SELECT count(*)::int AS c
+        FROM forex_candles
+        WHERE "assetId" = ${firstAsset.id} AND timeframe = 60
+      `
+      const count = rows[0]?.c ?? 0
+      return count >= 500
+    } catch {
+      // DB hiccup — better to run bootstrap (defensive) than to skip
+      // and end up with empty charts forever.
+      return false
+    }
   }
 
   /** Fetch the last 1000 bars of `tf` for one asset and persist via
