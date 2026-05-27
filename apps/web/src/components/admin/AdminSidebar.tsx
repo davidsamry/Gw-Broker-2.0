@@ -6,7 +6,8 @@ import {
   LayoutGrid, Users, Wallet, Activity, ShieldCheck,
   ArrowDownToLine, ArrowUpFromLine, MessageSquare, Network,
   Copy, Layers, Gift, Zap, TrendingUp, Clock, FileSpreadsheet,
-  Trophy, Image as ImageIcon, FileText, Mail, CreditCard, Radio, X,
+  Trophy, Image as ImageIcon, FileText, Mail, CreditCard, Radio,
+  Settings, X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -40,6 +41,7 @@ const MENU: MenuItem[] = [
   { href: '/admin/documentos',     label: 'Documentos',      icon: <FileText size={15} /> },
   { href: '/admin/emails',         label: 'Emails',          icon: <Mail size={15} /> },
   { href: '/admin/pagamentos',     label: 'Pagamentos',      icon: <CreditCard size={15} /> },
+  { href: '/admin/configuracoes',  label: 'Configurações',   icon: <Settings size={15} /> },
 ]
 
 interface AdminSidebarProps {

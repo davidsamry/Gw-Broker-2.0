@@ -3,8 +3,29 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 import type { CreateOperationInput } from './schema.js'
 import { resolveOperationIfExpired } from './worker.js'
+import { getSettings } from '../settings/service.js'
 
 export async function createOperation(userId: string, input: CreateOperationInput) {
+  // Min-interval guard — admin-configurable on /admin/configuracoes.
+  // Prevents bot-style spam clicking and protects the engine from a
+  // single user hammering operations at >10Hz.
+  const minIntervalMs = getSettings().operationMinIntervalMs
+  if (minIntervalMs > 0) {
+    const last = await prisma.$queryRaw<Array<{ createdAt: Date }>>`
+      SELECT o."createdAt"
+      FROM operations o
+      JOIN accounts   a ON a.id = o."accountId"
+      WHERE a."userId" = ${userId}
+        AND a.id      = ${input.accountId}
+      ORDER BY o."createdAt" DESC
+      LIMIT 1
+    `
+    const lastCreatedMs = last[0]?.createdAt.getTime() ?? 0
+    if (lastCreatedMs > 0 && Date.now() - lastCreatedMs < minIntervalMs) {
+      throw new Error('TOO_FAST')
+    }
+  }
+
   const operationId   = randomUUID()
   const transactionId = randomUUID()
   const expiresAt     = new Date(Date.now() + input.expiresInSeconds * 1000)

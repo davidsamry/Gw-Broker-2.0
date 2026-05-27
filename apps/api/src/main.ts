@@ -3,6 +3,7 @@ import { buildApp } from './app.js'
 import { startExpirationWorker, stopExpirationWorker } from './operations/worker.js'
 import { startOtcV2Worker, stopOtcV2Worker } from './otc/v2/worker.js'
 import { startForexRuntime, stopForexRuntime } from './forex/runtime/boot.js'
+import { refreshSettingsCache } from './settings/service.js'
 
 const port = Number(process.env.PORT ?? 3001)
 const host = process.env.HOST ?? '0.0.0.0'
@@ -12,6 +13,10 @@ const app = await buildApp()
 try {
   await app.listen({ port, host })
   app.log.info(`API listening on http://${host}:${port}`)
+  // Hydrate the platform-settings cache so the first deposit/withdrawal/
+  // operation request after boot already sees the DB values instead of
+  // the hardcoded defaults baked into the service module.
+  await refreshSettingsCache()
   startExpirationWorker()
   app.log.info('Expiration worker started (polling every 1s)')
   // OTC v2 — the only OTC engine now (v1 retired in Etapa 8). Boots

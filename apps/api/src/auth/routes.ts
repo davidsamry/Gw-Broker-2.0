@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { loginSchema, registerSchema, updateProfileSchema, twoFactorCodeSchema, kycSubmitSchema } from './schema.js'
 import { getKycSubmission, getUserById, loginUser, registerUser, submitKyc, updateUserProfile } from './service.js'
 import { requestPasswordReset, resetPasswordWithToken } from './passwordReset.js'
+import { getSettings } from '../settings/service.js'
 import { listOperations } from '../operations/service.js'
 import { listWithdrawals } from '../withdrawals/service.js'
 import { listTransactions } from '../transactions/service.js'
@@ -139,7 +140,22 @@ export async function authRoutes(app: FastifyInstance) {
         listTransactions(userId).catch(() => []),
         getKycSubmission(userId).catch(() => null),
       ])
-      return reply.send({ user, operations, withdrawals, transactions, kycSubmission })
+      // Surface a small public-config payload so the frontend can
+      // render valid min/max in the deposit/withdrawal/trading forms
+      // (and hide the Copy menu when admin disabled it).
+      const s = getSettings()
+      const settings = {
+        depositMin:             s.depositMin,
+        depositMax:             s.depositMax,
+        withdrawalMin:          s.withdrawalMin,
+        withdrawalMax:          s.withdrawalMax,
+        withdrawalFeePct:       s.withdrawalFeePct,
+        operationMin:           s.operationMin,
+        operationMax:           s.operationMax,
+        operationMinIntervalMs: s.operationMinIntervalMs,
+        copyTradeEnabled:       s.copyTradeEnabled,
+      }
+      return reply.send({ user, operations, withdrawals, transactions, kycSubmission, settings })
     } catch {
       return reply.status(404).send({ error: 'USER_NOT_FOUND' })
     }

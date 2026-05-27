@@ -758,6 +758,39 @@ model ForexEngineSnapshot {
   @@map("forex_engine_snapshot")
 }
 
+// ── Platform settings ──────────────────────────────────────────────────
+// Singleton (always one row with id='global') that holds the broker-wide
+// limits + toggles editable from /admin/configuracoes. The API reads
+// these on boot into a memory cache (settings/service.ts) and the cache
+// is refreshed by the admin PATCH endpoint — so request-time validation
+// is sync without paying a DB roundtrip per request.
+model PlatformSettings {
+  id                String   @id @default("global")
+
+  // Withdrawals
+  withdrawalFeePct  Decimal  @default(0)        @db.Decimal(5, 2)   // %
+  withdrawalMin     Decimal  @default(60)       @db.Decimal(18, 2)
+  withdrawalMax     Decimal  @default(10000)    @db.Decimal(18, 2)
+
+  // Deposits
+  depositMin        Decimal  @default(60)       @db.Decimal(18, 2)
+  depositMax        Decimal  @default(100000)   @db.Decimal(18, 2)
+  depositRollover   Decimal  @default(2)        @db.Decimal(6, 2)   // multiplier (no bonus)
+
+  // Operations
+  operationMin      Decimal  @default(5)        @db.Decimal(18, 2)
+  operationMax      Decimal  @default(100000)   @db.Decimal(18, 2)
+  operationMinIntervalMs Int @default(1000)                          // ms between consecutive trades
+
+  // Feature toggles
+  copyTradeEnabled  Boolean  @default(true)
+
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
+
+  @@map("platform_settings")
+}
+
 // ── Ranking (fake leaderboard) ─────────────────────────────────────────
 // Pool of fictitious users that the admin manages from /admin/ranking.
 // The public /ranking endpoint picks 25 from this pool every 3 hours

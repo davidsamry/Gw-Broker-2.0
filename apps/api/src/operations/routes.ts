@@ -27,6 +27,9 @@ export async function operationRoutes(app: FastifyInstance) {
       if (err.message === 'INSUFFICIENT_BALANCE') {
         return reply.status(400).send({ error: 'INSUFFICIENT_BALANCE' })
       }
+      if (err.message === 'TOO_FAST') {
+        return reply.status(429).send({ error: 'TOO_FAST' })
+      }
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }
