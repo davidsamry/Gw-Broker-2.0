@@ -16,15 +16,17 @@ const streamQuerySchema = z.object({
 })
 
 export async function operationRoutes(app: FastifyInstance) {
-  // SSE stream must be registered BEFORE the bearer-auth preHandler so
-  // we can read the token from the query string instead.
+
+  // ── SSE stream (no bearer-auth preHandler) ──────────────────────────────
+  // Registered at the parent scope so the addHook below doesn't apply.
+  // EventSource can't set the Authorization header, so the JWT rides in a
+  // query string parameter and we validate it manually. Accepts both web
+  // tokens (no `kind` claim) and Bot API tokens (kind: 'bot') since both
+  // represent the same authenticated user.
   app.get('/stream', async (req, reply) => {
     const q = streamQuerySchema.safeParse(req.query)
     if (!q.success) return reply.status(400).send({ error: 'VALIDATION_ERROR' })
 
-    // Validate the JWT manually — `app.jwt.verify` accepts a raw token
-    // string. We accept both web tokens (no `kind`) and bot tokens
-    // (kind: 'bot') since both represent the same authenticated user.
     let userId: string
     try {
       const decoded = await app.jwt.verify(q.data.token) as { sub?: string }
@@ -70,64 +72,72 @@ export async function operationRoutes(app: FastifyInstance) {
     })
   })
 
-  app.addHook('preHandler', (app as any).authenticate)
+  // ── Authenticated routes ────────────────────────────────────────────────
+  // Wrapped in a child plugin so the addHook only applies in this scope,
+  // leaving /stream above untouched. (Fastify hooks propagate parent →
+  // children, so the previous approach of "register /stream first then
+  // addHook on parent" did NOT isolate the stream — every route still
+  // hit the bearer-auth.)
+  await app.register(async (auth) => {
+    auth.addHook('preHandler', (app as any).authenticate)
 
-  app.post('/', async (req, reply) => {
-    const parsed = createOperationSchema.safeParse(req.body)
-    if (!parsed.success) {
-      return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
-    }
+    auth.post('/', async (req, reply) => {
+      const parsed = createOperationSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
+      }
 
-    const userId = ((req as any).user.sub) as string
-    try {
-      const operation = await createOperation(userId, parsed.data)
-      return reply.status(201).send({ operation })
-    } catch (err: any) {
-      if (err.message === 'ACCOUNT_NOT_FOUND') {
-        return reply.status(404).send({ error: 'ACCOUNT_NOT_FOUND' })
+      const userId = ((req as any).user.sub) as string
+      try {
+        const operation = await createOperation(userId, parsed.data)
+        return reply.status(201).send({ operation })
+      } catch (err: any) {
+        if (err.message === 'ACCOUNT_NOT_FOUND') {
+          return reply.status(404).send({ error: 'ACCOUNT_NOT_FOUND' })
+        }
+        if (err.message === 'INSUFFICIENT_BALANCE') {
+          return reply.status(400).send({ error: 'INSUFFICIENT_BALANCE' })
+        }
+        if (err.message === 'TOO_FAST') {
+          return reply.status(429).send({ error: 'TOO_FAST' })
+        }
+        req.log.error(err)
+        return reply.status(500).send({ error: 'INTERNAL_ERROR' })
       }
-      if (err.message === 'INSUFFICIENT_BALANCE') {
-        return reply.status(400).send({ error: 'INSUFFICIENT_BALANCE' })
-      }
-      if (err.message === 'TOO_FAST') {
-        return reply.status(429).send({ error: 'TOO_FAST' })
-      }
-      req.log.error(err)
-      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
-    }
-  })
+    })
 
-  app.get('/', async (req, reply) => {
-    const parsed = listQuerySchema.safeParse(req.query)
-    if (!parsed.success) {
-      return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
-    }
-
-    const userId = ((req as any).user.sub) as string
-    try {
-      const operations = await listOperations(userId, parsed.data.accountId)
-      return reply.send({ operations })
-    } catch (err: any) {
-      if (err.message === 'ACCOUNT_NOT_FOUND') {
-        return reply.status(404).send({ error: 'ACCOUNT_NOT_FOUND' })
+    auth.get('/', async (req, reply) => {
+      const parsed = listQuerySchema.safeParse(req.query)
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
       }
-      req.log.error(err)
-      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
-    }
-  })
 
-  app.get('/:id', async (req, reply) => {
-    const userId = ((req as any).user.sub) as string
-    const { id } = req.params as { id: string }
-    try {
-      const operation = await getOperation(userId, id)
-      return reply.send({ operation })
-    } catch (err: any) {
-      if (err.message === 'NOT_FOUND') {
-        return reply.status(404).send({ error: 'NOT_FOUND' })
+      const userId = ((req as any).user.sub) as string
+      try {
+        const operations = await listOperations(userId, parsed.data.accountId)
+        return reply.send({ operations })
+      } catch (err: any) {
+        if (err.message === 'ACCOUNT_NOT_FOUND') {
+          return reply.status(404).send({ error: 'ACCOUNT_NOT_FOUND' })
+        }
+        req.log.error(err)
+        return reply.status(500).send({ error: 'INTERNAL_ERROR' })
       }
-      req.log.error(err)
-      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
-    }
+    })
+
+    auth.get('/:id', async (req, reply) => {
+      const userId = ((req as any).user.sub) as string
+      const { id } = req.params as { id: string }
+      try {
+        const operation = await getOperation(userId, id)
+        return reply.send({ operation })
+      } catch (err: any) {
+        if (err.message === 'NOT_FOUND') {
+          return reply.status(404).send({ error: 'NOT_FOUND' })
+        }
+        req.log.error(err)
+        return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+      }
+    })
   })
 }

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore, useCurrentAccount } from '@/store/auth'
+import { useOperationsStore } from '@/store/operations'
 import { GraduationCap, Plus, Bell, ChevronDown, X } from 'lucide-react'
 import { getAccountLevel } from '@/lib/accountLevel'
 import { Sidebar } from '@/components/layout/Sidebar'
@@ -182,6 +183,50 @@ export default function TradingPage() {
   const [mobileAccountOpen, setMobileAccountOpen] = useState(false)
   const [activeTrades, setActiveTrades] = useState<ActiveTrade[]>([])
   const [chartTradeEvents, setChartTradeEvents] = useState<ChartTradeEvent[]>([])
+
+  // ── Chart-marker sync for remote/bot trades ───────────────────────────
+  // Locally-placed trades go through handleTradePlaced → activeTrades.
+  // Trades opened via the Bot API or on another logged-in device arrive
+  // via /operations/stream → useOperationsStream upserts into the store,
+  // but the chart's activeTrades wouldn't see them without this effect.
+  //
+  // Adds OPEN ops (for the currently-selected asset only) that aren't
+  // already in activeTrades, and prunes activeTrades entries whose store
+  // status flipped away from OPEN (resolved or cancelled). Entries the
+  // store hasn't seen yet (fresh local trades pending SSE delivery) stay
+  // — they'll be reconciled on the next pass.
+  const storeOps = useOperationsStore((s) => s.operations)
+  // BRT-shifted epoch seconds (UTC - 3h) — matches what placeTrade uses
+  // for entryTime/expiryTime so the chart renders both with one formula.
+  const BRT_OFFSET = -3 * 3600
+  useEffect(() => {
+    setActiveTrades((prev) => {
+      const prevIds        = new Set(prev.map((t) => t.id))
+      const storeOpenIds   = new Set(storeOps.filter((o) => o.status === 'OPEN').map((o) => o.id))
+      const storeKnownIds  = new Set(storeOps.map((o) => o.id))
+
+      // 1. Drop entries the store now reports as resolved/cancelled.
+      //    Untouched if the store doesn't know the trade at all (fresh
+      //    optimistic local trade — SSE will deliver shortly).
+      const trimmed = prev.filter((t) => !storeKnownIds.has(t.id) || storeOpenIds.has(t.id))
+
+      // 2. Add remote OPEN ops for the current asset that we don't yet have.
+      const additions = storeOps
+        .filter((o) => o.status === 'OPEN' && o.assetId === selectedAsset.id && !prevIds.has(o.id))
+        .map((o) => ({
+          id:         o.id,
+          entryPrice: parseFloat(o.entryPrice ?? '0'),
+          entryTime:  Math.floor(new Date(o.openedAt).getTime() / 1000) + BRT_OFFSET,
+          expiryTime: Math.floor(new Date(o.expiresAt).getTime() / 1000) + BRT_OFFSET,
+          direction:  o.direction,
+          amount:     parseFloat(o.amount),
+          payout:     o.payout,
+        }))
+
+      if (trimmed.length === prev.length && additions.length === 0) return prev
+      return [...trimmed, ...additions]
+    })
+  }, [storeOps, selectedAsset.id])
   const binanceTicker = useBinanceTicker(selectedAsset.source === 'BINANCE' ? selectedAsset.marketSymbol : undefined)
   const displayPrice = binanceTicker?.price ?? selectedAsset.price
   // Signals to the chart whether `displayPrice` is fresh WS data (true)
