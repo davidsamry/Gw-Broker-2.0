@@ -1,14 +1,15 @@
 // Forex public REST endpoints.
-//   /symbols  — F1: catalogue of enabled pairs
-//   /status   — F1: runtime + provider state
-//   /stream   — F4: SSE feed of live ticks + in-progress candles
-//   /candles  — F5 (todo): REST query of historical bars
-//   /ticker   — F5 (todo): latest snapshot per asset
+//   /symbols       — F1: catalogue of enabled pairs
+//   /status        — F1: runtime + provider state
+//   /stream        — F4: SSE feed of live ticks + in-progress candles
+//   /candles       — F5: REST query of historical bars (chart hydration)
+//   /ticker/:asset — F5: latest snapshot per asset (price now)
 
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../prisma.js'
 import { getForexRuntimeState } from './runtime/boot.js'
+import { FOREX_TIMEFRAMES } from './types.js'
 import {
   forexBus,
   type ForexTickEvent,
@@ -150,9 +151,125 @@ export async function forexRoutes(app: FastifyInstance) {
       forexBus.off('candle', onCandle)
     })
   })
+
+  // ── REST candles ──────────────────────────────────────────────────────
+  // Used by the chart to hydrate the initial bar window before the SSE
+  // takes over. Returns ASCENDING by openTime so the chart can consume
+  // directly without re-sorting client-side.
+  //
+  // Includes both finalized AND the current in-progress bar (which the
+  // aggregator flushes every 5s, so the most-recent row is at most ~5s
+  // behind reality — close enough that the chart can paint it and the
+  // first SSE candle event will catch any subsequent ticks).
+  app.get('/candles', async (req, reply) => {
+    const q = candlesQuery.safeParse(req.query)
+    if (!q.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', details: q.error.flatten() })
+    }
+    try {
+      const rows = await prisma.$queryRaw<CandleRow[]>`
+        SELECT
+          "openTime",
+          "openPrice"::text   AS "openPrice",
+          "highPrice"::text   AS "highPrice",
+          "lowPrice"::text    AS "lowPrice",
+          "closePrice"::text  AS "closePrice",
+          "tickCount",
+          "finalizedAt"
+        FROM forex_candles
+        WHERE "assetId" = ${q.data.asset}
+          AND "timeframe" = ${q.data.tf}
+        ORDER BY "openTime" DESC
+        LIMIT ${q.data.limit}
+      `
+      // DB returned newest-first for efficient LIMIT; chart wants oldest-
+      // first so the rendering loop appends to the right. Reverse once.
+      const candles = rows.reverse().map((r) => ({
+        time:        r.openTime.getTime(),
+        open:        parseFloat(r.openPrice),
+        high:        parseFloat(r.highPrice),
+        low:         parseFloat(r.lowPrice),
+        close:       parseFloat(r.closePrice),
+        tickCount:   r.tickCount,
+        isClosed:    r.finalizedAt != null,
+      }))
+      return reply.send({ asset: q.data.asset, timeframe: q.data.tf, candles })
+    } catch (err) {
+      app.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // ── REST ticker ───────────────────────────────────────────────────────
+  // Latest bid/ask + timestamp from forex_engine_snapshot. Used by the
+  // asset selector to show a price next to each pair without opening
+  // five SSE connections, and by the chart for initial-paint price
+  // before the first stream event arrives.
+  app.get('/ticker/:asset', async (req, reply) => {
+    const { asset } = req.params as { asset: string }
+    if (!asset) return reply.status(400).send({ error: 'VALIDATION_ERROR' })
+    try {
+      const rows = await prisma.$queryRaw<TickerRow[]>`
+        SELECT
+          "assetId",
+          "lastBid"::text    AS "lastBid",
+          "lastAsk"::text    AS "lastAsk",
+          "lastTickAt"
+        FROM forex_engine_snapshot
+        WHERE "assetId" = ${asset}
+        LIMIT 1
+      `
+      if (rows.length === 0) {
+        return reply.status(404).send({ error: 'NOT_FOUND' })
+      }
+      const r = rows[0]
+      return reply.send({
+        assetId:    r.assetId,
+        bid:        r.lastBid    != null ? parseFloat(r.lastBid)    : null,
+        ask:        r.lastAsk    != null ? parseFloat(r.lastAsk)    : null,
+        lastTickAt: r.lastTickAt != null ? r.lastTickAt.toISOString() : null,
+      })
+    } catch (err) {
+      app.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
 }
 
 const streamQuery = z.object({
   assets: z.string().optional(),
   tf:     z.coerce.number().int().optional(),
 })
+
+const candlesQuery = z.object({
+  asset: z.string().min(1),
+  // Restrict to the timeframes the aggregator actually produces so we
+  // don't return empty arrays for `tf=120` etc — fail fast at validation.
+  tf:    z.coerce.number().int().refine(
+    (n) => (FOREX_TIMEFRAMES as readonly number[]).includes(n),
+    `tf must be one of ${FOREX_TIMEFRAMES.join(', ')}`,
+  ),
+  // Match OTC v2's default + cap so the chart can ask for "fill the
+  // whole visible range" without DoSing the DB.
+  limit: z.coerce.number().int().min(1).max(3000).default(1000),
+})
+
+// Internal row shape from the DB query — Decimal columns selected as
+// text so JSON serialisation doesn't drop precision. Frontend parses
+// back to number with parseFloat.
+interface CandleRow {
+  openTime:    Date
+  openPrice:   string
+  highPrice:   string
+  lowPrice:    string
+  closePrice:  string
+  tickCount:   number
+  finalizedAt: Date | null
+}
+
+interface TickerRow {
+  assetId:    string
+  lastBid:    string | null
+  lastAsk:    string | null
+  lastTickAt: Date    | null
+}
