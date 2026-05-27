@@ -27,6 +27,11 @@ import { prisma } from '../../../prisma.js'
 
 const HEARTBEAT_INTERVAL_MS = 25_000  // library README's suggested cadence
 const RECONNECT_BACKOFFS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000]
+// Polling cadence for the trendbars fallback. cTrader's ProtoOASpotEvent
+// arrives but the bundled protobufjs@5 decodes the payload as `{}`, so
+// we drive price updates by polling the latest M1 candle close instead.
+// 1500ms across 5 pairs = 3.3 req/sec, well under cTrader rate limit.
+const POLL_INTERVAL_MS = 1_500
 
 export interface CTraderConfig {
   host:                string
@@ -43,15 +48,19 @@ interface SymbolListEntry {
   enabled:    boolean
 }
 
-// Loose type — the library declares CTraderLayerEvent as `{}` so all
-// payload fields are technically optional from the library's perspective.
-// cTrader actually serialises ints as STRINGS via protobufjs JSON, so we
-// also accept strings for any numeric-looking field.
-interface SpotEvent {
-  symbolId?:  number | string
-  bid?:       number | string
-  ask?:       number | string
-  timestamp?: number | string
+// Shape of ProtoOAGetTrendbarsRes that we care about. cTrader serialises
+// every numeric field as a STRING through protobufjs JSON — coerce on
+// read. Fields beyond these (volume, period, etc.) are present but
+// unused by the polling code.
+interface TrendbarPayload {
+  low?:         number | string
+  deltaOpen?:   number | string
+  deltaClose?:  number | string
+  deltaHigh?:   number | string
+  utcTimestampInMinutes?: number | string
+}
+interface TrendbarsRes {
+  trendbar?: TrendbarPayload[]
 }
 
 export class CTraderClient implements MarketProvider {
@@ -66,6 +75,7 @@ export class CTraderClient implements MarketProvider {
 
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private reconnectTimer: ReturnType<typeof setTimeout>  | null = null
+  private pollTimer:      ReturnType<typeof setInterval> | null = null
   private reconnectStep   = 0
   private intentionalClose = false
 
@@ -89,6 +99,7 @@ export class CTraderClient implements MarketProvider {
     this.intentionalClose = true
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null }
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null }
+    if (this.pollTimer)      { clearInterval(this.pollTimer);      this.pollTimer = null      }
     try { (this.connection as any)?.close?.() } catch { /* lib may not expose close */ }
     this.connection = null
     this.setStatus('STOPPED')
@@ -141,24 +152,18 @@ export class CTraderClient implements MarketProvider {
         port: 5035,
       })
 
-      // Wire spot event handler BEFORE open() so we don't miss the first
-      // events after subscribe. Cast: library types every event as the
-      // empty object `{}`; actual shape is documented in SpotEvent above.
-      this.connection.on('ProtoOASpotEvent', (event: any) => this.handleSpotEvent(event as SpotEvent))
-
-      // Debug listeners — log notable events so we can see what's arriving
-      // when ticks don't show up. Remove once tick stream is stable.
+      // We intentionally do NOT subscribe to ProtoOASpotEvent — the
+      // bundled protobufjs@5 decodes the payload as `{}` (incompatible
+      // with cTrader's current wire format). Instead we poll the latest
+      // M1 trendbar close every POLL_INTERVAL_MS — see startPolling().
+      // The same Trendbars endpoint works correctly through the library.
+      //
+      // Notable session-level events are still useful for debugging.
       this.connection.on('ProtoOAClientDisconnectEvent', (e: any) => {
         this.log(`server disconnect: ${JSON.stringify(e).slice(0, 200)}`)
       })
       this.connection.on('ProtoOAAccountsTokenInvalidatedEvent', (e: any) => {
         this.log(`token invalidated: ${JSON.stringify(e).slice(0, 200)}`)
-      })
-      this.connection.on('ProtoHeartbeatEvent', () => {
-        this.log('<<< heartbeat from server')
-      })
-      this.connection.on('ProtoOASymbolChangedEvent', (e: any) => {
-        this.log(`symbol changed: ${JSON.stringify(e).slice(0, 200)}`)
       })
       this.connection.on('ProtoOAErrorRes', (e: any) => {
         this.log(`server error: ${JSON.stringify(e).slice(0, 300)}`)
@@ -199,51 +204,15 @@ export class CTraderClient implements MarketProvider {
         const id = this.symbolMap.get(a.id)
         if (id) ids.push(id)
       }
-      if (ids.length > 0) {
-        const subRes = await this.connection.sendCommand('ProtoOASubscribeSpotsReq', {
-          ctidTraderAccountId: this.config.ctidTraderAccountId,
-          symbolId: ids,
-        })
-        this.log(`subscribed to ${ids.length} symbols, response: ${JSON.stringify(subRes).slice(0, 200)}`)
+      if (ids.length === 0) {
+        this.log('WARNING: no symbols matched — nothing to poll')
       } else {
-        this.log('WARNING: no symbols matched — nothing to subscribe to')
+        this.log(`polling ${ids.length} symbols every ${POLL_INTERVAL_MS}ms`)
+        this.startPolling()
       }
 
-      // Debug: probe the account with ProtoOATraderReq to confirm we have
-      // active account access. If this fails or returns empty, the demo
-      // account likely lacks broker association or market data permission.
-      try {
-        const trader = await this.connection.sendCommand('ProtoOATraderReq', {
-          ctidTraderAccountId: this.config.ctidTraderAccountId,
-        })
-        this.log(`trader profile OK: ${JSON.stringify(trader).slice(0, 300)}`)
-      } catch (err) {
-        this.log(`trader probe FAILED: ${(err as Error).message}`)
-      }
-
-      // Probe: request 10 most recent M1 candles for the first symbol.
-      // Confirms whether the account has historical market data access.
-      const firstSymId = ids[0]
-      if (firstSymId) {
-        try {
-          const now = Date.now()
-          const bars = await this.connection.sendCommand('ProtoOAGetTrendbarsReq', {
-            ctidTraderAccountId: this.config.ctidTraderAccountId,
-            symbolId:            firstSymId,
-            period:              'M1',
-            fromTimestamp:       now - 60 * 60 * 1000,
-            toTimestamp:         now,
-            count:               10,
-          })
-          const summary = JSON.stringify(bars).slice(0, 300)
-          this.log(`trendbars probe (symbolId=${firstSymId}): ${summary}`)
-        } catch (err) {
-          this.log(`trendbars probe FAILED: ${(err as Error).message}`)
-        }
-      }
-
-      // 5. Heartbeat loop — also doubles as a connection-alive check.
-      //    If sendHeartbeat throws, we treat it as a disconnect and reconnect.
+      // Heartbeat loop — also doubles as a connection-alive check.
+      // If sendHeartbeat throws, we treat it as a disconnect and reconnect.
       this.startHeartbeat()
 
       // Reset reconnect backoff on a clean connection.
@@ -258,6 +227,8 @@ export class CTraderClient implements MarketProvider {
 
   private scheduleReconnect(): void {
     if (this.intentionalClose) return
+    if (this.pollTimer)      { clearInterval(this.pollTimer);      this.pollTimer = null      }
+    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null }
     this.reconnectCount++
     const delay = RECONNECT_BACKOFFS_MS[Math.min(this.reconnectStep, RECONNECT_BACKOFFS_MS.length - 1)]
     this.reconnectStep++
@@ -268,6 +239,90 @@ export class CTraderClient implements MarketProvider {
       this.reconnectTimer = null
       void this.connect()
     }, delay)
+  }
+
+  // ── Trendbars polling (substitute for broken SpotEvent decode) ────────
+  //
+  // Every POLL_INTERVAL_MS we fan out one ProtoOAGetTrendbarsReq per
+  // mapped symbol, asking for the latest 1 M1 candle. The close of that
+  // candle becomes our "current price" for the asset.
+  //
+  // Caveat: prices update at most every 1.5s, not every tick. Good enough
+  // for binary options of 60s+; F3 will use these to build candles for the
+  // chart. If we later want sub-second, swap in the SpotEvent decoder fix.
+  private startPolling(): void {
+    if (this.pollTimer) clearInterval(this.pollTimer)
+    // Run immediately so we get prices in the first second, not after a
+    // full POLL_INTERVAL_MS gap.
+    void this.pollAll()
+    this.pollTimer = setInterval(() => { void this.pollAll() }, POLL_INTERVAL_MS)
+  }
+
+  private async pollAll(): Promise<void> {
+    if (!this.connection) return
+    // Fan-out: 5 parallel requests. cTrader handles concurrent commands
+    // fine (the library multiplexes on the same TCP connection via
+    // clientMsgId).
+    const tasks = this.assets.map((a) => this.pollOne(a))
+    await Promise.allSettled(tasks)
+  }
+
+  private async pollOne(asset: ForexAssetConfig): Promise<void> {
+    const symbolId = this.symbolMap.get(asset.id)
+    if (!symbolId || !this.connection) return
+
+    try {
+      const now = Date.now()
+      // Ask for the most recent M1 candle. fromTimestamp 2 minutes back
+      // guarantees we get the in-progress bar plus the prior closed one.
+      const res = await this.connection.sendCommand('ProtoOAGetTrendbarsReq', {
+        ctidTraderAccountId: this.config.ctidTraderAccountId,
+        symbolId,
+        period:              'M1',
+        fromTimestamp:       now - 2 * 60 * 1000,
+        toTimestamp:         now,
+        count:               2,
+      }) as TrendbarsRes
+
+      const bars = res.trendbar
+      if (!bars || bars.length === 0) return
+
+      // Latest bar (last in the array). cTrader trendbars are int-encoded
+      // deltas off `low`: open = low + deltaOpen, close = low + deltaClose.
+      const last = bars[bars.length - 1]
+      const low  = Number(last.low)
+      if (!Number.isFinite(low)) return
+      const closeRaw = low + Number(last.deltaClose ?? 0)
+      // cTrader serialises every price as 1/100_000 of a unit, independent
+      // of the asset's display digits. e.g. 1.23 → 123_000. USD/JPY at
+      // ~159.46 arrives as 15_946_000. Don't use `asset.digits` here —
+      // that's for DISPLAY precision, not the wire format scale.
+      const close    = closeRaw / 100_000
+
+      this.lastTickAt = now
+      this.ticksReceived++
+
+      // We don't have separate bid/ask from trendbars — use close as both.
+      // If F3 later wants spread modelling, it can synthesise from pipSize.
+      console.log(
+        `[forex/ctrader] tick ${asset.id}` +
+        ` close=${close.toFixed(asset.digits)}` +
+        ` (M1 close, polled)`,
+      )
+
+      this.events?.onTick({
+        assetId:   asset.id,
+        bid:       close,
+        ask:       close,
+        mid:       close,
+        timestamp: now,
+      })
+    } catch (err) {
+      // One-pair failure is non-fatal; the next poll will retry. Only log
+      // when the failure rate seems abnormal.
+      // (Could add per-asset error counters here if we ever need them.)
+      void err
+    }
   }
 
   private startHeartbeat(): void {
@@ -323,68 +378,6 @@ export class CTraderClient implements MarketProvider {
       }
     }
     this.log(`symbol map built: ${updates.length}/${this.assets.length} pairs mapped`)
-  }
-
-  // ── Spot event handling ───────────────────────────────────────────────
-
-  private firstEventLogged = false
-
-  private handleSpotEvent(event: SpotEvent): void {
-    // One-time dump of the raw event so we can see exactly what types
-    // cTrader sends (string vs number for symbolId/bid/ask).
-    if (!this.firstEventLogged) {
-      this.firstEventLogged = true
-      this.log(`first spot event raw: ${JSON.stringify(event)}`)
-    }
-
-    const symbolId = Number(event.symbolId)
-    if (!Number.isFinite(symbolId)) return
-
-    // Reverse lookup: symbolId → assetId
-    let assetId: string | null = null
-    let digits = 5
-    for (const a of this.assets) {
-      if (this.symbolMap.get(a.id) === symbolId) {
-        assetId = a.id
-        digits = a.digits
-        break
-      }
-    }
-    if (!assetId) return
-
-    // cTrader sends bid/ask scaled by 10^digits as int64 — serialised as
-    // STRING by the protobuf JSON encoder. Coerce robustly.
-    const scale = Math.pow(10, digits)
-    const bidRaw = (event as any).bid
-    const askRaw = (event as any).ask
-    const bidNum = bidRaw != null ? Number(bidRaw) : NaN
-    const askNum = askRaw != null ? Number(askRaw) : NaN
-    const bid = Number.isFinite(bidNum) ? bidNum / scale : null
-    const ask = Number.isFinite(askNum) ? askNum / scale : null
-    if (bid == null && ask == null) return
-
-    const mid = (bid != null && ask != null) ? (bid + ask) / 2 : (bid ?? ask ?? 0)
-    const now = Date.now()
-
-    this.lastTickAt = now
-    this.ticksReceived++
-
-    // F2: log to console for visibility. F3 will hand the same stream
-    // to the candle aggregator instead of logging.
-    console.log(
-      `[forex/ctrader] tick ${assetId}` +
-      ` bid=${bid?.toFixed(digits) ?? '—'}` +
-      ` ask=${ask?.toFixed(digits) ?? '—'}` +
-      ` mid=${mid.toFixed(digits)}`,
-    )
-
-    this.events?.onTick({
-      assetId,
-      bid:       bid ?? mid,
-      ask:       ask ?? mid,
-      mid,
-      timestamp: now,
-    })
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
