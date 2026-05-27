@@ -231,6 +231,51 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
     [storeOperations],
   )
 
+  // Remote OPEN trades — ops that landed in the store via /operations/stream
+  // SSE (placed on another device or by a bot through /bot/v1/trade) but
+  // aren't yet in the local `openTrades` (which only tracks trades placed
+  // on THIS tab). Deduped by id so a trade placed locally — whose id was
+  // promoted from clientTradeId → serverOpId after POST — only renders once.
+  const remoteOpenTrades: OpenTrade[] = useMemo(() => {
+    const localIds = new Set(openTrades.map((t) => t.id))
+    return storeOperations
+      .filter((o) => o.status === 'OPEN' && !localIds.has(o.id))
+      .map((o) => {
+        const asset = ASSETS.find((x) => x.id === o.assetId)
+          ?? {
+            id:        o.assetId,
+            symbol:    o.assetSymbol || o.assetId,
+            label:     o.assetSymbol || o.assetId,
+            type:      'OTC' as const,
+            category:  'Moedas' as const,
+            payout:    o.payout,
+            payout5min: o.payout,
+            flag1: '', flag2: '',
+            code1: '', code2: '',
+            price: 0, change24h: 0,
+          }
+        return {
+          id:         o.id,
+          asset,
+          direction:  o.direction,
+          amount:     Number(o.amount),
+          profit:     0,
+          timeLeft:   0,
+          entryPrice: Number(o.entryPrice ?? 0),
+          // expiryTime stored as BRT-shifted epoch seconds (-3h). Matches
+          // what placeTrade computes for local trades so TradeItem's
+          // countdown uses one formula for both.
+          expiryTime: Math.floor(new Date(o.expiresAt).getTime() / 1000) + BRT_OFFSET,
+        }
+      })
+  }, [storeOperations, openTrades])
+
+  // Final list rendered as PENDENTES.
+  const allOpenTrades: OpenTrade[] = useMemo(
+    () => [...openTrades, ...remoteOpenTrades],
+    [openTrades, remoteOpenTrades],
+  )
+
   // OTC live tick (null when flag off, asset is BINANCE, or before first
   // tick lands). When set, it feeds entryPrice so the optimistic marker
   // matches what the server will actually record.
@@ -327,6 +372,11 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
         : (Date.now() + expiresInSec * 1000)
       const delayMs = Math.max(0, serverExpiryMs - Date.now())
 
+      // Promote the local optimistic trade's id to the server-issued one
+      // so that the SSE 'created' event (also keyed by server id) gets
+      // deduped against this row instead of rendering as a duplicate.
+      setOpenTrades(prev => prev.map(t => t.id === clientTradeId ? { ...t, id: operationId } : t))
+
       // Schedule result popup at the EXACT server expiry. GETs the real
       // operationId, but emits chart events keyed by clientTradeId
       // (matches the OPEN above). If the first GET races the backend
@@ -357,7 +407,9 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
             profit,
           }
 
-          setOpenTrades(prev => prev.filter(t => t.id !== clientTradeId))
+          // ID was promoted from clientTradeId → operationId after the POST
+          // returned, so filter by operationId here.
+          setOpenTrades(prev => prev.filter(t => t.id !== operationId))
           // Credit winnings locally (stake + profit). Loss = no change since
           // stake was already debited on click.
           if (won) {
@@ -386,7 +438,7 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
           setTimeout(() => onTradePlaced?.(null), 4000)
         } catch {
           setTradeError('Erro ao atualizar resultado da operação.')
-          setOpenTrades(prev => prev.filter(t => t.id !== clientTradeId))
+          setOpenTrades(prev => prev.filter(t => t.id !== operationId))
           setTimeout(() => onTradePlaced?.(null), 4000)
         }
       }, delayMs)
@@ -590,19 +642,19 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
           <div className="h-px bg-[#2a2e3b]" />
 
           <div className="flex-1 overflow-y-auto flex flex-col">
-            {openTrades.length === 0 && closedTrades.length === 0 ? (
+            {allOpenTrades.length === 0 && closedTrades.length === 0 ? (
               <EmptyState message="Não há operações abertas." />
             ) : (
               <>
-                {openTrades.length > 0 && (
+                {allOpenTrades.length > 0 && (
                   <>
                     <div className="flex items-center gap-2 px-4 py-1.5 mt-1">
                       <span className="text-[10px] font-bold text-[#8b8f9a] tracking-wide">PENDENTES</span>
                       <div className="w-5 h-5 rounded-full bg-blue-600/30 border border-blue-500/50 flex items-center justify-center">
-                        <span className="text-[9px] font-bold text-white">{openTrades.length}</span>
+                        <span className="text-[9px] font-bold text-white">{allOpenTrades.length}</span>
                       </div>
                     </div>
-                    {openTrades.map((trade) => (
+                    {allOpenTrades.map((trade) => (
                       <TradeItem key={trade.id} trade={trade} shortLabels={shortLabels} />
                     ))}
                   </>

@@ -28,6 +28,7 @@ import { AccountDropdown } from '@/components/layout/AccountDropdown'
 import { ASSETS, type Asset, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { useBinanceTicker } from '@/lib/binanceMarket'
 import { fetchMarketAssets, fetchDisabledAssetIds } from '@/lib/marketApi'
+import { useOperationsStream } from '@/lib/operationsStream'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -52,6 +53,11 @@ export default function TradingPage() {
   const router        = useRouter()
   const authStore     = useAuthStore()
   const currentAccount = useCurrentAccount(authStore)
+
+  // Live operations sync — opens an SSE to /operations/stream so trades
+  // placed via the Bot API (or on a second logged-in device) appear in
+  // this tab instantly + resolution credits show up without reload.
+  useOperationsStream()
 
   useEffect(() => {
     authStore.init().then(() => {
