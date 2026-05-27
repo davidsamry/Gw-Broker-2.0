@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
-  adjustUserBalance, getUserDetail, listUsers, updateUserByAdmin,
-  updateUserBonus, resetUserPassword,
+  adjustUserBalance, deleteUser, getUserDetail, listUsers,
+  updateUserByAdmin, updateUserBonus, resetUserPassword,
 } from './service.js'
 
 const listQuerySchema = z.object({
@@ -149,6 +149,26 @@ export async function userAdminRoutes(app: FastifyInstance) {
       return reply.send(data)
     } catch (err: any) {
       if (err.message === 'ACCOUNT_NOT_FOUND') return reply.status(404).send({ error: 'ACCOUNT_NOT_FOUND' })
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Hard delete — wipes the user + accounts + every dependent row (ops,
+  // transactions, deposits, withdrawals, KYC, tickets, etc.) in a single
+  // transaction. Drawer-only action with email-confirmation gate on the
+  // frontend. Server enforces: can't delete yourself, can't delete other
+  // admins (downgrade first).
+  app.delete('/:id', async (req, reply) => {
+    const { id }  = req.params as { id: string }
+    const adminId = ((req as any).user.sub) as string
+    try {
+      const data = await deleteUser(adminId, id)
+      return reply.send(data)
+    } catch (err: any) {
+      if (err.message === 'USER_NOT_FOUND')      return reply.status(404).send({ error: 'USER_NOT_FOUND' })
+      if (err.message === 'CANNOT_DELETE_SELF')  return reply.status(400).send({ error: 'CANNOT_DELETE_SELF' })
+      if (err.message === 'CANNOT_DELETE_ADMIN') return reply.status(400).send({ error: 'CANNOT_DELETE_ADMIN' })
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }

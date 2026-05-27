@@ -373,6 +373,115 @@ export async function resetUserPassword(targetUserId: string, newPassword: strin
   return { ok: true }
 }
 
+// ── Hard delete ───────────────────────────────────────────────────────────
+// Destroys a user + everything they own. Used by /admin/usuarios drawer for
+// cleaning out test accounts. Cascade behaviour relies on the FK ON DELETE
+// rules set in the Prisma schema (Account, Operation, etc. all CASCADE
+// from User). For tables without explicit cascade, we delete the dependents
+// manually first so the User row can go.
+//
+// Safety rails (all server-side — UI also gates these but never trust):
+//   • Cannot delete yourself — admin can't lock themselves out.
+//   • Cannot delete another ADMIN — protects against admin coup. An admin
+//     wanting to remove another admin must first downgrade them to USER
+//     via PATCH (which already requires self-lockout check).
+
+export interface DeleteUserResult {
+  ok:           boolean
+  deletedId:    string
+  deletedEmail: string
+}
+
+export async function deleteUser(adminId: string, targetUserId: string): Promise<DeleteUserResult> {
+  if (adminId === targetUserId) throw new Error('CANNOT_DELETE_SELF')
+
+  const target = await prisma.user.findUnique({
+    where:  { id: targetUserId },
+    select: { id: true, email: true, role: true },
+  })
+  if (!target) throw new Error('USER_NOT_FOUND')
+  if (target.role === 'ADMIN') throw new Error('CANNOT_DELETE_ADMIN')
+
+  // Run everything in a transaction so a partial delete never leaves the
+  // DB in an inconsistent state (e.g. accounts gone but operations linger).
+  // Order matters: child tables that DON'T cascade from User must be wiped
+  // BEFORE the parent. Most of our schema does cascade, but a few tables
+  // (operations, transactions, deposits, withdrawals, kyc_submissions,
+  // tickets, ticket_messages, bonus_grants, otc_admin_logs FK on adminId)
+  // need explicit handling.
+  await prisma.$transaction(async (tx) => {
+    // Operations + transactions live on accounts, not directly on the user
+    // but cascading from account → user is set up only for some FKs. To be
+    // safe, wipe everything by accountId first.
+    await tx.$executeRaw`
+      DELETE FROM transactions
+      WHERE "accountId" IN (SELECT id FROM accounts WHERE "userId" = ${targetUserId})
+    `
+    await tx.$executeRaw`
+      DELETE FROM operations
+      WHERE "accountId" IN (SELECT id FROM accounts WHERE "userId" = ${targetUserId})
+    `
+    await tx.$executeRaw`
+      DELETE FROM deposits
+      WHERE "accountId" IN (SELECT id FROM accounts WHERE "userId" = ${targetUserId})
+    `
+    await tx.$executeRaw`
+      DELETE FROM withdrawals
+      WHERE "accountId" IN (SELECT id FROM accounts WHERE "userId" = ${targetUserId})
+    `
+    await tx.$executeRaw`
+      DELETE FROM bonus_grants
+      WHERE "accountId" IN (SELECT id FROM accounts WHERE "userId" = ${targetUserId})
+    `
+    // Tickets + messages — messages reference tickets, so messages first.
+    await tx.$executeRaw`
+      DELETE FROM ticket_messages
+      WHERE "ticketId" IN (SELECT id FROM tickets WHERE "userId" = ${targetUserId})
+    `
+    await tx.$executeRaw`
+      DELETE FROM ticket_messages
+      WHERE "authorId" = ${targetUserId}
+    `
+    await tx.$executeRaw`
+      DELETE FROM tickets WHERE "userId" = ${targetUserId}
+    `
+    await tx.$executeRaw`
+      DELETE FROM kyc_submissions WHERE "userId" = ${targetUserId}
+    `
+    await tx.$executeRaw`
+      DELETE FROM password_reset_tokens WHERE "userId" = ${targetUserId}
+    `
+    // Accounts come after their dependents above.
+    await tx.$executeRaw`
+      DELETE FROM accounts WHERE "userId" = ${targetUserId}
+    `
+    // Finally the user row.
+    await tx.$executeRaw`
+      DELETE FROM users WHERE id = ${targetUserId}
+    `
+  })
+
+  // Audit log (best-effort; if the otc_admin_logs schema isn't set up
+  // for non-asset events the catch swallows it.)
+  try {
+    await prisma.$executeRaw`
+      INSERT INTO otc_admin_logs ("adminId", action, "assetId", "beforeState", "afterState", "createdAt")
+      VALUES (
+        ${adminId},
+        ${'DELETE_USER'},
+        ${null},
+        ${JSON.stringify({ id: target.id, email: target.email })}::jsonb,
+        ${JSON.stringify({ deleted: true })}::jsonb,
+        NOW()
+      )
+    `
+  } catch (err) {
+    console.error('[admin/users] audit log for DELETE_USER failed', err)
+  }
+
+  return { ok: true, deletedId: target.id, deletedEmail: target.email }
+}
+
 // ── Balance adjustment ────────────────────────────────────────────────────
 
 export interface AdjustBalanceInput {

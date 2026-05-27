@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { X, KeyRound, AlertCircle, Loader2 } from 'lucide-react'
+import { X, KeyRound, AlertCircle, Loader2, Trash2 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
@@ -64,7 +64,8 @@ export function UserDetailDrawer({ userId, onClose, onChanged }: Props) {
   const [error, setError]     = useState('')
   const [saving, setSaving]   = useState(false)
   const [saveMsg, setSaveMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
-  const [resetOpen, setResetOpen] = useState(false)
+  const [resetOpen,  setResetOpen]  = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const me     = useAuthStore((s) => s.user)
   const isSelf = me?.id === userId
@@ -298,13 +299,25 @@ export function UserDetailDrawer({ userId, onClose, onChanged }: Props) {
                 <ToggleRow label="Bloqueado"     value={form.blocked}           onChange={(v) => setForm({ ...form, blocked: v })} disabled={isSelf} />
               </div>
 
-              {/* ── Reset password ──────────────────────────────────── */}
-              <button
-                onClick={() => setResetOpen(true)}
-                className="flex items-center gap-2 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors w-fit"
-              >
-                <KeyRound size={13} /> Redefinir Senha
-              </button>
+              {/* ── Reset password + danger zone ─────────────────────── */}
+              <div className="flex items-center gap-4 flex-wrap">
+                <button
+                  onClick={() => setResetOpen(true)}
+                  className="flex items-center gap-2 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  <KeyRound size={13} /> Redefinir Senha
+                </button>
+                {/* Hard delete — disabled for admins (server also blocks,
+                    UI just makes it obvious why the button doesn't work). */}
+                {data && data.user.role !== 'ADMIN' && (
+                  <button
+                    onClick={() => setDeleteOpen(true)}
+                    className="flex items-center gap-2 text-xs font-semibold text-red-400 hover:text-red-300 transition-colors"
+                  >
+                    <Trash2 size={13} /> Excluir Conta
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Footer with save */}
@@ -340,6 +353,20 @@ export function UserDetailDrawer({ userId, onClose, onChanged }: Props) {
             userId={data.user.id}
             email={data.user.email}
             onClose={() => setResetOpen(false)}
+          />
+        )}
+
+        {deleteOpen && data && (
+          <DeleteUserModal
+            userId={data.user.id}
+            email={data.user.email}
+            name={data.user.name}
+            onClose={() => setDeleteOpen(false)}
+            onDeleted={() => {
+              setDeleteOpen(false)
+              onChanged?.()     // refresh the list behind the drawer
+              onClose()          // close the drawer entirely
+            }}
           />
         )}
       </aside>
@@ -583,6 +610,100 @@ function ResetPasswordModal({ userId, email, onClose }: { userId: string; email:
               </div>
             </>
           )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── DeleteUserModal ──────────────────────────────────────────────────────
+// Hard-delete confirmation. Admin must type the user's email exactly to
+// arm the red "Excluir" button — prevents accidental click-through. Server
+// also enforces the rules; this UI is defence-in-depth.
+function DeleteUserModal({
+  userId, email, name, onClose, onDeleted,
+}: {
+  userId:    string
+  email:     string
+  name:      string
+  onClose:   () => void
+  onDeleted: () => void
+}) {
+  const [typed,   setTyped]   = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error,   setError]   = useState('')
+  const armed = typed.trim().toLowerCase() === email.toLowerCase()
+
+  async function submit() {
+    if (!armed) return
+    setLoading(true); setError('')
+    try {
+      const { api } = await import('@/lib/api')   // dynamic — same as siblings
+      await api.delete(`/admin/users/${userId}`)
+      onDeleted()
+    } catch (err: any) {
+      const code = err?.response?.data?.error
+      if      (code === 'CANNOT_DELETE_SELF')  setError('Você não pode excluir a própria conta.')
+      else if (code === 'CANNOT_DELETE_ADMIN') setError('Não é possível excluir outro admin. Rebaixe-o para USER primeiro.')
+      else if (code === 'USER_NOT_FOUND')      setError('Usuário não encontrado.')
+      else                                      setError('Falha ao excluir. Tente novamente.')
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="absolute inset-0 z-10 bg-black/70 flex items-center justify-center px-4" onClick={onClose}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm bg-[#13161f] border border-red-500/40 rounded-xl shadow-2xl p-5"
+      >
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-red-500/15 border border-red-500/30 flex items-center justify-center">
+              <Trash2 size={15} className="text-red-400" />
+            </div>
+            <h3 className="text-sm font-bold text-white">Excluir conta</h3>
+          </div>
+          <button onClick={onClose} className="text-[#8b8f9a] hover:text-white"><X size={14} /></button>
+        </div>
+
+        <p className="text-xs text-[#ccc] leading-relaxed mb-3">
+          Você está prestes a excluir <strong className="text-white">{name}</strong> ({email}) e <strong className="text-red-300">TODOS os dados associados</strong>: contas, operações, depósitos, saques, KYC, tickets, transações.
+        </p>
+        <p className="text-xs text-red-300 leading-relaxed mb-4">
+          Esta ação é <strong>irreversível</strong>.
+        </p>
+
+        <label className="text-[10px] font-medium text-[#8b8f9a] mb-1 block">
+          Digite o email <code className="text-white font-mono">{email}</code> para confirmar:
+        </label>
+        <input
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          type="text"
+          autoFocus
+          placeholder={email}
+          className="w-full bg-[#1a1e2a] border border-[#1f232e] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-red-500/60 mb-3 font-mono"
+        />
+
+        {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+
+        <div className="flex gap-2">
+          <button
+            onClick={onClose}
+            disabled={loading}
+            className="flex-1 h-9 rounded-lg border border-[#1f232e] text-xs font-semibold text-[#8b8f9a] hover:text-white"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={submit}
+            disabled={!armed || loading}
+            className="flex-1 h-9 rounded-lg bg-red-500 hover:bg-red-400 text-xs font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+          >
+            {loading && <Loader2 size={12} className="animate-spin" />}
+            {loading ? 'Excluindo…' : 'Excluir permanentemente'}
+          </button>
         </div>
       </div>
     </div>
