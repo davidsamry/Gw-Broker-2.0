@@ -23,7 +23,17 @@ import type {
   MarketProvider, ProviderEvents, ProviderStatus,
 } from '../types.js'
 import type { ForexAssetConfig } from '../../types.js'
+import { FOREX_TIMEFRAMES, type ForexTimeframe } from '../../types.js'
 import { prisma } from '../../../prisma.js'
+
+// cTrader period strings keyed by our seconds-based ForexTimeframe.
+// Used by the history bootstrap to ask for "last N M1/M5/M15/H1 bars".
+const TF_TO_CTRADER_PERIOD: Record<ForexTimeframe, string> = {
+  60:   'M1',
+  300:  'M5',
+  900:  'M15',
+  3600: 'H1',
+}
 
 const HEARTBEAT_INTERVAL_MS = 25_000  // library README's suggested cadence
 const RECONNECT_BACKOFFS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000]
@@ -57,6 +67,8 @@ interface TrendbarPayload {
   deltaOpen?:   number | string
   deltaClose?:  number | string
   deltaHigh?:   number | string
+  /** Tick volume during the bar. Saved into tickCount during bootstrap. */
+  volume?:      number | string
   utcTimestampInMinutes?: number | string
 }
 interface TrendbarsRes {
@@ -204,16 +216,24 @@ export class CTraderClient implements MarketProvider {
         const id = this.symbolMap.get(a.id)
         if (id) ids.push(id)
       }
-      if (ids.length === 0) {
-        this.log('WARNING: no symbols matched — nothing to poll')
-      } else {
-        this.log(`polling ${ids.length} symbols every ${POLL_INTERVAL_MS}ms`)
-        this.startPolling()
-      }
-
       // Heartbeat loop — also doubles as a connection-alive check.
       // If sendHeartbeat throws, we treat it as a disconnect and reconnect.
       this.startHeartbeat()
+
+      if (ids.length === 0) {
+        this.log('WARNING: no symbols matched — nothing to poll')
+      } else {
+        // Bootstrap THEN start polling. ProtoOAGetTrendbarsReq is
+        // rate-limited at ~5/s per account by cTrader; running bootstrap
+        // (which uses the same payload type) concurrent with polling
+        // burst-trips the limit and yields BLOCKED_PAYLOAD_TYPE errors.
+        // Sequencing them = ~15-25s of no live price after a restart,
+        // but with full chart history available right after. Worth it.
+        void this.bootstrapHistory().finally(() => {
+          this.log(`polling ${ids.length} symbols every ${POLL_INTERVAL_MS}ms`)
+          this.startPolling()
+        })
+      }
 
       // Reset reconnect backoff on a clean connection.
       this.reconnectStep = 0
@@ -336,6 +356,120 @@ export class CTraderClient implements MarketProvider {
         this.scheduleReconnect()
       }
     }, HEARTBEAT_INTERVAL_MS)
+  }
+
+  // ── History bootstrap ─────────────────────────────────────────────────
+  //
+  // On boot, fetch the last ~1000 candles per (asset, timeframe) from
+  // cTrader and UPSERT into forex_candles. Without this the chart shows
+  // an empty/sparse window until the live aggregator has collected
+  // enough data on its own (~16h for 1000 M1 bars), which looks broken.
+  //
+  // Serial across (asset, tf) pairs to stay polite to the API — 5 assets
+  // × 4 timeframes = 20 requests, ~20 seconds total at ~1s per call.
+  // Fire-and-forget from the caller; failures of individual pairs are
+  // logged but don't poison the rest.
+  private async bootstrapHistory(): Promise<void> {
+    if (!this.connection) return
+    const startedAt = Date.now()
+    this.log('history bootstrap starting…')
+
+    let okCount = 0
+    let failCount = 0
+    // cTrader rate-limits ProtoOAGetTrendbarsReq at ~5 req/s per account.
+    // Bootstrap runs BEFORE polling starts (see start() above) so we
+    // have the full budget — 250ms = 4 req/s, comfortably under the
+    // cap and keeps total bootstrap time around 5s for 20 calls.
+    const PACE_MS = 250
+    for (const asset of this.assets) {
+      const symbolId = this.symbolMap.get(asset.id)
+      if (!symbolId) continue
+      for (const tf of FOREX_TIMEFRAMES) {
+        try {
+          const count = await this.fetchAndPersistHistory(asset, symbolId, tf)
+          okCount++
+          this.log(`bootstrap ${asset.id} tf=${tf}: ${count} bars persisted`)
+        } catch (err) {
+          failCount++
+          // Library rejects with the raw cTrader error payload (not an
+          // Error). Stringify the whole thing so we actually see the
+          // errorCode + description.
+          const detail = err instanceof Error ? err.message : JSON.stringify(err).slice(0, 200)
+          this.log(`bootstrap ${asset.id} tf=${tf} FAILED: ${detail}`)
+        }
+        await new Promise((r) => setTimeout(r, PACE_MS))
+      }
+    }
+    this.log(`history bootstrap done in ${Date.now() - startedAt}ms (ok=${okCount} fail=${failCount})`)
+  }
+
+  /** Fetch the last 1000 bars of `tf` for one asset and persist via
+   *  UPSERT. cTrader returns trendbars deltas off `low`; we reconstruct
+   *  full OHLC + apply the 1/100_000 wire scale. */
+  private async fetchAndPersistHistory(
+    asset:     ForexAssetConfig,
+    symbolId:  number,
+    tf:        ForexTimeframe,
+  ): Promise<number> {
+    if (!this.connection) return 0
+    const period = TF_TO_CTRADER_PERIOD[tf]
+    if (!period) return 0
+
+    const now = Date.now()
+    // Window sized to ~1000 bars per timeframe. cTrader caps results
+    // around this anyway — we just need to ask for a big-enough range.
+    const fromMs = now - 1000 * tf * 1000
+    const res = await this.connection.sendCommand('ProtoOAGetTrendbarsReq', {
+      ctidTraderAccountId: this.config.ctidTraderAccountId,
+      symbolId,
+      period,
+      fromTimestamp: fromMs,
+      toTimestamp:   now,
+      count:         1000,
+    }) as TrendbarsRes
+
+    const bars = res.trendbar ?? []
+    if (bars.length === 0) return 0
+
+    // Build the parameterised INSERT in a single round-trip. UPSERT key
+    // is (assetId, timeframe, openTime) — won't double-write if we run
+    // bootstrap twice (e.g. reconnect).
+    //
+    // Note: cTrader returns each bar's utcTimestampInMinutes as the
+    // openTime (minutes since epoch). Multiply by 60_000 for ms.
+    let persisted = 0
+    for (const b of bars) {
+      const tsMinutes = Number(b.utcTimestampInMinutes)
+      if (!Number.isFinite(tsMinutes)) continue
+      const openTime = new Date(tsMinutes * 60_000)
+      const low      = Number(b.low)
+      if (!Number.isFinite(low)) continue
+      const open     = (low + Number(b.deltaOpen  ?? 0)) / 100_000
+      const high     = (low + Number(b.deltaHigh  ?? 0)) / 100_000
+      const close    = (low + Number(b.deltaClose ?? 0)) / 100_000
+      const lowF     = low / 100_000
+      const volume   = Number(b.volume ?? 0)
+
+      try {
+        await prisma.$executeRaw`
+          INSERT INTO forex_candles
+            ("assetId", "timeframe", "openTime", "openPrice", "highPrice", "lowPrice", "closePrice", "tickCount", "finalizedAt")
+          VALUES
+            (${asset.id}, ${tf}, ${openTime}, ${open}, ${high}, ${lowF}, ${close}, ${volume}, ${openTime})
+          ON CONFLICT ("assetId", "timeframe", "openTime") DO UPDATE
+            SET "openPrice"   = EXCLUDED."openPrice",
+                "highPrice"   = EXCLUDED."highPrice",
+                "lowPrice"    = EXCLUDED."lowPrice",
+                "closePrice"  = EXCLUDED."closePrice",
+                "tickCount"   = EXCLUDED."tickCount",
+                "finalizedAt" = EXCLUDED."finalizedAt"
+        `
+        persisted++
+      } catch (err) {
+        this.log(`persist failed for ${asset.id} tf=${tf} bar=${openTime.toISOString()}: ${err}`)
+      }
+    }
+    return persisted
   }
 
   // ── Symbol mapping ────────────────────────────────────────────────────
