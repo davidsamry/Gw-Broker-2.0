@@ -136,9 +136,15 @@ export function TradingCompactCard({
         direction, amount: investment, payout: asset.payout,
         status: 'CANCELLED',
       })
-      const code = err.response?.data?.error
-      if (code === 'INSUFFICIENT_BALANCE') setTradeError('Saldo insuficiente.')
-      else setTradeError('Erro ao abrir operação.')
+      // Same diagnostic mapping as TradingPanel — keep them in sync.
+      const code   = err.response?.data?.error as string | undefined
+      const status = err.response?.status as number | undefined
+      if      (code === 'INSUFFICIENT_BALANCE')    setTradeError('Saldo insuficiente.')
+      else if (code === 'TOO_FAST' || status === 429) setTradeError('Aguarde alguns instantes antes de operar novamente.')
+      else if (code === 'ACCOUNT_NOT_FOUND')       setTradeError('Conta não encontrada — recarregue a página.')
+      else if (code === 'VALIDATION_ERROR')        setTradeError('Valor inválido (veja limites de Configurações).')
+      else if (!err.response)                       setTradeError('Sem conexão com o servidor.')
+      else                                          setTradeError(`Erro ao abrir operação${code ? ` (${code})` : ''}.`)
     } finally {
       setPlacing(false)
     }
