@@ -957,8 +957,11 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           it. Right-anchoring keeps the chip flush regardless of zoom/pan,
           and only the Y (price level) follows the live tick. Offset of
           70px clears the price-axis label column (~60px) without sitting
-          on top of the price labels. Same pattern Quotex uses. */}
-      {candleTimerY != null && (
+          on top of the price labels. Same pattern Quotex uses.
+          Hidden while showLoadingOverlay is up (asset switch) — otherwise
+          the chip from the OLD chart lingers on top of the "Carregando…"
+          overlay until the new chart's first tick arrives. */}
+      {candleTimerY != null && !showLoadingOverlay && (
         <div
           className="absolute z-20 pointer-events-none"
           style={{ top: candleTimerY, right: 70, transform: 'translateY(-50%)' }}
