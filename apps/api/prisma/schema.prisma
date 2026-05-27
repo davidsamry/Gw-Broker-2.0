@@ -758,6 +758,25 @@ model ForexEngineSnapshot {
   @@map("forex_engine_snapshot")
 }
 
+// ── Ranking (fake leaderboard) ─────────────────────────────────────────
+// Pool of fictitious users that the admin manages from /admin/ranking.
+// The public /ranking endpoint picks 25 from this pool every 3 hours
+// (deterministic shuffle keyed on the 3h window) and exposes them to
+// the user-facing RankingPanel. Real user trade data is NEVER mixed in —
+// this is purely a marketing/social-proof display.
+model RankingEntry {
+  id          String   @id @default(cuid())
+  name        String                // 'João S.', 'Mariana X.', etc.
+  countryCode String                // ISO 3166-1 alpha-2: 'br', 'us', 'jp', ...
+  amount      Decimal  @db.Decimal(18, 2)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([active])
+  @@map("ranking_entries")
+}
+
 // ── Email system ───────────────────────────────────────────────────────
 // Admin-editable templates rendered with Handlebars-style {{var}}
 // substitution. `key` is the stable identifier the backend looks up

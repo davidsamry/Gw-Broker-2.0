@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, ChevronDown, Trophy, Globe } from 'lucide-react'
+import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 interface RankingPanelProps {
@@ -19,34 +20,27 @@ interface LeaderEntry {
   amount: number  // R$
 }
 
-// Top of the leaderboard — mock weekly data so the page is full and looks live.
-const LEADERS: LeaderEntry[] = [
-  { rank:  1, name: 'Apollo I.',     code: 'br', amount: 91590.80 },
-  { rank:  2, name: 'Yonathan D.',   code: 'id', amount: 39531.14 },
-  { rank:  3, name: 'Joseph R.',     code: 'kr', amount: 39069.49 },
-  { rank:  4, name: 'Felipe A.',     code: 'ng', amount: 38544.89 },
-  { rank:  5, name: 'Mariana X.',    code: 'us', amount: 38456.75 },
-  { rank:  6, name: 'Valci L.',      code: 'pt', amount: 37887.26 },
-  { rank:  7, name: 'Pedro B.',      code: 'kr', amount: 37800.08 },
-  { rank:  8, name: 'Daniel O.',     code: 'id', amount: 37290.47 },
-  { rank:  9, name: 'Isabela G.',    code: 'us', amount: 37049.92 },
-  { rank: 10, name: 'Kanwara S.',    code: 'pe', amount: 36849.53 },
-  { rank: 11, name: 'Diego B.',      code: 'jp', amount: 36703.25 },
-  { rank: 12, name: 'Angelo H.',     code: 'br', amount: 36540.96 },
-  { rank: 13, name: 'Leonardo U.',   code: 'bo', amount: 36417.43 },
-  { rank: 14, name: 'Vinicius A.',   code: 'br', amount: 36351.49 },
-  { rank: 15, name: 'Leo V.',        code: 'de', amount: 36291.68 },
-  { rank: 16, name: 'Julia J.',      code: 'us', amount: 36162.91 },
-  { rank: 17, name: 'Ricardo P.',    code: 'br', amount: 36041.10 },
-  { rank: 18, name: 'Sofia T.',      code: 'ar', amount: 35987.55 },
-  { rank: 19, name: 'Hans M.',       code: 'de', amount: 35804.21 },
-  { rank: 20, name: 'Yuki N.',       code: 'jp', amount: 35692.83 },
-  { rank: 21, name: 'Carlos R.',     code: 'mx', amount: 35501.16 },
-  { rank: 22, name: 'Anna K.',       code: 'ru', amount: 35349.90 },
-  { rank: 23, name: 'Bruno C.',      code: 'pt', amount: 35178.42 },
-  { rank: 24, name: 'Priya S.',      code: 'in', amount: 35044.61 },
-  { rank: 25, name: 'Olivia W.',     code: 'gb', amount: 34902.18 },
-]
+// Cache (sessionStorage) — the public ranking is identical for ALL users
+// during a 3h window, so we cache the response locally and only refetch
+// when the cached `rotatesAt` ISO has passed. Saves a roundtrip on every
+// reopen of the panel.
+const RANKING_CACHE_KEY = 'vx_ranking_cache_v1'
+interface CachedRanking { entries: LeaderEntry[]; rotatesAt: string }
+
+function loadCachedRanking(): CachedRanking | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = sessionStorage.getItem(RANKING_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as CachedRanking
+    if (new Date(parsed.rotatesAt).getTime() <= Date.now()) return null   // expired
+    return parsed
+  } catch { return null }
+}
+function saveCachedRanking(c: CachedRanking): void {
+  if (typeof window === 'undefined') return
+  try { sessionStorage.setItem(RANKING_CACHE_KEY, JSON.stringify(c)) } catch { /* private mode */ }
+}
 
 const REGION_LABEL: Record<Region, string> = {
   MUNDIAL:  'Mundialmente',
@@ -58,6 +52,24 @@ const REGION_LABEL: Record<Region, string> = {
 export function RankingPanel({ onClose, userName = 'Você', userCode = 'br' }: RankingPanelProps) {
   const [region, setRegion]         = useState<Region>('MUNDIAL')
   const [regionOpen, setRegionOpen] = useState(false)
+  // Seed from cache so the list paints instantly on reopen. Refetch in
+  // background to pick up admin edits + new 3h rotations.
+  const cached = typeof window !== 'undefined' ? loadCachedRanking() : null
+  const [leaders, setLeaders]       = useState<LeaderEntry[]>(cached?.entries ?? [])
+  const [rotatesAt, setRotatesAt]   = useState<string | null>(cached?.rotatesAt ?? null)
+
+  useEffect(() => {
+    let cancelled = false
+    api.get<{ entries: LeaderEntry[]; rotatesAt: string }>('/ranking')
+      .then(({ data }) => {
+        if (cancelled) return
+        setLeaders(data.entries)
+        setRotatesAt(data.rotatesAt)
+        saveCachedRanking({ entries: data.entries, rotatesAt: data.rotatesAt })
+      })
+      .catch(() => { /* keep cached/empty — silent */ })
+    return () => { cancelled = true }
+  }, [])
 
   return (
     // Width: 320px on desktop (side panel beside chart). Full width + height
@@ -123,10 +135,23 @@ export function RankingPanel({ onClose, userName = 'Você', userCode = 'br' }: R
 
       {/* Leaderboard */}
       <div className="flex-1 overflow-y-auto">
-        {LEADERS.map((entry) => (
-          <LeaderRow key={entry.rank} entry={entry} />
-        ))}
+        {leaders.length === 0 ? (
+          <div className="text-center text-[#8b8f9a] text-xs py-12 px-4">
+            Sem dados de ranking no momento.
+          </div>
+        ) : (
+          leaders.map((entry) => (
+            <LeaderRow key={entry.rank} entry={entry} />
+          ))
+        )}
       </div>
+
+      {/* Rotation hint (optional debug — only in dev) */}
+      {process.env.NODE_ENV !== 'production' && rotatesAt && (
+        <div className="px-4 pb-2 text-[10px] text-[#8b8f9a] text-center">
+          Próxima rotação: {new Date(rotatesAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+        </div>
+      )}
     </div>
   )
 }

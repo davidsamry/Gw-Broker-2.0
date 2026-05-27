@@ -15,6 +15,7 @@ import { ticketRoutes } from './tickets/routes.js'
 import { otcV2Routes } from './otc/v2/routes.js'
 import { bonusRoutes } from './bonuses/routes.js'
 import { forexRoutes } from './forex/routes.js'
+import { rankingRoutes } from './ranking/routes.js'
 import { metricsRoute } from './metrics/route.js'
 import { httpRequestDurationSeconds } from './metrics/registry.js'
 import { prisma } from './prisma.js'
@@ -118,6 +119,7 @@ export async function buildApp() {
   await app.register(otcV2Routes,        { prefix: '/otc/v2'   })
   await app.register(bonusRoutes,        { prefix: '/bonuses'  })
   await app.register(forexRoutes,        { prefix: '/forex/v1' })
+  await app.register(rankingRoutes,      { prefix: '/ranking'  })
 
   return app
 }
