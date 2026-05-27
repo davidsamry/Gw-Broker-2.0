@@ -12,10 +12,13 @@
 import { prisma } from '../prisma.js'
 
 export interface PublicRankingEntry {
-  rank:        number       // 1..N
-  name:        string
-  countryCode: string       // ISO 3166-1 alpha-2 (lowercase)
-  amount:      number       // BRL
+  rank:   number       // 1..N
+  name:   string
+  // Named `code` (not `countryCode`) to match the frontend RankingPanel's
+  // LeaderEntry interface — keeps the wire payload smaller and avoids a
+  // mapping layer on the frontend.
+  code:   string       // ISO 3166-1 alpha-2 (lowercase)
+  amount: number       // BRL
 }
 
 export interface PublicRankingResponse {
@@ -60,10 +63,10 @@ export async function getPublicRanking(): Promise<PublicRankingResponse> {
   // Take top N (or whatever's available if pool < N), assign ranks 1..N.
   const slice = shuffled.slice(0, LEADERBOARD_SIZE)
   const entries: PublicRankingEntry[] = slice.map((e, i) => ({
-    rank:        i + 1,
-    name:        e.name,
-    countryCode: e.countryCode,
-    amount:      Number(e.amount),
+    rank:   i + 1,
+    name:   e.name,
+    code:   e.countryCode,
+    amount: Number(e.amount),
   }))
 
   return {
