@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { api } from '@/lib/api'
-import { useAuthStore } from '@/store/auth'
+import { useAuthStore, SETTINGS_FALLBACK } from '@/store/auth'
 import { cn } from '@/lib/utils'
 
 interface DepositoModalProps {
@@ -48,8 +48,9 @@ interface AvailableBonus {
   rollover:   number
 }
 
-const MIN     = 60        // R$ — kept in sync with apps/api/src/deposits/schema.ts
-const MAX     = 100_000   // R$
+// MIN/MAX now live in PlatformSettings (admin: /admin/configuracoes) and
+// flow to the client via /auth/me → authStore.settings. SETTINGS_FALLBACK
+// covers the brief window before /auth/me lands.
 const POLL_MS = 3000
 const PRESETS = [100, 250, 500, 1000, 2500, 5000]
 
@@ -86,6 +87,11 @@ function formatBrl(n: number): string {
 export function DepositoModal({ onClose, initialBonusCode }: DepositoModalProps) {
   const authStore = useAuthStore()
   const profileCpf = authStore.user?.cpf ?? null
+  // Pull deposit min/max from admin-edited PlatformSettings (lands in
+  // authStore via /auth/me). Falls back to the historical defaults if
+  // /auth/me hasn't resolved yet — same numbers the migration seeded.
+  const MIN = authStore.settings?.depositMin ?? SETTINGS_FALLBACK.depositMin
+  const MAX = authStore.settings?.depositMax ?? SETTINGS_FALLBACK.depositMax
 
   const [phase, setPhase]     = useState<Phase>('form')
   // When initialBonusCode is set, seed the amount at R$ 100 in initial

@@ -51,12 +51,44 @@ export interface User {
   updatedAt?:        string         // used to re-sync MinhaContaTab local state
 }
 
+// Subset of PlatformSettings (api/src/settings/service.ts) exposed publicly
+// via /auth/me so the deposit/withdraw/trade forms can read live limits
+// instead of hardcoded constants.
+export interface PublicSettings {
+  depositMin:             number
+  depositMax:             number
+  withdrawalMin:          number
+  withdrawalMax:          number
+  withdrawalFeePct:       number
+  operationMin:           number
+  operationMax:           number
+  operationMinIntervalMs: number
+  copyTradeEnabled:       boolean
+}
+
+// Safe fallbacks for the brief window before /auth/me lands (or when
+// running offline). Mirror the defaults seeded in the migration.
+export const SETTINGS_FALLBACK: PublicSettings = {
+  depositMin:             60,
+  depositMax:             100_000,
+  withdrawalMin:          60,
+  withdrawalMax:          10_000,
+  withdrawalFeePct:       0,
+  operationMin:           5,
+  operationMax:           100_000,
+  operationMinIntervalMs: 1000,
+  copyTradeEnabled:       true,
+}
+
 interface AuthState {
   user:               User | null
   token:              string | null
   isDemo:             boolean
   loading:            boolean
   kycSubmission:      KycSubmission | null
+  /** Broker-wide limits + toggles. Null only during the very first paint
+   *  before /auth/me resolves; readers should use SETTINGS_FALLBACK then. */
+  settings:           PublicSettings | null
 
   // 2FA: pass `code` for users with twoFactorEnabled. If omitted and the
   // account has 2FA on, the API throws REQUIRES_2FA — callers can catch
@@ -136,6 +168,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isDemo:        loadIsDemo(),
   loading:       true,
   kycSubmission: null,
+  settings:      null,
 
   setIsDemo: (v) => { saveIsDemo(v); set({ isDemo: v }) },
 
@@ -193,7 +226,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const { data } = await api.get('/auth/me')
       saveUserCache(data.user)
-      set({ user: data.user, token, loading: false })
+      set({
+        user:     data.user,
+        token,
+        loading:  false,
+        // Capture the live PlatformSettings snapshot. Falsy/missing →
+        // keep whatever was previously cached (don't blow it away).
+        ...(data.settings ? { settings: data.settings as PublicSettings } : {}),
+      })
       // Hydrate operations + withdrawals caches from the same response —
       // eliminates the separate RTTs the panels used to fire on mount.
       if (Array.isArray(data.operations)) {

@@ -407,8 +407,15 @@ function NovaRetiradaModal({
   const [submitting, setSubmitting] = useState(false)
   const [error, setError]           = useState('')
 
+  // Admin-editable limits via /admin/configuracoes. authStore.settings
+  // is hydrated from /auth/me; fallback to the migration defaults until
+  // it resolves.
+  const settings = useAuthStore((s) => s.settings)
+  const WD_MIN = settings?.withdrawalMin ?? 60
+  const WD_MAX = Math.min(settings?.withdrawalMax ?? Infinity, maxAmount)
+
   const amountNum = parseFloat(amount.replace(',', '.')) || 0
-  const valid     = amountNum >= 50 && amountNum <= maxAmount && destination.trim().length >= 3
+  const valid     = amountNum >= WD_MIN && amountNum <= WD_MAX && destination.trim().length >= 3
 
   const destPlaceholder = method === 'PIX'
     ? 'Chave PIX (CPF / email / telefone / aleatória)'
@@ -499,7 +506,7 @@ function NovaRetiradaModal({
               className="w-full bg-[#252a3a] border border-[#2a2e3b] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/60"
             />
             <p className="text-[10px] text-[#8b8f9a] mt-1">
-              Mínimo R$ 60,00 · Disponível R$ {formatBRL(maxAmount)}
+              Mín: R$ {formatBRL(WD_MIN)} · Máx: R$ {formatBRL(Math.min(settings?.withdrawalMax ?? Infinity, maxAmount))} · Disponível R$ {formatBRL(maxAmount)}
             </p>
           </div>
 
