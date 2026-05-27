@@ -17,6 +17,7 @@
 
 import { prisma } from '../../prisma.js'
 import { FOREX_TIMEFRAMES, type ForexTick, type ForexTimeframe } from '../types.js'
+import { publishTick, publishCandle } from '../stream/bus.js'
 
 // In-progress bar. Closed bars are written to the DB and dropped from
 // memory; only the currently-open bar per (asset, timeframe) lives here.
@@ -47,6 +48,14 @@ export function aggregateTick(tick: ForexTick): void {
   // pile up tick processing. Errors are logged but never thrown.
   void writeSnapshot(tick)
 
+  // Broadcast the raw tick on the bus — SSE subscribers pick it up
+  // (with per-client throttling). Pre-rounded to keep wire size small.
+  publishTick({
+    assetId: tick.assetId,
+    price:   tick.mid,
+    time:    tick.timestamp,
+  })
+
   let perTf = inFlight.get(tick.assetId)
   if (!perTf) {
     perTf = new Map()
@@ -59,23 +68,43 @@ export function aggregateTick(tick: ForexTick): void {
 
     if (!current) {
       // First tick we've ever seen for this (asset, tf) — start a bar.
-      perTf.set(tf, openBar(slot, tick.mid))
+      const bar = openBar(slot, tick.mid)
+      perTf.set(tf, bar)
+      publishCandle(toEvent(tick.assetId, tf, bar, /*closed=*/false))
       continue
     }
 
     if (current.openTime !== slot) {
       // Slot rolled over. Finalize the prior bar, then open a new one
-      // anchored at the new slot.
+      // anchored at the new slot. Emit both events so the chart can
+      // close the old bar AND start drawing the new one.
+      publishCandle(toEvent(tick.assetId, tf, current, /*closed=*/true))
       void persistBar(tick.assetId, tf, current, /*finalized=*/true)
-      perTf.set(tf, openBar(slot, tick.mid))
+      const nextBar = openBar(slot, tick.mid)
+      perTf.set(tf, nextBar)
+      publishCandle(toEvent(tick.assetId, tf, nextBar, /*closed=*/false))
       continue
     }
 
-    // Same slot — update OHLC.
+    // Same slot — update OHLC + emit an interim candle event.
     current.close      = tick.mid
     current.high       = Math.max(current.high, tick.mid)
     current.low        = Math.min(current.low,  tick.mid)
     current.tickCount += 1
+    publishCandle(toEvent(tick.assetId, tf, current, /*closed=*/false))
+  }
+}
+
+function toEvent(assetId: string, timeframe: ForexTimeframe, bar: InProgressBar, closed: boolean) {
+  return {
+    assetId,
+    timeframe,
+    openTime: bar.openTime,
+    open:     bar.open,
+    high:     bar.high,
+    low:      bar.low,
+    close:    bar.close,
+    isClosed: closed,
   }
 }
 
