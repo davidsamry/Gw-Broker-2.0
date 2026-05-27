@@ -11,6 +11,7 @@ import { prisma } from '../../prisma.js'
 import type { ForexAssetConfig } from '../types.js'
 import { tryCreateCTraderClient } from '../providers/ctrader/client.js'
 import type { MarketProvider, ProviderStatus } from '../providers/types.js'
+import { aggregateTick, flushInFlightBars } from './aggregator.js'
 
 interface RuntimeState {
   provider: MarketProvider | null
@@ -80,7 +81,7 @@ export async function startForexRuntime(): Promise<void> {
 
   try {
     await state.provider.start(state.assets, {
-      onTick:   (_tick) => { /* F3: hand to aggregator */ },
+      onTick:   (tick) => aggregateTick(tick),
       onStatus: (status, detail) => {
         state.status = status
         console.log(`[forex/ctrader] status=${status}${detail ? ` (${detail})` : ''}`)
@@ -93,9 +94,24 @@ export async function startForexRuntime(): Promise<void> {
     console.error('[forex/ctrader] provider start FAILED — continuing without it', err)
     state.status = 'STOPPED'
   }
+
+  // Periodic flush of in-progress bars. Without this, a restart loses
+  // whatever OHLC was built in the current slot. Every 5s gives the next
+  // boot a near-current state to resume from (worst case a 5s gap).
+  if (!flushInterval) {
+    flushInterval = setInterval(() => {
+      void flushInFlightBars()
+    }, 5_000)
+  }
 }
 
+let flushInterval: ReturnType<typeof setInterval> | null = null
+
 export async function stopForexRuntime(): Promise<void> {
+  if (flushInterval) { clearInterval(flushInterval); flushInterval = null }
+  // One last flush so whatever's mid-aggregation survives the shutdown.
+  try { await flushInFlightBars() }
+  catch (err) { console.error('[forex] final flush error', err) }
   if (state.provider) {
     try { await state.provider.stop() }
     catch (err) { console.error('[forex/ctrader] stop error', err) }
