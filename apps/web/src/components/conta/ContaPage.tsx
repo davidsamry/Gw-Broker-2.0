@@ -568,6 +568,11 @@ function RetiradaTab() {
   const upsertOne   = useWithdrawalsStore((s) => s.upsertOne)
   const refetch     = useWithdrawalsStore((s) => s.refetch)
 
+  // Admin-editable minimum withdrawal threshold. Falls back to 60 if
+  // /auth/me hasn't resolved yet (matches the migration default).
+  const settings    = useAuthStore((s) => s.settings)
+  const WD_MIN      = settings?.withdrawalMin ?? 60
+
   // Real account (always REAL — demo withdrawals don't make sense).
   const realAccount   = authStore.user?.accounts.find((a) => a.type === 'REAL')
   const balance       = realAccount ? parseFloat(realAccount.balance) : 0
@@ -647,9 +652,9 @@ function RetiradaTab() {
             <p className="text-sm font-semibold text-white">Retirada:</p>
             <button
               onClick={() => setCreateOpen(true)}
-              disabled={balance < 60}
+              disabled={balance < WD_MIN}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title={balance < 60 ? 'Saldo insuficiente (mínimo R$60)' : 'Solicitar nova retirada'}
+              title={balance < WD_MIN ? `Saldo insuficiente (mínimo R$ ${formatBRL(WD_MIN)})` : 'Solicitar nova retirada'}
             >
               <Plus size={13} />
               Solicitar retirada
