@@ -10,6 +10,14 @@ export interface Account {
   type:     'DEMO' | 'REAL'
   balance:  string
   currency: string
+  // Rollover state — server returns string-encoded Decimals on every
+  // /auth/me. Used by the Retirada modal to surface "faltam R$ X" before
+  // the user even hits Submit. Both fields are optional because older
+  // cached payloads (vx_user_cache_v4 from before this feature) won't
+  // have them — the modal falls back to 0 in that case.
+  rolloverRequired?: string
+  rolloverProgress?: string
+  bonusBalance?:     string
 }
 
 export type UserRole = 'USER' | 'ADMIN'
@@ -73,7 +81,7 @@ interface AuthState {
 // Bump the cache key whenever the User shape changes so existing clients
 // don't read a stale cached object missing new fields. Current schema
 // version: v4 (added kycSubmission via /auth/me + KycStatus typing).
-const USER_CACHE_KEY = 'vx_user_cache_v4'
+const USER_CACHE_KEY = 'vx_user_cache_v5'    // bumped: Account gained rollover/bonus fields
 const USER_CACHE_TTL = 5 * 60 * 1000 // 5 min — short enough that stale balance corrects quickly
 
 interface UserCache { user: User; savedAt: number }

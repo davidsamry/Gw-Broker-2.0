@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { sendEmailAsync } from '../email/service.js'
+import { getSettings } from '../settings/service.js'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 import { createCashin, isConfigured } from '../payments/bspay.js'
@@ -191,6 +192,26 @@ export async function confirmDepositById(depositId: string) {
   `
   const wasPending = rows.length > 0
   if (!wasPending) return false   // already PAID or doesn't exist — idempotent
+
+  // Rollover (no-bonus path): every confirmed deposit adds a multiple of
+  // its value to the account's rolloverRequired. The user must trade
+  // through that volume on the REAL account before withdrawal is unlocked.
+  // BonusGrant has its own per-grant rollover (separate model) — these
+  // two coexist and BOTH must clear before saque is allowed.
+  try {
+    const settings = getSettings()
+    if (settings.depositRollover > 0) {
+      await prisma.$executeRaw`
+        UPDATE accounts
+        SET "rolloverRequired" = "rolloverRequired" + (
+          SELECT amount * ${settings.depositRollover}::decimal FROM deposits WHERE id = ${depositId}
+        )
+        WHERE id = (SELECT "accountId" FROM deposits WHERE id = ${depositId})
+      `
+    }
+  } catch (err) {
+    console.error(`[deposits] rollover update failed for deposit=${depositId}`, err)
+  }
 
   // Fase B1: if a BonusGrant is tied to this deposit, activate it now.
   // Errors here don't roll back the deposit — the user has already paid,

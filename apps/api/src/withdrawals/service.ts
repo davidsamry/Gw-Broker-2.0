@@ -3,6 +3,17 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 import type { CreateWithdrawalInput } from './schema.js'
 
+// Thrown by createWithdrawal when the REAL account hasn't satisfied its
+// rollover requirement yet. Route handler maps to HTTP 400 with the
+// remaining amount so the UI can show "faltam R$ X".
+export class RolloverIncompleteError extends Error {
+  constructor(public required: number, public progress: number) {
+    super('ROLLOVER_INCOMPLETE')
+    this.name = 'RolloverIncompleteError'
+  }
+  get remaining(): number { return Math.max(0, this.required - this.progress) }
+}
+
 export interface WithdrawalRow {
   id:          string
   accountId:   string
@@ -19,6 +30,24 @@ export interface WithdrawalRow {
 // Atomic create — single CTE: validate ownership + balance, debit balance,
 // insert withdrawal, insert ledger transaction. Mirrors createOperation.
 export async function createWithdrawal(userId: string, input: CreateWithdrawalInput) {
+  // Rollover gate (REAL accounts only). Even when balance is sufficient,
+  // saque is blocked until trade volume on the REAL account ≥ accumulated
+  // rolloverRequired (set by each confirmed deposit × settings.depositRollover
+  // multiplier, and by admin-set lump-sums via /admin/usuarios bonus card).
+  const acc = await prisma.account.findFirst({
+    where:  { id: input.accountId, userId },
+    select: { type: true, rolloverRequired: true, rolloverProgress: true },
+  })
+  if (!acc) throw new Error('ACCOUNT_NOT_FOUND')
+  if (acc.type === 'REAL') {
+    const required = Number(acc.rolloverRequired)
+    const progress = Number(acc.rolloverProgress)
+    if (progress < required) {
+      // Caller surfaces the remaining-to-roll value to the user.
+      throw new RolloverIncompleteError(required, progress)
+    }
+  }
+
   const withdrawalId  = randomUUID()
   const transactionId = randomUUID()
   const amountDec     = new Prisma.Decimal(input.amount)

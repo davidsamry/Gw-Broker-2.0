@@ -430,13 +430,28 @@ function NovaRetiradaModal({
       onCreated(data.withdrawal as ApiWithdrawal)
     } catch (err: any) {
       const code = err?.response?.data?.error
+      const body = err?.response?.data
       if      (code === 'INSUFFICIENT_BALANCE') setError('Saldo insuficiente.')
       else if (code === 'ACCOUNT_NOT_FOUND')    setError('Conta não encontrada.')
-      else                                       setError('Erro ao solicitar retirada.')
+      else if (code === 'ROLLOVER_INCOMPLETE')  setError(
+        `Rollover incompleto: você precisa operar mais R$ ${Number(body.remaining ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} antes de sacar.`
+      )
+      else if (code === 'VALIDATION_ERROR') {
+        const first = body?.details?.fieldErrors?.amount?.[0] ?? 'Valor inválido.'
+        setError(first)
+      }
+      else setError('Erro ao solicitar retirada.')
     } finally {
       setSubmitting(false)
     }
   }
+
+  // Read rollover from auth-store user.accounts so we can show a hint
+  // even before the user clicks Solicitar. Same data the backend uses.
+  const account = useAuthStore.getState().user?.accounts.find(a => a.id === accountId)
+  const rolloverRequired = Number((account as any)?.rolloverRequired ?? 0)
+  const rolloverProgress = Number((account as any)?.rolloverProgress ?? 0)
+  const rolloverRemaining = Math.max(0, rolloverRequired - rolloverProgress)
 
   return (
     <div
@@ -455,6 +470,23 @@ function NovaRetiradaModal({
         </div>
 
         <div className="px-5 py-4 flex flex-col gap-4">
+          {/* Rollover hint — only when the user has a pending requirement.
+              Blocks the form entirely when the gap > 0, but still renders
+              the input so the user can see the disabled state + reason. */}
+          {rolloverRemaining > 0 && (
+            <div className="px-3 py-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-xs">
+              <div className="flex items-center gap-1.5 font-bold text-yellow-300 mb-1">
+                ⚠ Rollover incompleto
+              </div>
+              <p className="text-yellow-200/90 leading-relaxed">
+                Você precisa operar mais <strong className="text-white">R$ {rolloverRemaining.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong> em volume na conta REAL antes de poder sacar.
+              </p>
+              <p className="text-yellow-200/60 mt-1 text-[10px]">
+                Progresso: R$ {rolloverProgress.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} / R$ {rolloverRequired.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </p>
+            </div>
+          )}
+
           {/* Amount */}
           <div>
             <label className="text-[10px] font-medium text-[#8b8f9a] mb-1 block">Valor (R$)</label>

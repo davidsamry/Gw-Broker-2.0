@@ -33,6 +33,14 @@ export async function withdrawalRoutes(app: FastifyInstance) {
       if (err.message === 'INSUFFICIENT_BALANCE') {
         return reply.status(400).send({ error: 'INSUFFICIENT_BALANCE' })
       }
+      if (err.name === 'RolloverIncompleteError') {
+        return reply.status(400).send({
+          error:     'ROLLOVER_INCOMPLETE',
+          required:  err.required,
+          progress:  err.progress,
+          remaining: err.remaining,
+        })
+      }
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }

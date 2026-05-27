@@ -70,8 +70,16 @@ export async function createOperation(userId: string, input: CreateOperationInpu
         RETURNING *
       ),
       upd_bal AS (
+        -- Debit stake + accumulate rollover progress on REAL accounts.
+        -- DEMO trades don't count toward the deposit rollover, otherwise
+        -- a user could spam demo trades to unlock real-money withdrawals.
         UPDATE accounts
-        SET balance = balance - ${new Prisma.Decimal(input.amount)}
+        SET balance          = balance - ${new Prisma.Decimal(input.amount)},
+            "rolloverProgress" = CASE
+              WHEN type = 'REAL'::"AccountType"
+                THEN "rolloverProgress" + ${new Prisma.Decimal(input.amount)}
+              ELSE "rolloverProgress"
+            END
         WHERE id IN (SELECT id FROM valid)
         RETURNING id
       ),
