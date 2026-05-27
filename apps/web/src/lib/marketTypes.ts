@@ -1,6 +1,9 @@
 export type MarketType = 'OTC' | 'FOREX' | 'CRYPTO'
-export type MarketSource = 'INTERNAL' | 'BINANCE'
-export type ExecutionVenue = 'OTC_INTERNAL' | 'BINANCE_SPOT'
+// 'FOREX' added when cTrader integration shipped — assets with this
+// source route through useForexLivePrice + fetchForexCandles instead of
+// the OTC engine. Default fallthrough (no source) still means OTC.
+export type MarketSource = 'INTERNAL' | 'BINANCE' | 'FOREX'
+export type ExecutionVenue = 'OTC_INTERNAL' | 'BINANCE_SPOT' | 'FOREX_CTRADER'
 
 export interface Asset {
   id: string

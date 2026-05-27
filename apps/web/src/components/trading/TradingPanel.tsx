@@ -9,6 +9,7 @@ import { api } from '@/lib/api'
 import { useOperationsStore, type ApiOperation } from '@/store/operations'
 import { useAuthStore } from '@/store/auth'
 import { useOtcLivePrice } from '@/lib/otcMarket'
+import { useForexLivePrice } from '@/lib/forexMarket'
 import { useBinanceTicker } from '@/lib/binanceMarket'
 
 interface TradingPanelProps {
@@ -79,13 +80,17 @@ function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: bool
 
   // Live P&L — subscribes to the same price feed the chart uses so the
   // row updates in real time. Hooks must be called unconditionally, so
-  // we pass null/undefined to the one that doesn't match this asset.
+  // we pass null/undefined to the ones that don't match this asset.
   const isBinance      = trade.asset.source === 'BINANCE'
-  const otcLivePrice   = useOtcLivePrice(isBinance ? null : trade.asset.id)
+  const isForex        = trade.asset.source === 'FOREX'
+  const otcLivePrice   = useOtcLivePrice(isBinance || isForex ? null : trade.asset.id)
+  const forexLivePrice = useForexLivePrice(isForex ? trade.asset.id : null)
   const binanceTicker  = useBinanceTicker(isBinance ? trade.asset.marketSymbol : undefined)
   const currentPrice   = isBinance
     ? (binanceTicker?.price ?? trade.entryPrice)
-    : (otcLivePrice ?? trade.entryPrice)
+    : isForex
+      ? (forexLivePrice ?? trade.entryPrice)
+      : (otcLivePrice ?? trade.entryPrice)
 
   // Binary option settlement: CALL wins if price ABOVE entry, PUT wins
   // if BELOW. Tie (==) is a loss server-side, but while open we show 0
@@ -276,11 +281,13 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
     [openTrades, remoteOpenTrades],
   )
 
-  // OTC live tick (null when flag off, asset is BINANCE, or before first
-  // tick lands). When set, it feeds entryPrice so the optimistic marker
-  // matches what the server will actually record.
-  const otcLivePrice = useOtcLivePrice(asset.source === 'BINANCE' ? null : asset.id)
-  const livePrice    = marketPrice ?? otcLivePrice ?? asset.price
+  // Live price for entry/UI. Falls through marketPrice → forex → OTC →
+  // static asset.price. All hooks must be called unconditionally — the
+  // ones for sources that don't apply receive null/undefined and return
+  // null cheaply (no SSE connection opens).
+  const otcLivePrice   = useOtcLivePrice(asset.source === 'BINANCE' || asset.source === 'FOREX' ? null : asset.id)
+  const forexLivePrice = useForexLivePrice(asset.source === 'FOREX' ? asset.id : null)
+  const livePrice      = marketPrice ?? forexLivePrice ?? otcLivePrice ?? asset.price
   const payout       = asset.payout / 100
   const payment      = Math.round(investment + investment * payout)
 

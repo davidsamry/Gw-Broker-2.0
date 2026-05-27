@@ -36,7 +36,9 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
   const [favorites, setFavorites] = useState<Set<string>>(new Set(DEFAULT_FAVORITES))
 
   const filtered = useMemo(() => {
-    const sourceOrder: Record<'BINANCE' | 'INTERNAL', number> = { BINANCE: 0, INTERNAL: 1 }
+    // FOREX (cTrader) gets top billing — real-broker prices feel premium
+    // next to OTC. Crypto (Binance) next; OTC last since it's synthesised.
+    const sourceOrder: Record<'BINANCE' | 'INTERNAL' | 'FOREX', number> = { FOREX: 0, BINANCE: 1, INTERNAL: 2 }
     const typeOrder: Record<Asset['type'], number> = { Crypto: 0, OTC: 1, Forex: 2 }
 
     return assets

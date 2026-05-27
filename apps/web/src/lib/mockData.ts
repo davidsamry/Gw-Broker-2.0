@@ -36,6 +36,16 @@ export interface ChartTradeEvent {
 // Adding/removing assets here must stay in sync with the DB (otc_assets +
 // Binance catalog) so admin and pricing engine see the same list.
 export const ASSETS: Asset[] = [
+  // ── Forex — live cTrader (F1-F5) ────────────────────────────────────────
+  // IDs match `forex_assets.id` in the API DB so the SSE stream + REST
+  // endpoints route correctly. price/change24h start as 0 — replaced by
+  // the first tick from /forex/v1/ticker on chart mount.
+  { id: 'eur-usd', symbol: 'EUR/USD', label: 'EUR/USD',  type: 'Forex', category: 'Moedas', source: 'FOREX', marketSymbol: 'EURUSD', payout: 85, payout5min: 85, flag1: '🇪🇺', flag2: '🇺🇸', code1: 'eu', code2: 'us', price: 0, change24h: 0 },
+  { id: 'gbp-usd', symbol: 'GBP/USD', label: 'GBP/USD',  type: 'Forex', category: 'Moedas', source: 'FOREX', marketSymbol: 'GBPUSD', payout: 85, payout5min: 85, flag1: '🇬🇧', flag2: '🇺🇸', code1: 'gb', code2: 'us', price: 0, change24h: 0 },
+  { id: 'usd-jpy', symbol: 'USD/JPY', label: 'USD/JPY',  type: 'Forex', category: 'Moedas', source: 'FOREX', marketSymbol: 'USDJPY', payout: 85, payout5min: 85, flag1: '🇺🇸', flag2: '🇯🇵', code1: 'us', code2: 'jp', price: 0, change24h: 0 },
+  { id: 'aud-usd', symbol: 'AUD/USD', label: 'AUD/USD',  type: 'Forex', category: 'Moedas', source: 'FOREX', marketSymbol: 'AUDUSD', payout: 85, payout5min: 85, flag1: '🇦🇺', flag2: '🇺🇸', code1: 'au', code2: 'us', price: 0, change24h: 0 },
+  { id: 'usd-cad', symbol: 'USD/CAD', label: 'USD/CAD',  type: 'Forex', category: 'Moedas', source: 'FOREX', marketSymbol: 'USDCAD', payout: 85, payout5min: 85, flag1: '🇺🇸', flag2: '🇨🇦', code1: 'us', code2: 'ca', price: 0, change24h: 0 },
+
   // ── OTC v2 — server-priced (Etapa 2 onwards) ────────────────────────────
   // During Etapa 1 these appear in the asset selector but the chart will
   // fall back to mock candles since the engine isn't wired yet. Wiring

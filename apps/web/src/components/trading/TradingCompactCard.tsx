@@ -9,6 +9,7 @@ import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
 import { useOtcLivePrice } from '@/lib/otcMarket'
+import { useForexLivePrice } from '@/lib/forexMarket'
 
 const TIME_OPTIONS = [
   { label: '01:00', value: 60   },
@@ -36,9 +37,11 @@ export function TradingCompactCard({
 
   // OTC live tick (null when flag off, asset is BINANCE, or before first
   // tick arrives). When set, it overrides asset.price below so the entry
-  // marker matches what the server will record.
-  const otcLivePrice = useOtcLivePrice(asset.source === 'BINANCE' ? null : asset.id)
-  const livePrice    = marketPrice ?? otcLivePrice ?? asset.price
+  // marker matches what the server will record. Same fallthrough as
+  // TradingPanel: marketPrice → forex → OTC → static asset.price.
+  const otcLivePrice   = useOtcLivePrice(asset.source === 'BINANCE' || asset.source === 'FOREX' ? null : asset.id)
+  const forexLivePrice = useForexLivePrice(asset.source === 'FOREX' ? asset.id : null)
+  const livePrice      = marketPrice ?? forexLivePrice ?? otcLivePrice ?? asset.price
   const payout       = asset.payout / 100
   const profit       = (investment * payout).toFixed(2).replace('.', ',')
 

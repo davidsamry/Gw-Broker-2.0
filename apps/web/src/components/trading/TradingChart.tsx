@@ -5,6 +5,7 @@ import { Pencil, ZoomIn, ZoomOut, Crosshair, ChevronDown, Eye, X, Activity } fro
 import { generateMockCandles, type Asset, type Candle, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { fetchBinanceCandles } from '@/lib/marketApi'
 import { fetchOtcCandles, subscribeOtcCandles } from '@/lib/otcMarket'
+import { fetchForexCandles, subscribeForexCandles } from '@/lib/forexMarket'
 import { getCachedCandles, setCachedCandles } from '@/lib/candleCache'
 import { subscribeKline } from '@/lib/binanceKline'
 import { cn } from '@/lib/utils'
@@ -361,8 +362,9 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
     let chart: any = null
     let disposed = false
     let priceInterval: ReturnType<typeof setInterval> | undefined
-    let klineUnsub: (() => void) | undefined
-    let otcCandleUnsub: (() => void) | undefined
+    let klineUnsub:       (() => void) | undefined
+    let otcCandleUnsub:   (() => void) | undefined
+    let forexCandleUnsub: (() => void) | undefined
 
     async function initChart() {
       if (!chartContainerRef.current || disposed) return
@@ -439,6 +441,23 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           } catch {
             candles = generateMockCandles(displayPrice, 150, selectedTf.seconds)
           }
+        }
+      } else if (asset.source === 'FOREX') {
+        // cTrader-backed forex: same response shape as OTC v2 so the
+        // mapping below is identical, only the lib differs. Forex
+        // candle times come in ms (epoch UTC); convert to BRT-shifted
+        // seconds same as Binance/OTC.
+        try {
+          const remoteCandles = await fetchForexCandles(asset.id, selectedTf.seconds, 1000)
+          if (disposed) return
+          if (remoteCandles.length > 0) {
+            candles = remoteCandles.map((c) => ({
+              ...c,
+              time: Math.floor(c.time / 1000) + BRT_OFFSET,
+            }))
+          }
+        } catch {
+          /* keep mock candles */
         }
       } else if (asset.source !== 'BINANCE') {
         // OTC v2 engine: server owns the candle history. Fetch the last
@@ -747,11 +766,38 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
         })
       }
 
+      // ── Forex candle stream — cTrader via /forex/v1/stream ─────────────
+      // Same handler shape as the OTC branch below — only the subscribe
+      // function and event shape (already normalised in forexMarket.ts)
+      // differ. Forex updates land every 1.5s (poll cadence) rather than
+      // tick-rate; the chart treats them identically.
+      if (asset.source === 'FOREX') {
+        forexCandleUnsub = subscribeForexCandles(asset.id, selectedTf.seconds, (c) => {
+          if (disposed) return
+          const time = Math.floor(c.openTime / 1000) + BRT_OFFSET
+          price        = c.close
+          candleStart  = time
+          candleOpen   = c.open
+          candleHigh   = c.high
+          candleLow    = c.low
+          lastTickPrice = c.close
+
+          if (chartType === 'area') {
+            mainSeries.update({ time, value: c.close })
+          } else if (chartType === 'heiken-ashi') {
+            const haClose = parseFloat(((c.open + c.high + c.low + c.close) / 4).toFixed(5))
+            mainSeries.update({ time, open: c.open, high: c.high, low: c.low, close: haClose })
+          } else {
+            mainSeries.update({ time, open: c.open, high: c.high, low: c.low, close: c.close })
+          }
+        })
+      }
+
       // ── OTC v2 candle stream — real server OHLC, no synthesis ──────────
-      // For the 5 OTC assets, the API engine pushes the full current bar
+      // For the OTC assets, the API engine pushes the full current bar
       // plus every rollover via SSE. Same shape as the Binance kline
       // handler, just different source.
-      if (asset.source !== 'BINANCE') {
+      if (asset.source !== 'BINANCE' && asset.source !== 'FOREX') {
         otcCandleUnsub = subscribeOtcCandles(asset.id, selectedTf.seconds, (c) => {
           if (disposed) return
           const time = Math.floor(c.openTime / 1000) + BRT_OFFSET
@@ -789,8 +835,9 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
     return () => {
       disposed = true
       if (priceInterval) clearInterval(priceInterval)
-      if (klineUnsub) klineUnsub()
-      if (otcCandleUnsub) otcCandleUnsub()
+      if (klineUnsub)       klineUnsub()
+      if (otcCandleUnsub)   otcCandleUnsub()
+      if (forexCandleUnsub) forexCandleUnsub()
       resizeObserver.disconnect()
       seriesRef.current = null
       setChartReady(false)
