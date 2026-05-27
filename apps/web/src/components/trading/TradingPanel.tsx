@@ -9,7 +9,6 @@ import { api } from '@/lib/api'
 import { useOperationsStore, type ApiOperation } from '@/store/operations'
 import { useAuthStore } from '@/store/auth'
 import { useOtcLivePrice } from '@/lib/otcMarket'
-import { useForexLivePrice } from '@/lib/forexMarket'
 import { useBinanceTicker } from '@/lib/binanceMarket'
 
 interface TradingPanelProps {
@@ -82,15 +81,11 @@ function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: bool
   // row updates in real time. Hooks must be called unconditionally, so
   // we pass null/undefined to the ones that don't match this asset.
   const isBinance      = trade.asset.source === 'BINANCE'
-  const isForex        = trade.asset.source === 'FOREX'
-  const otcLivePrice   = useOtcLivePrice(isBinance || isForex ? null : trade.asset.id)
-  const forexLivePrice = useForexLivePrice(isForex ? trade.asset.id : null)
+  const otcLivePrice   = useOtcLivePrice(isBinance ? null : trade.asset.id)
   const binanceTicker  = useBinanceTicker(isBinance ? trade.asset.marketSymbol : undefined)
   const currentPrice   = isBinance
     ? (binanceTicker?.price ?? trade.entryPrice)
-    : isForex
-      ? (forexLivePrice ?? trade.entryPrice)
-      : (otcLivePrice ?? trade.entryPrice)
+    : (otcLivePrice ?? trade.entryPrice)
 
   // Binary option settlement: CALL wins if price ABOVE entry, PUT wins
   // if BELOW. Tie (==) is a loss server-side, but while open we show 0
@@ -281,13 +276,12 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
     [openTrades, remoteOpenTrades],
   )
 
-  // Live price for entry/UI. Falls through marketPrice → forex → OTC →
+  // Live price for entry/UI. Falls through marketPrice → OTC →
   // static asset.price. All hooks must be called unconditionally — the
   // ones for sources that don't apply receive null/undefined and return
   // null cheaply (no SSE connection opens).
-  const otcLivePrice   = useOtcLivePrice(asset.source === 'BINANCE' || asset.source === 'FOREX' ? null : asset.id)
-  const forexLivePrice = useForexLivePrice(asset.source === 'FOREX' ? asset.id : null)
-  const livePrice      = marketPrice ?? forexLivePrice ?? otcLivePrice ?? asset.price
+  const otcLivePrice = useOtcLivePrice(asset.source === 'BINANCE' ? null : asset.id)
+  const livePrice    = marketPrice ?? otcLivePrice ?? asset.price
   const payout       = asset.payout / 100
   const payment      = Math.round(investment + investment * payout)
 

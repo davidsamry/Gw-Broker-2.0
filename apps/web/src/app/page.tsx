@@ -28,7 +28,6 @@ import { BonusWelcomeModal } from '@/components/layout/BonusWelcomeModal'
 import { AccountDropdown } from '@/components/layout/AccountDropdown'
 import { ASSETS, type Asset, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { useBinanceTicker } from '@/lib/binanceMarket'
-import { useForexLivePrice } from '@/lib/forexMarket'
 import { fetchMarketAssets, fetchDisabledAssetIds } from '@/lib/marketApi'
 import { useOperationsStream } from '@/lib/operationsStream'
 import { api } from '@/lib/api'
@@ -228,15 +227,14 @@ export default function TradingPage() {
       return [...trimmed, ...additions]
     })
   }, [storeOps, selectedAsset.id])
-  const binanceTicker  = useBinanceTicker(selectedAsset.source === 'BINANCE' ? selectedAsset.marketSymbol : undefined)
-  const forexLivePrice = useForexLivePrice(selectedAsset.source === 'FOREX'   ? selectedAsset.id           : null)
-  const displayPrice   = binanceTicker?.price ?? forexLivePrice ?? selectedAsset.price
+  const binanceTicker = useBinanceTicker(selectedAsset.source === 'BINANCE' ? selectedAsset.marketSymbol : undefined)
+  const displayPrice  = binanceTicker?.price ?? selectedAsset.price
   // Signals to the chart whether `displayPrice` is fresh stream data
   // (true) or the stale static asset.price fallback (false). Lets the
   // chart's initial-sync logic distinguish "trust this price" from
   // "ignore until the stream arrives" — eliminates the load-time
-  // candle jump. Both Binance (WS) and Forex (SSE) count as fresh.
-  const hasFreshTicker = binanceTicker != null || forexLivePrice != null
+  // candle jump. Binance kline WS is the only fresh source now.
+  const hasFreshTicker = binanceTicker != null
 
   function handleTradePlaced(trade: ChartTradeEvent | null) {
     // Legacy null call from TradingPanel's cleanup timeout is now redundant:
