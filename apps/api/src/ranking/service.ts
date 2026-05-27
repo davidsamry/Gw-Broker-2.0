@@ -76,6 +76,52 @@ export async function getPublicRanking(): Promise<PublicRankingResponse> {
   }
 }
 
+// ── Per-user weekly stats ────────────────────────────────────────────────
+// Sums up the logged-in user's winnings (profit on RESOLVED+won operations)
+// in the current week, then determines their relative position against the
+// active leaderboard slice. Position is `null` when the user has 0 weekly
+// profit OR can't crack the top of the fake pool — UI shows "—" then.
+export interface MeRanking {
+  amount:   number          // user's weekly winnings, R$
+  position: number | null   // 1..25 if they'd land in the leaderboard, else null
+}
+
+export async function getMyWeeklyRanking(userId: string): Promise<MeRanking> {
+  // Week starts on Monday 00:00 in BRT (UTC-3). Mirrors the "Líderes da
+  // semana" wording in the panel header.
+  const now = new Date()
+  const day = now.getUTCDay()                  // 0=Sunday … 6=Saturday
+  const daysSinceMonday = (day + 6) % 7        // Mon=0, Sun=6
+  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysSinceMonday, 3, 0, 0, 0)) // 00:00 BRT == 03:00 UTC
+
+  const rows = await prisma.$queryRaw<Array<{ total: string | null }>>`
+    SELECT COALESCE(SUM(o.profit), 0)::text AS total
+    FROM operations o
+    JOIN accounts   a ON a.id = o."accountId"
+    WHERE a."userId" = ${userId}
+      AND a.type    = 'REAL'::"AccountType"
+      AND o.status  = 'RESOLVED'::"OperationStatus"
+      AND o.won     = true
+      AND o."createdAt" >= ${monday}
+  `
+  const amount = Number(rows[0]?.total ?? 0)
+
+  if (amount <= 0) return { amount: 0, position: null }
+
+  // Compare to the leaderboard's current 25 entries — if user is above
+  // any of them, slot in accordingly. We re-derive the same draw so the
+  // ranking is self-consistent.
+  const board = await getPublicRanking()
+  if (board.entries.length === 0) return { amount, position: 1 }
+
+  // First entry whose amount is < user's amount → user's position is that
+  // entry's rank.
+  for (const entry of board.entries) {
+    if (amount > entry.amount) return { amount, position: entry.rank }
+  }
+  return { amount, position: null }  // below the bottom of the visible list
+}
+
 function mulberry32(seed: number): () => number {
   let a = seed
   return function () {

@@ -57,9 +57,15 @@ export function RankingPanel({ onClose, userName = 'Você', userCode = 'br' }: R
   const cached = typeof window !== 'undefined' ? loadCachedRanking() : null
   const [leaders, setLeaders]       = useState<LeaderEntry[]>(cached?.entries ?? [])
   const [rotatesAt, setRotatesAt]   = useState<string | null>(cached?.rotatesAt ?? null)
+  // User's own weekly winnings + relative position. Null until the
+  // /ranking/me request lands (or the user isn't authenticated).
+  const [myStats, setMyStats] = useState<{ amount: number; position: number | null } | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    // Fire both in parallel — the public leaderboard works without auth,
+    // /ranking/me requires it. Either failure is silent (panel falls back
+    // to cached / "—" state).
     api.get<{ entries: LeaderEntry[]; rotatesAt: string }>('/ranking')
       .then(({ data }) => {
         if (cancelled) return
@@ -68,6 +74,9 @@ export function RankingPanel({ onClose, userName = 'Você', userCode = 'br' }: R
         saveCachedRanking({ entries: data.entries, rotatesAt: data.rotatesAt })
       })
       .catch(() => { /* keep cached/empty — silent */ })
+    api.get<{ amount: number; position: number | null }>('/ranking/me')
+      .then(({ data }) => { if (!cancelled) setMyStats(data) })
+      .catch(() => { /* not logged in or backend down — leave myStats null */ })
     return () => { cancelled = true }
   }, [])
 
@@ -120,17 +129,28 @@ export function RankingPanel({ onClose, userName = 'Você', userCode = 'br' }: R
         )}
       </div>
 
-      {/* User own row + empty-week notice */}
+      {/* User own row — values come from /ranking/me (winnings on REAL
+          account this week + relative position in current leaderboard).
+          Falls back to "—" / "R$ 0,00" while loading or when no profit. */}
       <div className="px-4 py-2">
         <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[#252a3a]/60 border border-[#2a2e3b]">
-          <span className="text-[#8b8f9a] text-sm font-bold w-4 text-center">—</span>
+          <span className="text-[#8b8f9a] text-sm font-bold w-4 text-center">
+            {myStats?.position ?? '—'}
+          </span>
           <Flag code={userCode} size={20} />
           <span className="flex-1 text-sm font-semibold text-white truncate">{userName}</span>
-          <span className="text-sm font-bold text-white">R$ 0,00</span>
+          <span className={cn(
+            'text-sm font-bold whitespace-nowrap',
+            (myStats?.amount ?? 0) > 0 ? 'text-green-400' : 'text-white',
+          )}>
+            R$ {(myStats?.amount ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
         </div>
-        <p className="text-[11px] text-[#8b8f9a] mt-2 px-1 leading-relaxed">
-          Você ainda não teve nenhuma negociação lucrativa nesta semana
-        </p>
+        {(!myStats || myStats.amount === 0) && (
+          <p className="text-[11px] text-[#8b8f9a] mt-2 px-1 leading-relaxed">
+            Você ainda não teve nenhuma negociação lucrativa nesta semana
+          </p>
+        )}
       </div>
 
       {/* Leaderboard */}
