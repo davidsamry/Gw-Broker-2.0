@@ -12,7 +12,6 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { FlagPair } from '@/components/ui/FlagPair'
 
 interface RankingEntry {
   id:          string
@@ -328,7 +327,15 @@ function EntryRow({
         </select>
       ) : (
         <div className="flex items-center gap-2">
-          <FlagPair code1={entry.countryCode} code2={entry.countryCode} size={16} />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`https://flagcdn.com/w40/${entry.countryCode}.png`}
+            alt={entry.countryCode}
+            width={18}
+            height={18}
+            className="rounded-full object-cover border border-white/10 flex-shrink-0"
+            style={{ width: 18, height: 18 }}
+          />
           <span className="text-xs text-[#bdc1cf] uppercase">{entry.countryCode}</span>
         </div>
       )}
