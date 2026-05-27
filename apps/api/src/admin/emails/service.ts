@@ -5,7 +5,7 @@
 // otc_admin_logs so we have an audit trail of who changed what.
 
 import { prisma } from '../../prisma.js'
-import { sendEmail } from '../../email/service.js'
+import { sendEmail, BRAND_VARS } from '../../email/service.js'
 import { extractTemplateVariables, renderTemplate } from '../../email/templates.js'
 
 export interface AdminEmailTemplate {
@@ -140,9 +140,12 @@ export async function previewEmailTemplate(key: string): Promise<{
   for (const v of tpl.variables) {
     sampleVars[v] = sampleValueFor(v)
   }
+  // Merge BRAND_VARS so {{logo_url}} renders to a real PNG in the preview
+  // iframe (matches what sendEmail() does for real sends).
+  const mergedVars = { ...BRAND_VARS, ...sampleVars }
   return {
-    subject: renderTemplate(tpl.subject, sampleVars),
-    html:    renderTemplate(tpl.htmlBody, sampleVars),
+    subject: renderTemplate(tpl.subject, mergedVars),
+    html:    renderTemplate(tpl.htmlBody, mergedVars),
   }
 }
 

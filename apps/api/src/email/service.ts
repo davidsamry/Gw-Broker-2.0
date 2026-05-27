@@ -18,6 +18,16 @@ import { renderTemplate } from './templates.js'
 const RESEND_KEY  = process.env.RESEND_API_KEY ?? ''
 const FROM_EMAIL  = process.env.EMAIL_FROM      ?? 'noreply@vx-global.com'
 const FROM_NAME   = process.env.EMAIL_FROM_NAME ?? 'Vx Global'
+const FRONTEND_URL = process.env.FRONTEND_URL    ?? 'https://vx-global.com'
+
+// Brand variables injected into every template render — keeps the logo
+// URL and CTA targets in one place and lets us swap the prod domain via
+// env without touching the email rows in the DB.
+export const BRAND_VARS = {
+  logo_url:   `${FRONTEND_URL}/vx-logo.png`,
+  app_url:    FRONTEND_URL,
+  brand_name: FROM_NAME,
+}
 
 // Lazy-initialised so the API can boot without the key set (the email
 // module is optional in dev). Throws on first use if still missing,
@@ -57,8 +67,11 @@ export async function sendEmail(opts: SendEmailOptions): Promise<SendEmailResult
     return { sent: false, reason: 'TEMPLATE_INACTIVE' }
   }
 
-  const subject  = renderTemplate(tpl.subject,  opts.vars)
-  const htmlBody = renderTemplate(tpl.htmlBody, opts.vars)
+  // Caller-provided vars win over BRAND_VARS so a template can override
+  // (e.g. a custom logo per campaign) without changing the renderer.
+  const mergedVars = { ...BRAND_VARS, ...opts.vars }
+  const subject  = renderTemplate(tpl.subject,  mergedVars)
+  const htmlBody = renderTemplate(tpl.htmlBody, mergedVars)
 
   try {
     const { data, error } = await client().emails.send({
