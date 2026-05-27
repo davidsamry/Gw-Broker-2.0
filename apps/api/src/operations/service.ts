@@ -9,19 +9,21 @@ export async function createOperation(userId: string, input: CreateOperationInpu
   // Min-interval guard — admin-configurable on /admin/configuracoes.
   // Prevents bot-style spam clicking and protects the engine from a
   // single user hammering operations at >10Hz.
+  // NOTE: the operations table has no `createdAt` — `openedAt` is set
+  // to NOW() on INSERT and serves the same purpose.
   const minIntervalMs = getSettings().operationMinIntervalMs
   if (minIntervalMs > 0) {
-    const last = await prisma.$queryRaw<Array<{ createdAt: Date }>>`
-      SELECT o."createdAt"
+    const last = await prisma.$queryRaw<Array<{ openedAt: Date }>>`
+      SELECT o."openedAt"
       FROM operations o
       JOIN accounts   a ON a.id = o."accountId"
       WHERE a."userId" = ${userId}
         AND a.id      = ${input.accountId}
-      ORDER BY o."createdAt" DESC
+      ORDER BY o."openedAt" DESC
       LIMIT 1
     `
-    const lastCreatedMs = last[0]?.createdAt.getTime() ?? 0
-    if (lastCreatedMs > 0 && Date.now() - lastCreatedMs < minIntervalMs) {
+    const lastOpenedMs = last[0]?.openedAt.getTime() ?? 0
+    if (lastOpenedMs > 0 && Date.now() - lastOpenedMs < minIntervalMs) {
       throw new Error('TOO_FAST')
     }
   }
