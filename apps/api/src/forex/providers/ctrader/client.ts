@@ -1,97 +1,80 @@
-// cTrader Open API client — JSON over WebSocket (port 5035).
+// cTrader Open API client — uses @reiryoku/ctrader-layer for the wire
+// protocol (TCP+TLS+Protobuf, length-prefix framing, message correlation).
 //
-// Protocol reference: https://help.ctrader.com/open-api/
+// Why a library: cTrader does NOT reliably support JSON-over-WebSocket
+// across broker proxies (the F1 hand-rolled JSON client got "Bye" closes
+// before the first handshake message could be sent). The Protobuf layer
+// is well-specified and stable; reusing a battle-tested wrapper saves us
+// vendoring the .proto files and implementing length-prefix framing.
 //
-// Connection lifecycle:
-//   open  → ProtoOAVersionReq         (2104)
-//         → ProtoOAApplicationAuthReq (2100)
-//         → ProtoOAAccountAuthReq     (2102)
-//         → ProtoOASymbolsListReq     (2114) — map our pairs to symbolIds
-//         → ProtoOASubscribeSpotsReq  (2127) per asset
-//   stream← ProtoOASpotEvent          (2131) at every tick
-//   keep ← ProtoHeartbeatEvent        (51)   every 10s (we send + receive)
-//   close → reconnect with exponential backoff (1s..30s cap)
+// What we keep doing ourselves:
+//   • Lifecycle wrapping (start/stop/subscribe matching MarketProvider)
+//   • Symbol mapping (SymbolsList → forex_assets.ctraderSymbolId)
+//   • Tick normalisation (scaled int → decimal, midpoint, ForexTick shape)
+//   • Reconnect with backoff (the library doesn't auto-reconnect)
+//   • Heartbeat (library has sendHeartbeat() but we drive the cadence)
 //
-// The provider stays opaque to the rest of the forex module: it speaks
-// only to MarketProvider hooks (onTick / onStatus / onError). When the
-// socket drops, the runtime sees a status change but doesn't have to do
-// anything — reconnection is handled here.
+// Vulnerability note (post-MVP): the library depends on protobufjs@5 and
+// axios@0.21 — both have known CVEs. Acceptable for demo, must revisit
+// before going live.
 
-import { randomUUID } from 'node:crypto'
+import { CTraderConnection } from '@reiryoku/ctrader-layer'
 import type {
   MarketProvider, ProviderEvents, ProviderStatus,
 } from '../types.js'
 import type { ForexAssetConfig } from '../../types.js'
 import { prisma } from '../../../prisma.js'
 
-// ── cTrader payload type constants ──────────────────────────────────────────
-const PT_HEARTBEAT_EVENT          = 51
-const PT_APPLICATION_AUTH_REQ     = 2100
-const PT_APPLICATION_AUTH_RES     = 2101
-const PT_ACCOUNT_AUTH_REQ         = 2102
-const PT_ACCOUNT_AUTH_RES         = 2103
-const PT_VERSION_REQ              = 2104
-const PT_VERSION_RES              = 2105
-const PT_SYMBOLS_LIST_REQ         = 2114
-const PT_SYMBOLS_LIST_RES         = 2115
-const PT_SUBSCRIBE_SPOTS_REQ      = 2127
-const PT_SUBSCRIBE_SPOTS_RES      = 2128
-const PT_SPOT_EVENT               = 2131
-const PT_ERROR_RES                = 2142
-
-const HEARTBEAT_INTERVAL_MS  = 10_000
-const RECONNECT_BACKOFFS_MS  = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000]
+const HEARTBEAT_INTERVAL_MS = 25_000  // library README's suggested cadence
+const RECONNECT_BACKOFFS_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000]
 
 export interface CTraderConfig {
-  /** 'demo.ctraderapi.com' or 'live.ctraderapi.com'. */
   host:                string
-  /** OAuth2 application credentials from openapi.ctrader.com */
   clientId:            string
   clientSecret:        string
-  /** Access token issued for a specific trading account. */
   accessToken:         string
-  /** Refresh token — currently unused (F2 doesn't refresh; we'll add the
-   *  refresh dance when tokens start expiring in production). */
   refreshToken:        string
-  /** ctidTraderAccountId — broker's internal account id, returned by
-   *  GetAccountListByAccessTokenReq when you authorise the app. NOT the
-   *  account number shown in cTrader desktop. */
   ctidTraderAccountId: number
 }
 
-interface CTraderEnvelope {
-  clientMsgId?: string
-  payloadType:  number
-  payload?:     unknown
+interface SymbolListEntry {
+  symbolId:   number
+  symbolName: string
+  enabled:    boolean
 }
 
-interface CTraderError {
-  errorCode?:    string
-  description?:  string
+// Loose type — the library declares CTraderLayerEvent as `{}` so all
+// payload fields are technically optional from the library's perspective.
+// cTrader actually serialises ints as STRINGS via protobufjs JSON, so we
+// also accept strings for any numeric-looking field.
+interface SpotEvent {
+  symbolId?:  number | string
+  bid?:       number | string
+  ask?:       number | string
+  timestamp?: number | string
 }
 
 export class CTraderClient implements MarketProvider {
   readonly name = 'ctrader'
   private status: ProviderStatus = 'INITIAL'
 
-  private ws:        WebSocket | null = null
-  private events:    ProviderEvents | null = null
-  private assets:    ForexAssetConfig[]     = []
-  /** Map<assetId → ctraderSymbolId> built after SymbolsList. */
-  private symbolMap: Map<string, number>    = new Map()
+  private connection: CTraderConnection | null = null
+  private events:     ProviderEvents | null    = null
+  private assets:     ForexAssetConfig[]       = []
+  /** assetId → ctraderSymbolId (resolved at SymbolsList) */
+  private symbolMap = new Map<string, number>()
 
-  // Connection lifecycle bookkeeping
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
   private reconnectTimer: ReturnType<typeof setTimeout>  | null = null
   private reconnectStep   = 0
   private intentionalClose = false
 
-  // Stats (surfaced via getDebugInfo for the admin panel)
-  private connectedAt:        number | null = null
-  private lastTickAt:         number | null = null
-  private ticksReceived       = 0
-  private reconnectCount      = 0
-  private lastErrorMessage:   string | null = null
+  // Stats for getDebugInfo
+  private connectedAt:      number | null = null
+  private lastTickAt:       number | null = null
+  private ticksReceived     = 0
+  private reconnectCount    = 0
+  private lastErrorMessage: string | null = null
 
   constructor(private config: CTraderConfig) {}
 
@@ -106,197 +89,176 @@ export class CTraderClient implements MarketProvider {
     this.intentionalClose = true
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null }
     if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null }
-    try { this.ws?.close() } catch { /* ignore */ }
-    this.ws = null
+    try { (this.connection as any)?.close?.() } catch { /* lib may not expose close */ }
+    this.connection = null
     this.setStatus('STOPPED')
   }
 
   async subscribe(assetId: string): Promise<void> {
     const symbolId = this.symbolMap.get(assetId)
-    if (!symbolId) { this.log(`subscribe: no symbolId for ${assetId} (not in map yet?)`); return }
-    this.send({
-      payloadType: PT_SUBSCRIBE_SPOTS_REQ,
-      payload: {
+    if (!symbolId || !this.connection) return
+    try {
+      await this.connection.sendCommand('ProtoOASubscribeSpotsReq', {
         ctidTraderAccountId: this.config.ctidTraderAccountId,
         symbolId: [symbolId],
-      },
-    })
+      })
+    } catch (err) {
+      this.log(`subscribe ${assetId} failed: ${(err as Error).message}`)
+    }
   }
 
   async unsubscribe(_assetId: string): Promise<void> {
-    // F2: not used. Subscriptions persist for the connection's lifetime.
-    // F3+ may need this if admin disables an asset live.
+    // F2: not used. Subscriptions persist for connection lifetime.
   }
 
   getStatus(): ProviderStatus { return this.status }
 
   getDebugInfo(): Record<string, unknown> {
     return {
-      provider:        'ctrader',
-      host:            this.config.host,
-      ctidTraderAcct:  this.config.ctidTraderAccountId,
-      status:          this.status,
-      connectedAt:     this.connectedAt,
-      lastTickAt:      this.lastTickAt,
-      ticksReceived:   this.ticksReceived,
-      reconnectCount:  this.reconnectCount,
-      symbolMap:       Object.fromEntries(this.symbolMap),
-      lastError:       this.lastErrorMessage,
+      provider:       'ctrader',
+      host:           this.config.host,
+      ctidTraderAcct: this.config.ctidTraderAccountId,
+      status:         this.status,
+      connectedAt:    this.connectedAt,
+      lastTickAt:     this.lastTickAt,
+      ticksReceived:  this.ticksReceived,
+      reconnectCount: this.reconnectCount,
+      symbolMap:      Object.fromEntries(this.symbolMap),
+      lastError:      this.lastErrorMessage,
     }
   }
 
-  // ── Connection ─────────────────────────────────────────────────────────
+  // ── Connection lifecycle ──────────────────────────────────────────────
 
   private async connect(): Promise<void> {
     if (this.intentionalClose) return
     this.setStatus(this.reconnectStep > 0 ? 'RECONNECTING' : 'CONNECTING')
+    this.log(`connecting to ${this.config.host}:5035 (TCP+TLS+Protobuf via @reiryoku/ctrader-layer)`)
 
-    // cTrader JSON Open API endpoint. Port 5035 (JSON), 5036 (Protobuf).
-    const url = `wss://${this.config.host}:5035`
-    this.log(`connecting to ${url}`)
-
-    let ws: WebSocket
     try {
-      ws = new WebSocket(url)
-    } catch (err: any) {
-      this.recordError(err?.message ?? 'WebSocket constructor threw')
-      this.scheduleReconnect()
-      return
-    }
-    this.ws = ws
+      this.connection = new CTraderConnection({
+        host: this.config.host,
+        port: 5035,
+      })
 
-    ws.addEventListener('open',    () => this.onOpen())
-    ws.addEventListener('message', (e) => this.onMessage(e))
-    ws.addEventListener('error',   (e: any) => {
-      this.recordError(e?.message ?? 'socket error')
-    })
-    ws.addEventListener('close',   (e: any) => this.onClose(e?.code, e?.reason))
-  }
+      // Wire spot event handler BEFORE open() so we don't miss the first
+      // events after subscribe. Cast: library types every event as the
+      // empty object `{}`; actual shape is documented in SpotEvent above.
+      this.connection.on('ProtoOASpotEvent', (event: any) => this.handleSpotEvent(event as SpotEvent))
 
-  private async onOpen(): Promise<void> {
-    this.log('socket open — beginning handshake')
-    this.connectedAt = Date.now()
-    try {
-      // 1. Version handshake — confirms protocol compat. cTrader will
-      //    drop the connection if our version is too old/new.
-      const ver = await this.request<{ version?: { major: number; minor: number; patch: number } }>(
-        PT_VERSION_REQ, {}, PT_VERSION_RES,
-      )
-      const v = ver?.version
-      this.log(`server version: ${v ? `${v.major}.${v.minor}.${v.patch}` : 'unknown'}`)
+      // Debug listeners — log notable events so we can see what's arriving
+      // when ticks don't show up. Remove once tick stream is stable.
+      this.connection.on('ProtoOAClientDisconnectEvent', (e: any) => {
+        this.log(`server disconnect: ${JSON.stringify(e).slice(0, 200)}`)
+      })
+      this.connection.on('ProtoOAAccountsTokenInvalidatedEvent', (e: any) => {
+        this.log(`token invalidated: ${JSON.stringify(e).slice(0, 200)}`)
+      })
+      this.connection.on('ProtoHeartbeatEvent', () => {
+        this.log('<<< heartbeat from server')
+      })
+      this.connection.on('ProtoOASymbolChangedEvent', (e: any) => {
+        this.log(`symbol changed: ${JSON.stringify(e).slice(0, 200)}`)
+      })
+      this.connection.on('ProtoOAErrorRes', (e: any) => {
+        this.log(`server error: ${JSON.stringify(e).slice(0, 300)}`)
+      })
 
-      // 2. Application auth — proves we own the OAuth app.
-      await this.request(PT_APPLICATION_AUTH_REQ, {
+      // The library doesn't auto-reconnect or surface 'close' events
+      // consistently across versions, so we poll the underlying state
+      // via a heartbeat — if heartbeat throws, we reconnect.
+
+      await this.connection.open()
+      this.connectedAt = Date.now()
+      this.log('socket open — beginning handshake')
+
+      // 1. Application auth — proves we own the OAuth app.
+      await this.connection.sendCommand('ProtoOAApplicationAuthReq', {
         clientId:     this.config.clientId,
         clientSecret: this.config.clientSecret,
-      }, PT_APPLICATION_AUTH_RES)
+      })
       this.log('application authenticated')
 
-      // 3. Account auth — proves we have access to the user's account.
-      await this.request(PT_ACCOUNT_AUTH_REQ, {
+      // 2. Account auth — proves we have access to the user's account.
+      await this.connection.sendCommand('ProtoOAAccountAuthReq', {
         ctidTraderAccountId: this.config.ctidTraderAccountId,
         accessToken:         this.config.accessToken,
-      }, PT_ACCOUNT_AUTH_RES)
+      })
       this.log(`account ${this.config.ctidTraderAccountId} authenticated`)
-
       this.setStatus('AUTHED')
 
-      // 4. Symbols list → map our 5 pairs to cTrader's internal IDs.
-      const list = await this.request<{ symbol?: Array<{ symbolId: number; symbolName: string; enabled: boolean }> }>(
-        PT_SYMBOLS_LIST_REQ,
-        { ctidTraderAccountId: this.config.ctidTraderAccountId },
-        PT_SYMBOLS_LIST_RES,
-      )
-      await this.mapSymbols(list?.symbol ?? [])
+      // 3. SymbolsList → map our 5 pairs to cTrader's internal IDs.
+      const list = await this.connection.sendCommand('ProtoOASymbolsListReq', {
+        ctidTraderAccountId: this.config.ctidTraderAccountId,
+      }) as { symbol?: SymbolListEntry[] }
+      await this.mapSymbols(list.symbol ?? [])
 
-      // 5. Subscribe to spots for every asset that mapped successfully.
-      const subscribed: number[] = []
+      // 4. Subscribe to spots for every mapped asset.
+      const ids: number[] = []
       for (const a of this.assets) {
         const id = this.symbolMap.get(a.id)
-        if (id) subscribed.push(id)
+        if (id) ids.push(id)
       }
-      if (subscribed.length > 0) {
-        this.send({
-          payloadType: PT_SUBSCRIBE_SPOTS_REQ,
-          payload: {
-            ctidTraderAccountId: this.config.ctidTraderAccountId,
-            symbolId: subscribed,
-          },
+      if (ids.length > 0) {
+        const subRes = await this.connection.sendCommand('ProtoOASubscribeSpotsReq', {
+          ctidTraderAccountId: this.config.ctidTraderAccountId,
+          symbolId: ids,
         })
-        this.log(`subscribed to ${subscribed.length} symbols`)
+        this.log(`subscribed to ${ids.length} symbols, response: ${JSON.stringify(subRes).slice(0, 200)}`)
       } else {
         this.log('WARNING: no symbols matched — nothing to subscribe to')
       }
 
-      // 6. Start heartbeats — cTrader drops the connection after ~30s
-      //    of silence, and the handshake itself counts as activity, so
-      //    we have a comfortable buffer before the first heartbeat.
+      // Debug: probe the account with ProtoOATraderReq to confirm we have
+      // active account access. If this fails or returns empty, the demo
+      // account likely lacks broker association or market data permission.
+      try {
+        const trader = await this.connection.sendCommand('ProtoOATraderReq', {
+          ctidTraderAccountId: this.config.ctidTraderAccountId,
+        })
+        this.log(`trader profile OK: ${JSON.stringify(trader).slice(0, 300)}`)
+      } catch (err) {
+        this.log(`trader probe FAILED: ${(err as Error).message}`)
+      }
+
+      // Probe: request 10 most recent M1 candles for the first symbol.
+      // Confirms whether the account has historical market data access.
+      const firstSymId = ids[0]
+      if (firstSymId) {
+        try {
+          const now = Date.now()
+          const bars = await this.connection.sendCommand('ProtoOAGetTrendbarsReq', {
+            ctidTraderAccountId: this.config.ctidTraderAccountId,
+            symbolId:            firstSymId,
+            period:              'M1',
+            fromTimestamp:       now - 60 * 60 * 1000,
+            toTimestamp:         now,
+            count:               10,
+          })
+          const summary = JSON.stringify(bars).slice(0, 300)
+          this.log(`trendbars probe (symbolId=${firstSymId}): ${summary}`)
+        } catch (err) {
+          this.log(`trendbars probe FAILED: ${(err as Error).message}`)
+        }
+      }
+
+      // 5. Heartbeat loop — also doubles as a connection-alive check.
+      //    If sendHeartbeat throws, we treat it as a disconnect and reconnect.
       this.startHeartbeat()
 
       // Reset reconnect backoff on a clean connection.
       this.reconnectStep = 0
-    } catch (err: any) {
-      this.recordError(`handshake failed: ${err?.message ?? err}`)
-      try { this.ws?.close() } catch { /* ignore */ }
-    }
-  }
-
-  private onMessage(e: MessageEvent): void {
-    let msg: CTraderEnvelope
-    try {
-      msg = JSON.parse(typeof e.data === 'string' ? e.data : String(e.data))
     } catch (err) {
-      this.log(`malformed message dropped: ${err}`)
-      return
+      this.recordError(`connect/handshake failed: ${(err as Error).message}`)
+      try { (this.connection as any)?.close?.() } catch { /* ignore */ }
+      this.connection = null
+      this.scheduleReconnect()
     }
-
-    // clientMsgId routing — wakes the pending request() promise.
-    if (msg.clientMsgId && this.pendingRequests.has(msg.clientMsgId)) {
-      const pending = this.pendingRequests.get(msg.clientMsgId)!
-      this.pendingRequests.delete(msg.clientMsgId)
-      if (msg.payloadType === PT_ERROR_RES) {
-        const e = (msg.payload ?? {}) as CTraderError
-        pending.reject(new Error(`cTrader error ${e.errorCode}: ${e.description}`))
-      } else if (pending.expect && msg.payloadType !== pending.expect) {
-        pending.reject(new Error(`expected payload type ${pending.expect}, got ${msg.payloadType}`))
-      } else {
-        pending.resolve(msg.payload)
-      }
-      return
-    }
-
-    // Unsolicited events (no clientMsgId or unknown id).
-    switch (msg.payloadType) {
-      case PT_SPOT_EVENT:
-        this.handleSpotEvent(msg.payload as Record<string, unknown>)
-        break
-      case PT_HEARTBEAT_EVENT:
-        // Server pings us back — nothing to do; ours is on a timer.
-        break
-      case PT_ERROR_RES: {
-        const err = (msg.payload ?? {}) as CTraderError
-        this.recordError(`server error ${err.errorCode}: ${err.description}`)
-        break
-      }
-      default:
-        // Unknown unsolicited event — log at low priority for visibility.
-        this.log(`unhandled message payloadType=${msg.payloadType}`)
-    }
-  }
-
-  private onClose(code?: number, reason?: string): void {
-    this.log(`socket closed code=${code} reason=${reason ?? ''}`)
-    this.ws = null
-    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null }
-    if (this.intentionalClose) {
-      this.setStatus('STOPPED')
-      return
-    }
-    this.reconnectCount++
-    this.scheduleReconnect()
   }
 
   private scheduleReconnect(): void {
+    if (this.intentionalClose) return
+    this.reconnectCount++
     const delay = RECONNECT_BACKOFFS_MS[Math.min(this.reconnectStep, RECONNECT_BACKOFFS_MS.length - 1)]
     this.reconnectStep++
     this.setStatus('RECONNECTING', `next attempt in ${delay}ms`)
@@ -311,15 +273,20 @@ export class CTraderClient implements MarketProvider {
   private startHeartbeat(): void {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
     this.heartbeatTimer = setInterval(() => {
-      this.send({ payloadType: PT_HEARTBEAT_EVENT })
+      try {
+        this.connection?.sendHeartbeat()
+      } catch (err) {
+        this.log(`heartbeat failed → reconnecting (${(err as Error).message})`)
+        if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null }
+        this.scheduleReconnect()
+      }
     }, HEARTBEAT_INTERVAL_MS)
   }
 
   // ── Symbol mapping ────────────────────────────────────────────────────
 
-  private async mapSymbols(symbols: Array<{ symbolId: number; symbolName: string; enabled: boolean }>): Promise<void> {
-    // cTrader returns symbols like "EURUSD" or "EUR/USD" depending on
-    // broker. Normalize on both sides so the match isn't slash-sensitive.
+  private async mapSymbols(symbols: SymbolListEntry[]): Promise<void> {
+    // Normalise both sides so "EUR/USD" or "EURUSD.r" still matches "EURUSD".
     const norm = (s: string) => s.toUpperCase().replace(/[^A-Z]/g, '')
     const byNormalized = new Map<string, number>()
     for (const s of symbols) {
@@ -330,8 +297,12 @@ export class CTraderClient implements MarketProvider {
     this.symbolMap.clear()
     const updates: Array<{ id: string; symbolId: number }> = []
     for (const asset of this.assets) {
-      const id = byNormalized.get(norm(asset.symbol))
-      if (id != null) {
+      const raw = byNormalized.get(norm(asset.symbol))
+      // cTrader serialises symbolId as a string. Coerce to Number once
+      // here so the reverse-lookup in handleSpotEvent (`map.get() === sym
+      // Id`) compares apples to apples instead of "1" !== 1.
+      const id = raw != null ? Number(raw) : null
+      if (id != null && Number.isFinite(id)) {
         this.symbolMap.set(asset.id, id)
         updates.push({ id: asset.id, symbolId: id })
       } else {
@@ -339,13 +310,13 @@ export class CTraderClient implements MarketProvider {
       }
     }
 
-    // Persist the mapping so a restart can subscribe without waiting for
-    // the SymbolsList round-trip (though we still re-fetch on every boot
-    // to detect upstream changes).
+    // Persist the mapping so the admin panel + future restarts see it.
+    // Cast to int because cTrader's symbolId arrives as a Long/string in
+    // some library versions but the column is INTEGER.
     for (const u of updates) {
       try {
         await prisma.$executeRaw`
-          UPDATE forex_assets SET "ctraderSymbolId" = ${u.symbolId} WHERE id = ${u.id}
+          UPDATE forex_assets SET "ctraderSymbolId" = ${Number(u.symbolId)}::int WHERE id = ${u.id}
         `
       } catch (err) {
         this.log(`failed to persist symbolId for ${u.id}: ${err}`)
@@ -354,10 +325,19 @@ export class CTraderClient implements MarketProvider {
     this.log(`symbol map built: ${updates.length}/${this.assets.length} pairs mapped`)
   }
 
-  // ── Spot event handling ────────────────────────────────────────────────
+  // ── Spot event handling ───────────────────────────────────────────────
 
-  private handleSpotEvent(payload: Record<string, unknown>): void {
-    const symbolId = Number(payload.symbolId)
+  private firstEventLogged = false
+
+  private handleSpotEvent(event: SpotEvent): void {
+    // One-time dump of the raw event so we can see exactly what types
+    // cTrader sends (string vs number for symbolId/bid/ask).
+    if (!this.firstEventLogged) {
+      this.firstEventLogged = true
+      this.log(`first spot event raw: ${JSON.stringify(event)}`)
+    }
+
+    const symbolId = Number(event.symbolId)
     if (!Number.isFinite(symbolId)) return
 
     // Reverse lookup: symbolId → assetId
@@ -372,23 +352,25 @@ export class CTraderClient implements MarketProvider {
     }
     if (!assetId) return
 
-    // Bid/ask come scaled by 10^digits (integer). Some spots arrive with
-    // only bid or only ask — pass through whatever's set; null otherwise.
+    // cTrader sends bid/ask scaled by 10^digits as int64 — serialised as
+    // STRING by the protobuf JSON encoder. Coerce robustly.
     const scale = Math.pow(10, digits)
-    const bidRaw = payload.bid as number | undefined
-    const askRaw = payload.ask as number | undefined
-    const bid = typeof bidRaw === 'number' ? bidRaw / scale : null
-    const ask = typeof askRaw === 'number' ? askRaw / scale : null
+    const bidRaw = (event as any).bid
+    const askRaw = (event as any).ask
+    const bidNum = bidRaw != null ? Number(bidRaw) : NaN
+    const askNum = askRaw != null ? Number(askRaw) : NaN
+    const bid = Number.isFinite(bidNum) ? bidNum / scale : null
+    const ask = Number.isFinite(askNum) ? askNum / scale : null
     if (bid == null && ask == null) return
 
-    // Midpoint preferred; fall back to whichever side we have.
     const mid = (bid != null && ask != null) ? (bid + ask) / 2 : (bid ?? ask ?? 0)
     const now = Date.now()
 
     this.lastTickAt = now
     this.ticksReceived++
 
-    // F2 logs to console; F3 hands to the aggregator instead.
+    // F2: log to console for visibility. F3 will hand the same stream
+    // to the candle aggregator instead of logging.
     console.log(
       `[forex/ctrader] tick ${assetId}` +
       ` bid=${bid?.toFixed(digits) ?? '—'}` +
@@ -403,41 +385,6 @@ export class CTraderClient implements MarketProvider {
       mid,
       timestamp: now,
     })
-  }
-
-  // ── Request/response correlation ──────────────────────────────────────
-
-  private pendingRequests = new Map<string, {
-    resolve: (v: any) => void
-    reject:  (e: Error) => void
-    expect?: number
-  }>()
-
-  /** Send a request and await the matching response. Reject after 10s
-   *  to avoid hanging the handshake if the server drops the reply. */
-  private request<T = unknown>(payloadType: number, payload: unknown, expect?: number): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      const clientMsgId = randomUUID()
-      const timer = setTimeout(() => {
-        this.pendingRequests.delete(clientMsgId)
-        reject(new Error(`request ${payloadType} timed out`))
-      }, 10_000)
-      this.pendingRequests.set(clientMsgId, {
-        resolve: (v) => { clearTimeout(timer); resolve(v as T) },
-        reject:  (e) => { clearTimeout(timer); reject(e) },
-        expect,
-      })
-      this.send({ clientMsgId, payloadType, payload })
-    })
-  }
-
-  private send(env: CTraderEnvelope): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
-    try {
-      this.ws.send(JSON.stringify(env))
-    } catch (err) {
-      this.log(`send failed: ${err}`)
-    }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────
@@ -457,9 +404,8 @@ export class CTraderClient implements MarketProvider {
   }
 }
 
-/** Build a cTrader client from environment variables. Returns null when any
- *  required env is missing — the runtime then falls back to no-op mode so
- *  the rest of the forex module still boots. */
+/** Build a cTrader client from env. Returns null when any required env
+ *  is missing — runtime falls back to no-op mode. */
 export function tryCreateCTraderClient(): CTraderClient | null {
   const host         = process.env.CTRADER_HOST
   const clientId     = process.env.CTRADER_CLIENT_ID
