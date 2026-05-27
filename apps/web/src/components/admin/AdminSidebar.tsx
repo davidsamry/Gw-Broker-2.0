@@ -7,7 +7,7 @@ import {
   ArrowDownToLine, ArrowUpFromLine, MessageSquare, Network,
   Copy, Layers, Gift, Zap, TrendingUp, Clock, FileSpreadsheet,
   Trophy, Image as ImageIcon, FileText, Mail, CreditCard, Radio,
-  Settings, X,
+  Settings, X, Plug,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -42,6 +42,7 @@ const MENU: MenuItem[] = [
   { href: '/admin/emails',         label: 'Emails',          icon: <Mail size={15} /> },
   { href: '/admin/pagamentos',     label: 'Pagamentos',      icon: <CreditCard size={15} /> },
   { href: '/admin/configuracoes',  label: 'Configurações',   icon: <Settings size={15} /> },
+  { href: '/admin/api',            label: 'API',             icon: <Plug size={15} /> },
 ]
 
 interface AdminSidebarProps {
