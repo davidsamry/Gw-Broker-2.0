@@ -49,19 +49,25 @@ export async function getPublicRanking(): Promise<PublicRankingResponse> {
     return { entries: [], rotatesAt: rotatesAt.toISOString(), windowStartedAt: windowStartedAt.toISOString() }
   }
 
-  // Mulberry32 — small, fast, well-distributed PRNG. Seeded with the
-  // window index so every node in the cluster computes the same draw.
+  // Two-stage selection:
+  //   1. Shuffle the pool with a window-seeded PRNG → picks WHICH 25
+  //      entries appear (rotates every 3h).
+  //   2. Sort the chosen 25 by amount DESC → ranks 1..25 are honest
+  //      ("Líderes" = leaders, so the largest amount must be #1).
+  //
+  // Earlier versions skipped step 2 and the leaderboard showed entries
+  // out of monetary order — the admin pool had IA Axecash at R$ 41k as
+  // the top, but the visible list put Bruno C. at R$ 35k in position 1.
   const rand = mulberry32(windowIndex >>> 0)
-
-  // Fisher–Yates shuffle on a copy.
   const shuffled = [...pool]
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1))
     ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
   }
+  const slice = shuffled
+    .slice(0, LEADERBOARD_SIZE)
+    .sort((a, b) => Number(b.amount) - Number(a.amount))
 
-  // Take top N (or whatever's available if pool < N), assign ranks 1..N.
-  const slice = shuffled.slice(0, LEADERBOARD_SIZE)
   const entries: PublicRankingEntry[] = slice.map((e, i) => ({
     rank:   i + 1,
     name:   e.name,
