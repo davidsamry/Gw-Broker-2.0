@@ -15,16 +15,20 @@ import { Resend } from 'resend'
 import { prisma } from '../prisma.js'
 import { renderTemplate } from './templates.js'
 
-const RESEND_KEY  = process.env.RESEND_API_KEY ?? ''
-const FROM_EMAIL  = process.env.EMAIL_FROM      ?? 'noreply@vx-global.com'
-const FROM_NAME   = process.env.EMAIL_FROM_NAME ?? 'Vx Global'
+const RESEND_KEY   = process.env.RESEND_API_KEY ?? ''
+const FROM_EMAIL   = process.env.EMAIL_FROM      ?? 'noreply@vx-global.com'
+const FROM_NAME    = process.env.EMAIL_FROM_NAME ?? 'Vx Global'
 const FRONTEND_URL = process.env.FRONTEND_URL    ?? 'https://vx-global.com'
+// External CDN by default (ibb.co) so the image loads in any inbox
+// regardless of whether FRONTEND_URL is set or publicly reachable.
+// Override with EMAIL_LOGO_URL env if you self-host the file.
+const LOGO_URL     = process.env.EMAIL_LOGO_URL  ?? 'https://i.ibb.co/C3bn1qn1/Logo.png'
 
 // Brand variables injected into every template render — keeps the logo
-// URL and CTA targets in one place and lets us swap the prod domain via
-// env without touching the email rows in the DB.
+// URL and CTA targets in one place and lets us swap them via env without
+// touching the email rows in the DB.
 export const BRAND_VARS = {
-  logo_url:   `${FRONTEND_URL}/vx-logo.png`,
+  logo_url:   LOGO_URL,
   app_url:    FRONTEND_URL,
   brand_name: FROM_NAME,
 }
