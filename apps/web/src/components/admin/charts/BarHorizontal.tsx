@@ -17,10 +17,12 @@ export function BarHorizontal({ userWins, userLosses }: BarHorizontalProps) {
         <BarRow label="Derrotas Usuários" value={userLosses} max={max} color="#22c55e" />
       </div>
 
-      {/* X-axis ticks */}
+      {/* X-axis ticks — key by index because Math.round can collapse the
+          fractional steps (0.25, 0.5, 0.75) into duplicate integers when
+          max is small (e.g. max=1 ⇒ [0,0,1,1,1]). Position is stable. */}
       <div className="flex justify-between mt-2 ml-[140px]">
-        {ticks.map((t) => (
-          <span key={t} className="text-[10px] text-[#8b8f9a]">{t}</span>
+        {ticks.map((t, i) => (
+          <span key={i} className="text-[10px] text-[#8b8f9a]">{t}</span>
         ))}
       </div>
 
