@@ -77,7 +77,19 @@ export interface OtcAssetState {
   // least one wick by checking near the end of each slot and pushing
   // the tick outside the body when no wick is present yet.
   m1WickCheckedSlot?: number
+  // Post-reset history backfill — set to N (e.g. 500) by fullResetEngine.
+  // The very next tick captures the open price and writes N flat historical
+  // candles per timeframe immediately before the current slot, then clears
+  // this counter. UX: a freshly-reset chart paints with visual context
+  // instead of starting from zero. See runtime/post-reset-backfill.ts.
+  pendingBackfillCount?: number
 }
+
+// Number of flat historical candles injected per timeframe right after a
+// full reset. Per-timeframe (not total) — 500 5s + 500 15s + 500 30s +
+// 500 60s + 500 300s = 2500 candles total per asset per reset. Sits well
+// under CANDLES_PER_TF (3000) so the cache ring buffer never trims them.
+export const BACKFILL_AFTER_RESET = 500
 
 // Output of one engine step. Worker feeds this into candle builders +
 // the persistence layer.

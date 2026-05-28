@@ -11,7 +11,7 @@
 // liquidity_state) — see admin/otc/service.ts fullResetAllOtc.
 
 import { CandleBuilder } from '../engine/candle-builder.js'
-import { OTC_TIMEFRAMES } from '../types.js'
+import { OTC_TIMEFRAMES, BACKFILL_AFTER_RESET } from '../types.js'
 import { pickRegimeDurationMs } from '../engine/pricing.js'
 import { resetMicroState } from '../engine/microdynamics.js'
 import { assetStates, builders, candleCache, pendingTicks, pendingCandles } from './state-map.js'
@@ -50,6 +50,11 @@ export function fullResetEngine(): FullResetSummary {
     s.pullbackTicksRemaining = 0
     s.lastTickAt           = undefined
     s.lastCandleAt         = undefined
+    // Arm the post-reset backfill — the next tick on the asset loop
+    // will capture the live open price and inject BACKFILL_AFTER_RESET
+    // flat candles per timeframe immediately before the current slot,
+    // giving the chart visual context instead of starting empty.
+    s.pendingBackfillCount = BACKFILL_AFTER_RESET
     assetsReset++
 
     // Replace builders so the next tick opens a fresh candle at seedPrice

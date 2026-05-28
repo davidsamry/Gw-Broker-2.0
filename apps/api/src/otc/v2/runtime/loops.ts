@@ -19,6 +19,7 @@ import {
   timedDbOp,
 } from '../../../metrics/registry.js'
 import { maybeManipulatePrice, isSlotUnderManipulation } from './manipulation.js'
+import { injectBackwardsHistory } from './post-reset-backfill.js'
 
 // ── Boot-grace window — suppresses random spikes in the first
 // BOOT_SPIKE_GRACE_MS so the first ticks post-restart can't introduce
@@ -154,6 +155,22 @@ export function startAssetLoop(assetId: string): void {
 
     const tick: OtcTick = { assetId: s.config.id, price: round5(price), recordedAt: new Date(now) }
     pendingTicks.push(tick)
+
+    // ── Post-reset history backfill ────────────────────────────────
+    // Set by fullResetEngine to BACKFILL_AFTER_RESET; this is the
+    // first tick after a full reset, so we now know the actual open
+    // price (close to seedPrice, but not identical — AR(1) jitter).
+    // Inject flat historicals per timeframe immediately before the
+    // current slot. Fire-and-forget — the tick loop continues so the
+    // chart keeps streaming live ticks while the DB write happens.
+    if (s.pendingBackfillCount && s.pendingBackfillCount > 0) {
+      const count = s.pendingBackfillCount
+      s.pendingBackfillCount = 0   // clear FIRST to avoid double-fire on race
+      injectBackwardsHistory(assetId, tick.price, count, now)
+        .catch((err) => {
+          console.error('[otc-v2] post-reset backfill failed', { assetId, err })
+        })
+    }
 
     // Fase M3 metrics — these are per-tick (10Hz × 5 assets = 50/sec).
     // Counter.inc and Gauge.set are constant-time, no allocations.
