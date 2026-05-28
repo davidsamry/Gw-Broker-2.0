@@ -19,10 +19,10 @@ const RESEND_KEY   = process.env.RESEND_API_KEY ?? ''
 const FROM_EMAIL   = process.env.EMAIL_FROM      ?? 'noreply@vx-global.com'
 const FROM_NAME    = process.env.EMAIL_FROM_NAME ?? 'Vx Global'
 const FRONTEND_URL = process.env.FRONTEND_URL    ?? 'https://vx-global.com'
-// External CDN by default (ibb.co) so the image loads in any inbox
-// regardless of whether FRONTEND_URL is set or publicly reachable.
-// Override with EMAIL_LOGO_URL env if you self-host the file.
-const LOGO_URL     = process.env.EMAIL_LOGO_URL  ?? 'https://i.ibb.co/LXxCkMCk/Logo.png'
+// Self-hosted by default — apps/web ships vx-logo.png in /public so the
+// file is served at `${FRONTEND_URL}/vx-logo.png` with no extra setup.
+// Override with EMAIL_LOGO_URL only if you need a CDN-hosted variant.
+const LOGO_URL     = process.env.EMAIL_LOGO_URL  ?? `${FRONTEND_URL}/vx-logo.png`
 
 // Brand variables injected into every template render — keeps the logo
 // URL and CTA targets in one place and lets us swap them via env without
