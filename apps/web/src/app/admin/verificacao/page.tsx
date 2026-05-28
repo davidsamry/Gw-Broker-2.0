@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   ShieldCheck, Search, RefreshCw, Eye, X, Clock, CheckCircle2, XCircle, ChevronDown,
+  Undo2,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -202,12 +203,16 @@ function StatusChip({ status }: { status: KycRow['status'] }) {
 function DocumentsModal({
   submission, onClose, onDecided,
 }: { submission: KycRow; onClose: () => void; onDecided: () => void }) {
-  const [rejectMode, setRejectMode] = useState(false)
+  // Two "compose-a-reason" modes — both reuse the same textarea below.
+  // 'reject' = decide on a SUBMITTED case;
+  // 'revert' = downgrade a previously APPROVED case to REJECTED.
+  const [mode, setMode]     = useState<null | 'reject' | 'revert'>(null)
   const [reason, setReason] = useState('')
-  const [loading, setLoading] = useState<'approve' | 'reject' | null>(null)
-  const [error, setError] = useState('')
+  const [loading, setLoading] = useState<'approve' | 'reject' | 'revert' | null>(null)
+  const [error, setError]   = useState('')
 
-  const pending = submission.status === 'SUBMITTED'
+  const pending  = submission.status === 'SUBMITTED'
+  const approved = submission.status === 'APPROVED'
 
   async function approve() {
     setLoading('approve'); setError('')
@@ -231,6 +236,22 @@ function DocumentsModal({
     } catch (err: any) {
       if (err?.response?.data?.error === 'NOT_PENDING') setError('Já foi revisada por outro admin.')
       else                                              setError('Erro ao rejeitar.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  // Reversion: APPROVED → REJECTED. Same payload shape as /reject, just
+  // a different endpoint with a strict status guard on the backend.
+  async function revert() {
+    if (reason.trim().length < 3) { setError('Motivo deve ter pelo menos 3 caracteres.'); return }
+    setLoading('revert'); setError('')
+    try {
+      await api.post(`/admin/kyc/${submission.id}/revert-to-rejected`, { reason: reason.trim() })
+      onDecided()
+    } catch (err: any) {
+      if (err?.response?.data?.error === 'NOT_APPROVED') setError('Status mudou — atualize a lista.')
+      else                                                setError('Erro ao reverter.')
     } finally {
       setLoading(null)
     }
@@ -268,24 +289,37 @@ function DocumentsModal({
             </div>
           )}
 
-          {rejectMode && pending && (
+          {mode !== null && (
             <div className="mt-4">
-              <label className="text-[10px] font-medium text-[#8b8f9a] mb-1 block">Motivo da rejeição (será enviado ao usuário)</label>
+              <label className="text-[10px] font-medium text-[#8b8f9a] mb-1 block">
+                {mode === 'revert'
+                  ? 'Motivo da reversão (será enviado ao usuário e bloqueia saques imediatamente)'
+                  : 'Motivo da rejeição (será enviado ao usuário)'}
+              </label>
               <textarea
                 autoFocus
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 rows={3}
-                placeholder="Ex.: documento ilegível, selfie sem o documento ao lado, etc."
+                placeholder={mode === 'revert'
+                  ? 'Ex.: documento adulterado descoberto após aprovação, suspeita de fraude, etc.'
+                  : 'Ex.: documento ilegível, selfie sem o documento ao lado, etc.'}
                 className="w-full bg-[#1a1e2a] border border-[#1f232e] rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-emerald-500/60 resize-none"
               />
+              {mode === 'revert' && (
+                <p className="text-[10px] text-amber-400 mt-1.5 flex items-start gap-1">
+                  ⚠ A conta perderá acesso a saques até passar por nova verificação.
+                </p>
+              )}
             </div>
           )}
 
           {error && <p className="text-xs text-red-400 mt-3">{error}</p>}
         </div>
 
-        {/* Footer */}
+        {/* Footer — three modes: idle (pending/approved show action buttons),
+            reject-compose, revert-compose. Both compose modes share the
+            cancel/confirm pair below; the action color/icon differs. */}
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-[#1f232e] flex-shrink-0">
           <div className="text-xs text-[#8b8f9a] flex items-center gap-1.5">
             {pending ? (
@@ -295,47 +329,54 @@ function DocumentsModal({
             )}
           </div>
 
-          {pending && (
+          {mode !== null ? (
             <div className="flex items-center gap-2">
-              {rejectMode ? (
-                <>
-                  <button
-                    onClick={() => { setRejectMode(false); setReason(''); setError('') }}
-                    className="px-3 py-2 rounded-lg border border-[#1f232e] text-xs font-semibold text-[#8b8f9a] hover:text-white transition-colors"
-                  >
-                    Voltar
-                  </button>
-                  <button
-                    onClick={reject}
-                    disabled={loading !== null || reason.trim().length < 3}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-500 hover:bg-red-400 text-xs font-bold text-white transition-colors disabled:opacity-50"
-                  >
-                    <XCircle size={13} />
-                    {loading === 'reject' ? 'Rejeitando…' : 'Confirmar rejeição'}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={() => setRejectMode(true)}
-                    disabled={loading !== null}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[#1f232e] bg-[#1a1e2a] text-xs font-semibold text-white hover:bg-white/5 transition-colors disabled:opacity-50"
-                  >
-                    <XCircle size={13} />
-                    Rejeitar
-                  </button>
-                  <button
-                    onClick={approve}
-                    disabled={loading !== null}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-xs font-bold text-black transition-colors disabled:opacity-50"
-                  >
-                    <CheckCircle2 size={13} />
-                    {loading === 'approve' ? 'Aprovando…' : 'Aprovar'}
-                  </button>
-                </>
-              )}
+              <button
+                onClick={() => { setMode(null); setReason(''); setError('') }}
+                className="px-3 py-2 rounded-lg border border-[#1f232e] text-xs font-semibold text-[#8b8f9a] hover:text-white transition-colors"
+              >
+                Voltar
+              </button>
+              <button
+                onClick={mode === 'revert' ? revert : reject}
+                disabled={loading !== null || reason.trim().length < 3}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-red-500 hover:bg-red-400 text-xs font-bold text-white transition-colors disabled:opacity-50"
+              >
+                {mode === 'revert' ? <Undo2 size={13} /> : <XCircle size={13} />}
+                {mode === 'revert'
+                  ? (loading === 'revert' ? 'Revertendo…' : 'Confirmar reversão')
+                  : (loading === 'reject' ? 'Rejeitando…' : 'Confirmar rejeição')}
+              </button>
             </div>
-          )}
+          ) : pending ? (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setMode('reject')}
+                disabled={loading !== null}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-[#1f232e] bg-[#1a1e2a] text-xs font-semibold text-white hover:bg-white/5 transition-colors disabled:opacity-50"
+              >
+                <XCircle size={13} />
+                Rejeitar
+              </button>
+              <button
+                onClick={approve}
+                disabled={loading !== null}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-xs font-bold text-black transition-colors disabled:opacity-50"
+              >
+                <CheckCircle2 size={13} />
+                {loading === 'approve' ? 'Aprovando…' : 'Aprovar'}
+              </button>
+            </div>
+          ) : approved ? (
+            <button
+              onClick={() => setMode('revert')}
+              disabled={loading !== null}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+            >
+              <Undo2 size={13} />
+              Reverter para rejeitado
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

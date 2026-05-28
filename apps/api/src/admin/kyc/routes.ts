@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { approveKyc, listKycSubmissions, rejectKyc } from './service.js'
+import { approveKyc, listKycSubmissions, rejectKyc, revertKycToRejected } from './service.js'
 
 const listQuerySchema = z.object({
   page:     z.coerce.number().int().min(1).optional(),
@@ -53,6 +53,26 @@ export async function kycAdminRoutes(app: FastifyInstance) {
       return reply.send({ ok: true, status: 'REJECTED' })
     } catch (err: any) {
       if (err.message === 'NOT_PENDING') return reply.status(409).send({ error: 'NOT_PENDING' })
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Revert a previously approved submission back to REJECTED. Strict guard
+  // in the service ensures only APPROVED → REJECTED is allowed; any other
+  // current status responds 409 NOT_APPROVED so the UI knows to refresh.
+  app.post('/:id/revert-to-rejected', async (req, reply) => {
+    const parsed = rejectSchema.safeParse(req.body)   // same {reason} shape
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
+    }
+    const { id }  = req.params as { id: string }
+    const adminId = ((req as any).user.sub) as string
+    try {
+      await revertKycToRejected(adminId, id, parsed.data.reason)
+      return reply.send({ ok: true, status: 'REJECTED' })
+    } catch (err: any) {
+      if (err.message === 'NOT_APPROVED') return reply.status(409).send({ error: 'NOT_APPROVED' })
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }

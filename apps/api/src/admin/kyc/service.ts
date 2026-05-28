@@ -128,6 +128,42 @@ export async function approveKyc(adminId: string, submissionId: string) {
   return result
 }
 
+/**
+ * Reverse an already-APPROVED submission back to REJECTED. Used when an
+ * admin discovers, after the fact, that a doc shouldn't have been let
+ * through (e.g. fraud signals surface later). Strict transition guard —
+ * only APPROVED can be reverted; PENDING/SUBMITTED/REJECTED stay where
+ * they are and return NOT_APPROVED so the UI can show "already revised
+ * differently, refresh".
+ *
+ * Side effects mirror rejectKyc: User.kycStatus drops to REJECTED → the
+ * withdrawal gate immediately blocks the user the next time they hit
+ * POST /withdrawals, and the rejection email fires so they know why.
+ */
+export async function revertKycToRejected(adminId: string, submissionId: string, reason: string) {
+  const result = await prisma.$transaction(async (tx) => {
+    const updated = await tx.$executeRaw`
+      UPDATE kyc_submissions
+      SET status = 'REJECTED'::"KycStatus",
+          reason = ${reason},
+          "reviewedAt" = NOW(),
+          "reviewedBy" = ${adminId}
+      WHERE id = ${submissionId}
+        AND status = 'APPROVED'::"KycStatus"
+    `
+    if (updated === 0) throw new Error('NOT_APPROVED')
+
+    await tx.$executeRaw`
+      UPDATE users SET "kycStatus" = 'REJECTED'::"KycStatus"
+      WHERE id = (SELECT "userId" FROM kyc_submissions WHERE id = ${submissionId})
+    `
+    return true
+  })
+
+  await notifyKycResult(submissionId, 'REJECTED', reason)
+  return result
+}
+
 /** Reject a submission with a required reason. */
 export async function rejectKyc(adminId: string, submissionId: string, reason: string) {
   const result = await prisma.$transaction(async (tx) => {
