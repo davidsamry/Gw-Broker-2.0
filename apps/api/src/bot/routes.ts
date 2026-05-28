@@ -18,6 +18,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 import { prisma } from '../prisma.js'
+import type { Asset } from '../market-types.js'
 import { listBinanceAssets } from '../market/service.js'
 import { createOperation, listOperations, getOperation } from '../operations/service.js'
 import { getSettings } from '../settings/service.js'
@@ -35,20 +36,69 @@ function clientIp(req: FastifyRequest): string | null {
   return fwd || req.ip || null
 }
 
-/** Compact "EURUSD" / "BTCUSDT" → catalog entry. We search by both the
- *  raw `marketSymbol` (already compact) and a normalised version of the
- *  display symbol so bots can use either format. */
+/** Load the 5 in-house OTC assets and shape them into the same `Asset`
+ *  contract Binance entries use. marketSymbol is derived from the id
+ *  ('eur-usd-otc' → 'EURUSDOTC') so bots can resolve them via the same
+ *  symbol-matching loop. Disabled/paused entries are filtered out so a
+ *  bot can't trade what the admin turned off in /admin/otc. */
+async function loadOtcAssetsAsAssetShape(): Promise<Asset[]> {
+  const rows = await prisma.$queryRaw<Array<{
+    id: string; symbol: string; name: string;
+    category: string; payout: number; seedPrice: string;
+  }>>`
+    SELECT id, symbol, name, category::text AS category,
+           payout, "seedPrice"::text AS "seedPrice"
+    FROM otc_assets
+    WHERE enabled = TRUE AND paused = FALSE
+    ORDER BY "displayOrder" ASC, symbol ASC
+  `
+  return rows.map((r) => {
+    const compact = r.id.toUpperCase().replace(/[^A-Z0-9]/g, '')   // 'EURUSDOTC'
+    // category mapping: 'FOREX' → 'Forex' Asset.type. 'CRYPTO'/'COMMODITY'
+    // fall back to 'OTC' which the mapper turns into 'otc' for the bot.
+    const type: Asset['type'] = r.category === 'FOREX' ? 'Forex' : 'OTC'
+    return {
+      id:             r.id,
+      symbol:         r.symbol,                   // 'EUR/USD'
+      label:          r.name,                     // 'EUR/USD (OTC)'
+      type,
+      category:       'Moedas',                   // closest Asset.category match
+      source:         'INTERNAL',                 // signal to createOperation: don't pass marketSymbol
+      marketSymbol:   compact,                    // 'EURUSDOTC' — what bot sends
+      marketType:     'OTC',
+      executionVenue: 'OTC_INTERNAL',
+      payout:         r.payout,
+      payout5min:     r.payout,
+      flag1:          '', flag2: '', code1: '', code2: '',
+      price:          Number(r.seedPrice) || 1,   // placeholder, createOperation reads otc_ticks
+      change24h:      0,
+    }
+  })
+}
+
+/** Compact "EURUSD" / "BTCUSDT" / "EURUSDOTC" → catalog entry. Tries Binance
+ *  first (most bots will be on crypto), then falls through to the OTC
+ *  catalog. Both share the same `Asset` shape so the caller doesn't care. */
 async function findAssetBySymbol(symbol: string) {
   const compact = symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
-  // Reuse listBinanceAssets — it already handles admin enable/disable +
-  // payout overrides. Fast enough (single REST fetch + one DB query),
-  // and bots wouldn't hammer /trade fast enough to need a cache here.
+
+  // 1) Binance — listBinanceAssets handles admin enable/disable + payout
+  //    overrides. Fast enough (REST + one DB read), no cache needed.
   const assets = await listBinanceAssets()
   for (const a of assets) {
     const ms = (a.marketSymbol ?? '').toUpperCase()
     const sb = (a.symbol ?? '').replace(/[^A-Z0-9]/gi, '').toUpperCase()
     if (ms === compact || sb === compact) return a
   }
+
+  // 2) OTC fallback — only hits the DB if Binance missed. Bot lookups for
+  //    `EURUSDOTC` etc. route through here. createOperation already knows
+  //    how to source the entry price from otc_ticks (OTC v2, etapa 5).
+  const otcAssets = await loadOtcAssetsAsAssetShape()
+  for (const a of otcAssets) {
+    if (a.marketSymbol === compact) return a
+  }
+
   return null
 }
 
@@ -181,10 +231,14 @@ export async function botRoutes(app: FastifyInstance) {
     return reply.send(mapBalance(real))
   })
 
-  // GET /assets — Binance catalog (admin disable/payout overrides applied)
+  // GET /assets — Binance catalog + OTC catalog, in that order. Both
+  // sources apply admin enable/disable so a bot only sees what's tradable.
   app.get('/assets', { preHandler: [botAuthenticate] }, async (_req, reply) => {
-    const assets = await listBinanceAssets()
-    return reply.send({ assets: assets.map(mapAsset) })
+    const [binance, otc] = await Promise.all([
+      listBinanceAssets(),
+      loadOtcAssetsAsAssetShape(),
+    ])
+    return reply.send({ assets: [...binance.map(mapAsset), ...otc.map(mapAsset)] })
   })
 
   // POST /trade — open an operation against the REAL account
