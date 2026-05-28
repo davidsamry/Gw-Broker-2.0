@@ -166,7 +166,7 @@ export function startAssetLoop(assetId: string): void {
     if (s.pendingBackfillCount && s.pendingBackfillCount > 0) {
       const count = s.pendingBackfillCount
       s.pendingBackfillCount = 0   // clear FIRST to avoid double-fire on race
-      injectBackwardsHistory(assetId, tick.price, count, now)
+      injectBackwardsHistory(assetId, tick.price, count, now, s.config.volatilityBase)
         .catch((err) => {
           console.error('[otc-v2] post-reset backfill failed', { assetId, err })
         })
