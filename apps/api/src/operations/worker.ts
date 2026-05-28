@@ -175,6 +175,12 @@ async function resolveOperation(op: {
   openedAt:     Date
   direction:    'CALL' | 'PUT'
   marketSymbol: string | null
+  // Per User.isFake — admin-flagged demo accounts. When true, EVERY
+  // resolution returns WON regardless of price movement. Field is loaded
+  // via the JOIN in tick()/resolveOperationIfExpired below; if the JOIN
+  // ever fails (returns undefined), the falsy default means normal price
+  // comparison applies. Fail-safe is "behave like a real user".
+  isFake?:      boolean
 }) {
   try {
     const entry = Number(op.entryPrice)
@@ -200,9 +206,19 @@ async function resolveOperation(op: {
       }
     }
 
-    const won =
-      (op.direction === 'CALL' && exitPrice > entry) ||
-      (op.direction === 'PUT'  && exitPrice < entry)
+    // Fake-account override: admin marked the user as isFake (see
+    // admin/usuarios). Force WIN regardless of price comparison — the
+    // demo account is meant to always profit. The rest of the flow
+    // (balance credit, transaction row, SSE publish) is identical to a
+    // real win so the UI is indistinguishable for the user.
+    //
+    // STRICT GATE: explicit `=== true` check. Any other value (false /
+    // undefined / null / missing field) falls through to the normal
+    // price comparison. There is no way for a real user to land here.
+    const won = op.isFake === true
+      ? true
+      : (op.direction === 'CALL' && exitPrice > entry) ||
+        (op.direction === 'PUT'  && exitPrice < entry)
 
     const profit = won ? parseFloat((amount * (op.payout / 100)).toFixed(2)) : 0
 
@@ -273,12 +289,15 @@ async function resolveOperation(op: {
 
     // Single structured log per resolution — grepable for auditing
     // resolution quality. Should see ~0% source=random in healthy runs.
-    const tfStr = exit.candleTf ? ` candle_tf=${exit.candleTf}` : ''
+    // fake=true rows are audit-trail-only — confirms admin demo accounts
+    // were resolved via the override, not real market math.
+    const tfStr   = exit.candleTf ? ` candle_tf=${exit.candleTf}` : ''
+    const fakeStr = op.isFake === true ? ' fake=true' : ''
     console.log(
       `[op-resolve] op=${op.id} asset=${op.assetId} dir=${op.direction}` +
       ` entry=${entry.toFixed(5)} exit=${exitPrice.toFixed(5)}` +
       ` source=${exit.source} tick_age_ms=${exit.tickAgeMs}${tfStr}` +
-      ` won=${won} profit=${profit.toFixed(2)}` +
+      ` won=${won} profit=${profit.toFixed(2)}${fakeStr}` +
       divergenceWarn,
     )
   } catch (err) {
@@ -290,17 +309,23 @@ async function tick() {
   if (isPolling) return
   isPolling = true
   try {
-    const expired = await prisma.operation.findMany({
+    const expiredRaw = await prisma.operation.findMany({
       where:   { status: 'OPEN', expiresAt: { lte: new Date() } },
       orderBy: { expiresAt: 'asc' },
       take:    BATCH_SIZE,
       select:  {
         id: true, accountId: true, assetId: true, assetSymbol: true, amount: true, payout: true,
         entryPrice: true, expiresAt: true, openedAt: true, direction: true, marketSymbol: true,
+        // JOIN to read the user's isFake flag for the fake-win override.
+        // accountId → account → user is FK-indexed; cost is negligible.
+        account: { select: { user: { select: { isFake: true } } } },
       },
     })
 
-    if (expired.length === 0) return
+    if (expiredRaw.length === 0) return
+
+    // Flatten isFake onto the op so resolveOperation's shape stays flat.
+    const expired = expiredRaw.map((o) => ({ ...o, isFake: o.account.user.isFake }))
 
     // Resolve in parallel — each call's atomic claim prevents double-processing.
     await Promise.all(expired.map(resolveOperation))
@@ -318,7 +343,7 @@ async function tick() {
 // concurrently. Returns silently when the op isn't found, isn't OPEN
 // yet, or hasn't expired — nothing to do.
 export async function resolveOperationIfExpired(operationId: string): Promise<void> {
-  const op = await prisma.operation.findFirst({
+  const raw = await prisma.operation.findFirst({
     where: {
       id:        operationId,
       status:    'OPEN',
@@ -327,10 +352,11 @@ export async function resolveOperationIfExpired(operationId: string): Promise<vo
     select: {
       id: true, accountId: true, assetId: true, assetSymbol: true, amount: true, payout: true,
       entryPrice: true, expiresAt: true, openedAt: true, direction: true, marketSymbol: true,
+      account: { select: { user: { select: { isFake: true } } } },
     },
   })
-  if (!op) return
-  await resolveOperation(op)
+  if (!raw) return
+  await resolveOperation({ ...raw, isFake: raw.account.user.isFake })
 }
 
 let intervalId: ReturnType<typeof setInterval> | null = null
