@@ -33,6 +33,9 @@ Thumbs.db
 
 # Claude Code agent state (per-session worktrees, not config)
 .claude/worktrees/
+# Per-machine IDE preferences + transient locks (not project config)
+.claude/launch.json
+.claude/scheduled_tasks.lock
 
 # Test / coverage
 coverage/
