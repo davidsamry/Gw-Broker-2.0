@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { Minus, Plus, ArrowUp, ArrowDown, ChevronDown, ChevronUp, Package, X } from 'lucide-react'
+import { Minus, Plus, ArrowUp, ArrowDown, ChevronUp, Package, X } from 'lucide-react'
 import { ASSETS, type Asset, type OpenTrade, type ClosedTrade, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
@@ -73,18 +73,14 @@ function TradeItem({
   currentAssetId: string
   onSelectAsset?: (asset: Asset) => void
 }) {
-  // Dual-purpose card click — UX inspired by Quotex:
-  //   - Click on a card whose asset != on-screen chart → switch the chart
-  //     to that asset (user is checking on another pair's pending trade).
-  //   - Click on a card whose asset == on-screen chart → toggle the
-  //     inline x2 / Vender action row (the user already sees the chart;
-  //     they're drilling into the trade itself).
+  // Click on a pending-trade card → switch the chart to that asset.
+  // No-op if the card already represents the on-screen asset (avoids
+  // an unnecessary re-render of TradingChart).
   const isCurrent = trade.asset.id === currentAssetId
-  // -- countdown below --
+
   // Regressive countdown synchronized with the chart marker:
   // both use `expiryTime - (Date.now()/1000 + BRT_OFFSET)`.
   const [remaining, setRemaining] = useState(() => Math.max(0, trade.expiryTime - (Math.floor(Date.now() / 1000) + BRT_OFFSET)))
-  const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
     const tick = () => {
@@ -121,20 +117,17 @@ function TradeItem({
   const s = (remaining % 60).toString().padStart(2, '0')
 
   const name = trade.asset.label.length > 13 ? trade.asset.label.slice(0, 13) + '...' : trade.asset.label
-  const earlyExitValue = Math.round(trade.amount * 0.2)
 
   return (
     <div className="px-2 mb-px">
       <div
         className="px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer group"
         onClick={() => {
-          if (isCurrent || !onSelectAsset) setExpanded(v => !v)
-          else                              onSelectAsset(trade.asset)
+          if (!isCurrent && onSelectAsset) onSelectAsset(trade.asset)
         }}
         title={isCurrent ? undefined : `Abrir gráfico de ${trade.asset.label}`}
       >
         <div className="flex items-center gap-1.5">
-          <ChevronDown size={11} className={cn('text-[#8b8f9a] flex-shrink-0 transition-transform', expanded && 'rotate-180')} />
           <FlagPair code1={trade.asset.code1} code2={trade.asset.code2} size={15} />
           <span className="flex-1 text-[12px] font-semibold text-white truncate">
             {shortLabels ? name : trade.asset.label}
@@ -164,17 +157,6 @@ function TradeItem({
           </span>
         </div>
       </div>
-
-      {expanded && (
-        <div className="px-2 pb-2 flex gap-2">
-          <button className="flex-1 h-7 rounded-lg bg-[#252a3a] border border-[#2a2e3b] text-[11px] font-bold text-white hover:border-blue-500/50 transition-colors">
-            x2
-          </button>
-          <button className="flex-1 h-7 rounded-lg bg-blue-600 hover:bg-blue-500 text-[11px] font-bold text-white transition-colors px-2">
-            Vender agora &nbsp;R$ {fmtMoney(earlyExitValue)}
-          </button>
-        </div>
-      )}
     </div>
   )
 }
