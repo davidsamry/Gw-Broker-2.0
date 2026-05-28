@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
-import { loginSchema, registerSchema, updateProfileSchema, twoFactorCodeSchema, kycSubmitSchema } from './schema.js'
-import { getKycSubmission, getUserById, loginUser, registerUser, submitKyc, updateUserProfile } from './service.js'
+import { loginSchema, registerSchema, updateProfileSchema, twoFactorCodeSchema, kycSubmitSchema, changePasswordSchema } from './schema.js'
+import { changeUserPassword, getKycSubmission, getUserById, loginUser, registerUser, submitKyc, updateUserProfile } from './service.js'
 import { requestPasswordReset, resetPasswordWithToken } from './passwordReset.js'
 import { getSettings } from '../settings/service.js'
 import { listOperations } from '../operations/service.js'
@@ -173,6 +173,35 @@ export async function authRoutes(app: FastifyInstance) {
     } catch (err: any) {
       if (err.message === 'EMAIL_TAKEN') {
         return reply.status(409).send({ error: 'EMAIL_TAKEN' })
+      }
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // ── Change password (authenticated) ─────────────────────────────────────
+  // Distinct from /reset-password (which uses an email token + no auth).
+  // Here the user is logged in and provides the current password as the
+  // proof — no email needed. We do NOT rotate the session token after
+  // success: the active access token stays valid until its 15min expiry.
+  app.post('/change-password', { preHandler: [(app as any).authenticate] }, async (req, reply) => {
+    const parsed = changePasswordSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
+    }
+    const userId = ((req as any).user.sub) as string
+    try {
+      await changeUserPassword(userId, parsed.data)
+      return reply.send({ ok: true })
+    } catch (err: any) {
+      if (err.message === 'USER_NOT_FOUND') {
+        return reply.status(404).send({ error: 'USER_NOT_FOUND' })
+      }
+      if (err.message === 'INVALID_CURRENT_PASSWORD') {
+        return reply.status(401).send({ error: 'INVALID_CURRENT_PASSWORD' })
+      }
+      if (err.message === 'SAME_PASSWORD') {
+        return reply.status(400).send({ error: 'SAME_PASSWORD' })
       }
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })

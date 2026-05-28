@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '../prisma.js'
-import type { LoginInput, RegisterInput, UpdateProfileInput, KycSubmitInput } from './schema.js'
+import type { LoginInput, RegisterInput, UpdateProfileInput, KycSubmitInput, ChangePasswordInput } from './schema.js'
 import { verifyTotp } from './twoFactor.js'
 import { sendEmailAsync } from '../email/service.js'
 
@@ -153,6 +153,34 @@ export async function submitKyc(userId: string, input: KycSubmitInput) {
     `
   })
   return getKycSubmission(userId)
+}
+
+// Authenticated password change. Verifies `currentPassword` against the
+// stored hash before writing the new one. Throws specific error codes so
+// the route handler can map to friendly HTTP statuses + frontend messages.
+//   - INVALID_CURRENT_PASSWORD → 401 (wrong current pw)
+//   - SAME_PASSWORD            → 400 (new == old; prevents accidental no-op)
+//   - USER_NOT_FOUND           → 404
+export async function changeUserPassword(userId: string, input: ChangePasswordInput) {
+  const user = await prisma.user.findUnique({
+    where:  { id: userId },
+    select: { password: true },
+  })
+  if (!user) throw new Error('USER_NOT_FOUND')
+
+  const ok = await bcrypt.compare(input.currentPassword, user.password)
+  if (!ok) throw new Error('INVALID_CURRENT_PASSWORD')
+
+  // Block trivially-identical update so the user gets explicit feedback
+  // instead of a silent success that doesn't actually change anything.
+  const same = await bcrypt.compare(input.newPassword, user.password)
+  if (same) throw new Error('SAME_PASSWORD')
+
+  const hash = await bcrypt.hash(input.newPassword, 10)
+  await prisma.user.update({
+    where: { id: userId },
+    data:  { password: hash },
+  })
 }
 
 export async function updateUserProfile(userId: string, input: UpdateProfileInput) {

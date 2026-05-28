@@ -44,6 +44,15 @@ export const twoFactorCodeSchema = z.object({
   code: z.string().regex(/^\d{6}$/),
 })
 
+// Change password (authenticated user). currentPassword verified via
+// bcrypt.compare server-side. newPassword min 6 to match register (we
+// keep both bounds in sync so the same UX rules apply on signup and
+// here).
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword:     z.string().min(6).max(72),
+})
+
 // KYC: 3 base64 data URLs (data:image/...;base64,XXX). Server stores them
 // as-is in kyc_submissions URL columns. ~2-3MB combined when 3 phone photos.
 const dataUrlSchema = z.string()
@@ -68,8 +77,9 @@ export const updateProfileSchema = z.object({
   address:   z.string().max(200).trim().optional(),
 })
 
-export type RegisterInput      = z.infer<typeof registerSchema>
-export type LoginInput         = z.infer<typeof loginSchema>
-export type UpdateProfileInput = z.infer<typeof updateProfileSchema>
-export type TwoFactorCodeInput = z.infer<typeof twoFactorCodeSchema>
-export type KycSubmitInput     = z.infer<typeof kycSubmitSchema>
+export type RegisterInput       = z.infer<typeof registerSchema>
+export type LoginInput          = z.infer<typeof loginSchema>
+export type UpdateProfileInput  = z.infer<typeof updateProfileSchema>
+export type TwoFactorCodeInput  = z.infer<typeof twoFactorCodeSchema>
+export type KycSubmitInput      = z.infer<typeof kycSubmitSchema>
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>

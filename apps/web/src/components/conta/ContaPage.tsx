@@ -865,6 +865,53 @@ function MinhaContaTab() {
   const [disableLoading, setDisableLoading] = useState(false)
   const [disableError,  setDisableError]  = useState('')
 
+  // Change-password UI state. Modal opens on "Mudar" click, holds the
+  // three fields, calls POST /auth/change-password, and surfaces the
+  // backend's error codes as friendly Portuguese strings.
+  const [pwOpen,       setPwOpen]       = useState(false)
+  const [pwCurrent,    setPwCurrent]    = useState('')
+  const [pwNew,        setPwNew]        = useState('')
+  const [pwConfirm,    setPwConfirm]    = useState('')
+  const [pwLoading,    setPwLoading]    = useState(false)
+  const [pwError,      setPwError]      = useState('')
+  const [pwSuccess,    setPwSuccess]    = useState(false)
+
+  function openPasswordModal() {
+    setPwCurrent('')
+    setPwNew('')
+    setPwConfirm('')
+    setPwError('')
+    setPwSuccess(false)
+    setPwOpen(true)
+  }
+
+  async function submitChangePassword() {
+    if (pwLoading) return
+    setPwError('')
+    if (!pwCurrent) { setPwError('Informe sua senha atual.'); return }
+    if (pwNew.length < 6) { setPwError('A nova senha precisa ter pelo menos 6 caracteres.'); return }
+    if (pwNew !== pwConfirm) { setPwError('A confirmação não coincide com a nova senha.'); return }
+    if (pwNew === pwCurrent) { setPwError('A nova senha deve ser diferente da atual.'); return }
+    setPwLoading(true)
+    try {
+      await api.post('/auth/change-password', {
+        currentPassword: pwCurrent,
+        newPassword:     pwNew,
+      })
+      setPwSuccess(true)
+      // Auto-close after a moment so the user sees the confirmation.
+      setTimeout(() => setPwOpen(false), 1400)
+    } catch (err: any) {
+      const code = err?.response?.data?.error
+      if      (code === 'INVALID_CURRENT_PASSWORD') setPwError('Senha atual incorreta.')
+      else if (code === 'SAME_PASSWORD')            setPwError('A nova senha deve ser diferente da atual.')
+      else if (code === 'VALIDATION_ERROR')         setPwError('Dados inválidos — verifique o tamanho da senha.')
+      else                                          setPwError('Não foi possível alterar a senha. Tente novamente.')
+    } finally {
+      setPwLoading(false)
+    }
+  }
+
   async function refreshUser() {
     try {
       const { data } = await api.get('/auth/me')
@@ -979,6 +1026,82 @@ function MinhaContaTab() {
                 onCancel={() => setTwoFAOpen(null)}
               />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change-password modal — current / new / confirm. Mirrors the 2FA
+          modal styling so the security panel feels consistent. */}
+      {pwOpen && (
+        <div
+          className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => { if (!pwLoading) setPwOpen(false) }}
+        >
+          <div
+            className="w-full max-w-[420px] bg-[#13161f] border border-[#1f232e] rounded-2xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#1f232e]">
+              <h2 className="text-sm font-bold text-white">Alterar senha</h2>
+              <button
+                onClick={() => { if (!pwLoading) setPwOpen(false) }}
+                className="text-[#8b8f9a] hover:text-white"
+                aria-label="Fechar"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {pwSuccess ? (
+              <div className="px-5 py-8 flex flex-col items-center text-center gap-3">
+                <CheckCircle2 size={36} className="text-green-400" />
+                <p className="text-sm font-semibold text-white">Senha alterada com sucesso.</p>
+                <p className="text-xs text-[#8b8f9a]">Use a nova senha nos próximos logins.</p>
+              </div>
+            ) : (
+              <div className="px-5 py-5 flex flex-col gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-[#8b8f9a]">Senha atual</span>
+                  <input
+                    autoFocus
+                    type="password"
+                    value={pwCurrent}
+                    onChange={(e) => setPwCurrent(e.target.value)}
+                    className="w-full bg-[#1a1e2a] border border-[#1f232e] rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500/60"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-[#8b8f9a]">Nova senha (mín. 6 caracteres)</span>
+                  <input
+                    type="password"
+                    value={pwNew}
+                    onChange={(e) => setPwNew(e.target.value)}
+                    className="w-full bg-[#1a1e2a] border border-[#1f232e] rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500/60"
+                  />
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-[11px] text-[#8b8f9a]">Confirmar nova senha</span>
+                  <input
+                    type="password"
+                    value={pwConfirm}
+                    onChange={(e) => setPwConfirm(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') submitChangePassword() }}
+                    className="w-full bg-[#1a1e2a] border border-[#1f232e] rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500/60"
+                  />
+                </label>
+                {pwError && (
+                  <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+                    {pwError}
+                  </p>
+                )}
+                <button
+                  onClick={submitChangePassword}
+                  disabled={pwLoading}
+                  className="mt-1 w-full h-10 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm font-bold text-white transition-colors disabled:opacity-50"
+                >
+                  {pwLoading ? 'Alterando…' : 'Alterar senha'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1125,7 +1248,10 @@ function MinhaContaTab() {
               <div>
                 <div className="text-sm font-semibold text-white mb-0.5">Senha</div>
                 <div className="text-xs text-[#8b8f9a] mb-1.5">Alterar a senha da sua conta</div>
-                <button className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors">
+                <button
+                  onClick={openPasswordModal}
+                  className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors"
+                >
                   Mudar
                 </button>
               </div>
