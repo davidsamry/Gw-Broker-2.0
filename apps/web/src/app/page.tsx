@@ -1,599 +1,459 @@
-'use client'
-
-import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import { useAuthStore, useCurrentAccount } from '@/store/auth'
-import { useOperationsStore } from '@/store/operations'
-import { GraduationCap, Plus, Bell, ChevronDown, X } from 'lucide-react'
-import { getAccountLevel } from '@/lib/accountLevel'
-import { Sidebar } from '@/components/layout/Sidebar'
-import { Header } from '@/components/layout/Header'
+import Link from 'next/link'
+import {
+  ArrowRight, ArrowUpRight, BarChart3, Bitcoin, Banknote, Clock,
+  Globe, LineChart, ShieldCheck, Smartphone, TrendingUp, Wallet, Zap,
+} from 'lucide-react'
 import { Logo } from '@/components/layout/Logo'
-import { MobileNav } from '@/components/layout/MobileNav'
-import { TradingChart } from '@/components/trading/TradingChart'
-import { TradingPanel } from '@/components/trading/TradingPanel'
-import { TradingCompactCard } from '@/components/trading/TradingCompactCard'
-import { AccountSwitchModal } from '@/components/layout/AccountSwitchModal'
-import { AssetInfoModal } from '@/components/trading/AssetInfoModal'
-import { AssetSelectorModal } from '@/components/trading/AssetSelectorModal'
-import { NiveisModal } from '@/components/layout/NiveisModal'
-import { SupportPanel } from '@/components/layout/SupportPanel'
-import { ContaPage } from '@/components/conta/ContaPage'
-import { HistoricoPanel } from '@/components/layout/HistoricoPanel'
-import { RankingPanel } from '@/components/layout/RankingPanel'
-import { BonusPanel } from '@/components/layout/BonusPanel'
-import { ConfiguracoesPanel, type TradeSettings } from '@/components/layout/ConfiguracoesPanel'
-import { DepositoModal } from '@/components/deposito/DepositoModal'
-import { BonusWelcomeModal } from '@/components/layout/BonusWelcomeModal'
-import { AccountDropdown } from '@/components/layout/AccountDropdown'
-import { ASSETS, type Asset, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
-import { useBinanceTicker } from '@/lib/binanceMarket'
-import { fetchMarketAssets, fetchDisabledAssetIds } from '@/lib/marketApi'
-import { useOperationsStream } from '@/lib/operationsStream'
-import { api } from '@/lib/api'
-import { cn } from '@/lib/utils'
 
-type SidebarTab = 'TRADE' | 'HISTORICO' | 'RANKING' | 'SUPORTE' | 'CONTA' | 'COPY' | 'BONUS'
+export const metadata = {
+  title: 'VX Global — Negocie opções digitais em segundos',
+  description:
+    'Plataforma profissional de opções digitais com gráficos em tempo real, mais de 200 ativos, demo gratuita e saques rápidos via PIX.',
+}
 
-// ── localStorage-backed asset tabs (persist across sessions) ──────────────
-// IDs only — full Asset objects are resolved against ASSETS on read so a
-// catalog change (asset removed / renamed) doesn't crash; missing IDs are
-// silently dropped.
-//
-// IMPORTANT: localStorage is read inside a useEffect, NOT inside the
-// useState initializer. Reading from useState would diverge between SSR
-// (typeof window === 'undefined' → defaults) and the client's first
-// render (reads persisted values), causing a hydration mismatch on the
-// asset tabs (FlagPair tree differs).
-const OPEN_ASSETS_KEY     = 'vx:openAssetIds'
-const SELECTED_ASSET_KEY  = 'vx:selectedAssetId'
-const DEFAULT_OPEN_ASSETS = [ASSETS[0], ASSETS[3]]
-const DEFAULT_SELECTED    = ASSETS[3]
-
-export default function TradingPage() {
-  const router        = useRouter()
-  const authStore     = useAuthStore()
-  const currentAccount = useCurrentAccount(authStore)
-
-  // Live operations sync — opens an SSE to /operations/stream so trades
-  // placed via the Bot API (or on a second logged-in device) appear in
-  // this tab instantly + resolution credits show up without reload.
-  useOperationsStream()
-
-  useEffect(() => {
-    authStore.init().then(() => {
-      if (!useAuthStore.getState().user) router.replace('/login')
-    })
-  }, [])
-
-  // Pre-warm the API connection: opens TLS + TCP + CORS preflight on page load
-  // so the first trade doesn't pay the ~340ms handshake cost. Cheap fire-and-
-  // forget GET — server returns 200 in <5ms.
-  useEffect(() => {
-    api.get('/health').catch(() => { /* silent: warming, not blocking */ })
-  }, [])
-
-  useEffect(() => {
-    let active = true
-
-    async function loadMarketAssets() {
-      try {
-        // Parallel: Binance assets come pre-filtered by admin status
-        // (handled server-side in listBinanceAssets). OTC entries live
-        // in mockData.ts on the frontend, so we also fetch the list of
-        // admin-disabled IDs to hide them client-side.
-        const [binanceAssets, disabledIds] = await Promise.all([
-          fetchMarketAssets('BINANCE'),
-          fetchDisabledAssetIds().catch(() => [] as string[]),
-        ])
-        if (!active || binanceAssets.length === 0) return
-
-        const disabled = new Set(disabledIds)
-        const internalAssets = ASSETS.filter(
-          (asset) => asset.source !== 'BINANCE' && !disabled.has(asset.id),
-        )
-        const nextAssets = [...internalAssets, ...binanceAssets]
-
-        setAssets(nextAssets)
-        setSelectedAsset((prev) => nextAssets.find((asset) => asset.id === prev.id) ?? prev)
-        setOpenAssets((prev) => prev.map((asset) => nextAssets.find((next) => next.id === asset.id) ?? asset))
-      } catch {
-        if (active) setAssets(ASSETS)
-      }
-    }
-
-    loadMarketAssets()
-    return () => { active = false }
-  }, [])
-
-  const [assets, setAssets] = useState<Asset[]>(ASSETS)
-  // openAssets + selectedAsset persist across sessions in localStorage so
-  // the user comes back to the same tabs they last had open. Stored as
-  // bare IDs and re-resolved against ASSETS after mount (NOT in the
-  // useState initializer — that would cause a hydration mismatch since
-  // SSR can't read localStorage and the asset tab tree would diverge).
-  const [selectedAsset, setSelectedAsset] = useState<Asset>(DEFAULT_SELECTED)
-  const [openAssets,    setOpenAssets]    = useState<Asset[]>(DEFAULT_OPEN_ASSETS)
-
-  // After hydration, restore the user's last-seen tabs. Defaults render
-  // for ~16ms before this fires, but the swap is invisible because the
-  // chart and trading panel hide until auth.init resolves anyway.
-  // `restoredRef` flips to true after the restore completes — the persist
-  // effects below check it to avoid overwriting the persisted state with
-  // the defaults on initial mount (effects fire even when state hasn't
-  // changed yet, so without the guard the defaults would clobber the
-  // user's saved tabs on every page load).
-  const restoredRef = useRef(false)
-  useEffect(() => {
-    if (typeof window === 'undefined') { restoredRef.current = true; return }
-    try {
-      const raw = localStorage.getItem(OPEN_ASSETS_KEY)
-      if (raw) {
-        const ids = JSON.parse(raw) as unknown
-        if (Array.isArray(ids)) {
-          const resolved = ids
-            .map((id) => ASSETS.find((a) => a.id === id))
-            .filter((a): a is Asset => !!a)
-          if (resolved.length > 0) setOpenAssets(resolved)
-        }
-      }
-      const selId = localStorage.getItem(SELECTED_ASSET_KEY)
-      if (selId) {
-        const sel = ASSETS.find((a) => a.id === selId)
-        if (sel) setSelectedAsset(sel)
-      }
-    } catch { /* quota / parse / disabled */ }
-    restoredRef.current = true
-  }, [])
-
-  // Persist on every change. Guarded by restoredRef so the initial mount
-  // (still rendering defaults) doesn't write defaults to localStorage
-  // before the restore effect above has had a chance to read the
-  // previously persisted values.
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!restoredRef.current) return
-    try { localStorage.setItem(OPEN_ASSETS_KEY, JSON.stringify(openAssets.map(a => a.id))) }
-    catch { /* quota / disabled */ }
-  }, [openAssets])
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!restoredRef.current) return
-    try { localStorage.setItem(SELECTED_ASSET_KEY, selectedAsset.id) }
-    catch { /* quota / disabled */ }
-  }, [selectedAsset])
-  const [switchModal, setSwitchModal] = useState<'demo' | 'real' | null>(null)
-  const [assetInfoOpen, setAssetInfoOpen] = useState(false)
-  const [assetSelectorOpen, setAssetSelectorOpen] = useState(false)
-  const [depositoOpen, setDepositoOpen] = useState(false)
-  // Optional bonus code to pre-apply when the deposit modal opens. Set by
-  // the BonusPanel's "Depositar agora" CTA so the user doesn't have to
-  // copy/paste the code manually.
-  const [depositoBonusCode, setDepositoBonusCode] = useState<string | undefined>(undefined)
-
-  // Deep-link support — landing on the trading page with `?deposit=1` or
-  // `?bonus=CODE` (or both) opens the deposit modal automatically, with
-  // the bonus code pre-applied when present. Same effect as clicking the
-  // BonusPanel's "Depositar agora" CTA. Used by email campaigns, shareable
-  // promo links, and the BÔNUS welcome modal's call-to-action so the
-  // recipient lands one step away from depositing.
-  //
-  // After consuming the params we wipe them via history.replaceState so a
-  // page refresh doesn't reopen the modal indefinitely. We use the raw
-  // History API (not router.replace) because router.replace would re-run
-  // the page render and unmount the modal we just opened.
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const params  = new URLSearchParams(window.location.search)
-    const bonus   = params.get('bonus')?.trim() || null
-    const wantOpen = params.get('deposit') === '1' || !!bonus
-    if (!wantOpen) return
-    if (bonus) setDepositoBonusCode(bonus)
-    setDepositoOpen(true)
-    const url = new URL(window.location.href)
-    url.searchParams.delete('deposit')
-    url.searchParams.delete('bonus')
-    window.history.replaceState({}, '', url.toString())
-  }, [])
-  const [contaInitialTab, setContaInitialTab] = useState<'retirada' | 'minha-conta'>('minha-conta')
-  const [configOpen, setConfigOpen] = useState(false)
-  const [niveisOpen, setNiveisOpen] = useState(false)
-  const [theme, setTheme] = useState<'diurno' | 'crepusculo' | 'noite'>('noite')
-  const [tradeSettings, setTradeSettings] = useState<TradeSettings>({
-    autoScroll: true,
-    performanceMode: true,
-    shortLabels: true,
-  })
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('TRADE')
-  const [mobileAccountOpen, setMobileAccountOpen] = useState(false)
-  const [activeTrades, setActiveTrades] = useState<ActiveTrade[]>([])
-  const [chartTradeEvents, setChartTradeEvents] = useState<ChartTradeEvent[]>([])
-
-  // ── Chart-marker sync for remote/bot trades ───────────────────────────
-  // Locally-placed trades go through handleTradePlaced → activeTrades.
-  // Trades opened via the Bot API or on another logged-in device arrive
-  // via /operations/stream → useOperationsStream upserts into the store,
-  // but the chart's activeTrades wouldn't see them without this effect.
-  //
-  // Adds OPEN ops (for the currently-selected asset only) that aren't
-  // already in activeTrades, and prunes activeTrades entries whose store
-  // status flipped away from OPEN (resolved or cancelled). Entries the
-  // store hasn't seen yet (fresh local trades pending SSE delivery) stay
-  // — they'll be reconciled on the next pass.
-  const storeOps = useOperationsStore((s) => s.operations)
-  // BRT-shifted epoch seconds (UTC - 3h) — matches what placeTrade uses
-  // for entryTime/expiryTime so the chart renders both with one formula.
-  const BRT_OFFSET = -3 * 3600
-  useEffect(() => {
-    setActiveTrades((prev) => {
-      const prevIds        = new Set(prev.map((t) => t.id))
-      const storeOpenIds   = new Set(storeOps.filter((o) => o.status === 'OPEN').map((o) => o.id))
-      const storeKnownIds  = new Set(storeOps.map((o) => o.id))
-
-      // 1. Drop entries the store now reports as resolved/cancelled.
-      //    Untouched if the store doesn't know the trade at all (fresh
-      //    optimistic local trade — SSE will deliver shortly).
-      const trimmed = prev.filter((t) => !storeKnownIds.has(t.id) || storeOpenIds.has(t.id))
-
-      // 2. Add remote OPEN ops for the current asset that we don't yet have.
-      const additions = storeOps
-        .filter((o) => o.status === 'OPEN' && o.assetId === selectedAsset.id && !prevIds.has(o.id))
-        .map((o) => ({
-          id:         o.id,
-          entryPrice: parseFloat(o.entryPrice ?? '0'),
-          entryTime:  Math.floor(new Date(o.openedAt).getTime() / 1000) + BRT_OFFSET,
-          expiryTime: Math.floor(new Date(o.expiresAt).getTime() / 1000) + BRT_OFFSET,
-          direction:  o.direction,
-          amount:     parseFloat(o.amount),
-          payout:     o.payout,
-        }))
-
-      if (trimmed.length === prev.length && additions.length === 0) return prev
-      return [...trimmed, ...additions]
-    })
-  }, [storeOps, selectedAsset.id])
-  const binanceTicker = useBinanceTicker(selectedAsset.source === 'BINANCE' ? selectedAsset.marketSymbol : undefined)
-  const displayPrice  = binanceTicker?.price ?? selectedAsset.price
-  // Signals to the chart whether `displayPrice` is fresh stream data
-  // (true) or the stale static asset.price fallback (false). Lets the
-  // chart's initial-sync logic distinguish "trust this price" from
-  // "ignore until the stream arrives" — eliminates the load-time
-  // candle jump. Binance kline WS is the only fresh source now.
-  const hasFreshTicker = binanceTicker != null
-
-  function handleTradePlaced(trade: ChartTradeEvent | null) {
-    // Legacy null call from TradingPanel's cleanup timeout is now redundant:
-    // we handle per-trade cleanup ourselves via setTimeout below.
-    if (!trade) return
-
-    if (trade.status === 'OPEN') {
-      setActiveTrades(prev => [
-        ...prev.filter(t => t.id !== trade.id),
-        {
-          id:         trade.id,
-          entryPrice: trade.entryPrice,
-          entryTime:  trade.entryTime,
-          expiryTime: trade.expiryTime,
-          direction:  trade.direction,
-          amount:     trade.amount,
-          payout:     trade.payout,
-        },
-      ])
-    } else if (trade.status === 'CANCELLED') {
-      // Optimistic trade failed at the server — silently remove the marker.
-      // Stake refund + balance reconciliation happen at the call site.
-      setActiveTrades(prev => prev.filter(t => t.id !== trade.id))
-    } else { // RESOLVED
-      setActiveTrades(prev => prev.filter(t => t.id !== trade.id))
-      // Persist the result card on the chart until the user clicks its X.
-      // (Previously auto-dismissed after 4s — founder feedback: traders want
-      // to keep the result visible while they analyse the next setup.)
-      setChartTradeEvents(prev => [...prev.filter(t => t.id !== trade.id), trade])
-    }
-
-    // No refreshAccounts() — balance is now mutated locally by the trading
-    // components via applyBalanceDelta. Next /auth/me revalidate (page reload
-    // or stale-while-revalidate window) reconciles any drift.
-  }
-
-  const isDemo      = authStore.isDemo
-  const accounts    = authStore.user?.accounts ?? []
-  const demoBalance = parseFloat(accounts.find(a => a.type === 'DEMO')?.balance ?? '0')
-  const realBalance = parseFloat(accounts.find(a => a.type === 'REAL')?.balance ?? '0')
-  const balance     = isDemo ? demoBalance : realBalance
-
-  // Mobile-header level icon + chip — same logic as desktop Header.tsx.
-  // The `mounted` gate avoids a hydration mismatch: SSR has no auth, so
-  // isDemo defaults to true (DEMO) AND realBalance is 0. The client,
-  // after rehydrating from localStorage, may show REAL with a non-zero
-  // balance — which would swap the lucide icon component itself
-  // (different SVG <path> tree). React's `suppressHydrationWarning` only
-  // covers the immediate element, not child SVG paths, so we must keep
-  // the rendered tree identical on first paint. Defer ALL account-state
-  // reads (isDemo + balance + realBalance) until after mount; render the
-  // DEMO chip during SSR + first client paint, then swap in a single tick.
-  const [headerMounted, setHeaderMounted] = useState(false)
-  useEffect(() => { setHeaderMounted(true) }, [])
-  const safeIsDemo  = headerMounted ? isDemo  : true
-  const safeBalance = headerMounted ? balance : 0
-  const level       = getAccountLevel(headerMounted ? realBalance : 0)
-
-  function handleSelectAsset(asset: Asset) {
-    setSelectedAsset(asset)
-    if (!openAssets.find((a) => a.id === asset.id)) {
-      setOpenAssets((prev) => [...prev, asset])
-    }
-  }
-
-  function handleCloseAsset(asset: Asset) {
-    const remaining = openAssets.filter((a) => a.id !== asset.id)
-    setOpenAssets(remaining)
-    if (selectedAsset.id === asset.id && remaining.length > 0) {
-      setSelectedAsset(remaining[remaining.length - 1])
-    }
-  }
-
-  function handleSelectDemo() {
-    if (!isDemo) { authStore.setIsDemo(true); setSwitchModal('demo') }
-  }
-
-  function handleSelectReal() {
-    if (isDemo) { authStore.setIsDemo(false); setSwitchModal('real') }
-  }
-
-  // ─── Shared content renderers ──────────────────────────────────────────────
-
-  function renderMainContent(isMobile = false) {
-    if (sidebarTab === 'SUPORTE') {
-      // On mobile the user opens Suporte to read tickets and type replies —
-      // the chart is irrelevant there and would only steal vertical space.
-      // Show the panel full-screen, same UX pattern as CONTA.
-      if (isMobile) return <SupportPanel onClose={() => setSidebarTab('TRADE')} />
-      return (
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          <SupportPanel onClose={() => setSidebarTab('TRADE')} />
-          <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        </div>
-      )
-    }
-    if (sidebarTab === 'CONTA')     return <ContaPage key={contaInitialTab} initialTab={contaInitialTab} onClose={() => setSidebarTab('TRADE')} />
-    if (sidebarTab === 'HISTORICO') {
-      // On mobile the user wants to scan their full history — chart on top
-      // would steal vertical space. Show the panel full-screen, matching
-      // the SUPORTE/CONTA pattern.
-      if (isMobile) return <HistoricoPanel onClose={() => setSidebarTab('TRADE')} isDemo={authStore.isDemo} />
-      return (
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          <HistoricoPanel onClose={() => setSidebarTab('TRADE')} isDemo={authStore.isDemo} />
-          <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        </div>
-      )
-    }
-    if (sidebarTab === 'RANKING') {
-      // Same mobile-vs-desktop split as HISTORICO / SUPORTE: on mobile show
-      // only the panel, on desktop pair it with the chart.
-      if (isMobile) return <RankingPanel onClose={() => setSidebarTab('TRADE')} userName={authStore.user?.name} userCode="br" />
-      return (
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          <RankingPanel onClose={() => setSidebarTab('TRADE')} userName={authStore.user?.name} userCode="br" />
-          <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        </div>
-      )
-    }
-    if (sidebarTab === 'BONUS') {
-      // Card CTA opens the deposit modal with the bonus code pre-applied.
-      const openWithBonus = (code: string) => {
-        setDepositoBonusCode(code)
-        setDepositoOpen(true)
-      }
-      if (isMobile) return <BonusPanel onClose={() => setSidebarTab('TRADE')} onDeposit={openWithBonus} />
-      return (
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          <BonusPanel onClose={() => setSidebarTab('TRADE')} onDeposit={openWithBonus} />
-          <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        </div>
-      )
-    }
-    if (sidebarTab === 'COPY')      return <ComingSoon title="Copy Trading" message="Em breve você poderá copiar automaticamente as melhores operações de traders profissionais." onClose={() => setSidebarTab('TRADE')} />
-
-    // TRADE (default)
-    return (
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {!isMobile && configOpen && (
-          <ConfiguracoesPanel onClose={() => setConfigOpen(false)} theme={theme} onThemeChange={setTheme} settings={tradeSettings} onSettingsChange={setTradeSettings} />
-        )}
-        <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        {!isMobile && <TradingPanel asset={selectedAsset} marketPrice={displayPrice} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={handleTradePlaced} />}
-      </div>
-    )
-  }
-
+export default function LandingPage() {
   return (
-    <div className="h-full bg-[#151822] overflow-hidden">
-
-      {/* ── DESKTOP layout (md+) ─────────────────────────────────────────── */}
-      <div className="hidden md:flex h-full overflow-hidden">
-        <Sidebar activeTab={sidebarTab} onTabChange={setSidebarTab} onSettings={() => setConfigOpen(!configOpen)} />
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <Header
-            selectedAsset={selectedAsset}
-            onSelectAsset={handleSelectAsset}
-            openAssets={openAssets}
-            onOpenAsset={handleSelectAsset}
-            onCloseAsset={handleCloseAsset}
-            onOpenSelector={() => setAssetSelectorOpen(true)}
-            onDeposito={() => setDepositoOpen(true)}
-            onRetirada={() => { setContaInitialTab('retirada'); setSidebarTab('CONTA') }}
-            onTransacoes={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA') }}
-            onOperacoes={() => setSidebarTab('TRADE')}
-            onMinhaConta={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA') }}
-            onNiveis={() => setNiveisOpen(true)}
-            onLogout={() => { authStore.logout().then(() => router.replace('/login')) }}
-            onResetDemo={() => authStore.resetDemo()}
-            isDemo={isDemo}
-            onSelectDemo={handleSelectDemo}
-            onSelectReal={handleSelectReal}
-            demoBalance={demoBalance}
-            realBalance={realBalance}
-            balance={balance}
-            userEmail={authStore.user?.email ?? ''}
-            userId={authStore.user?.id ?? ''}
-          />
-          <div className="flex-1 flex min-h-0 overflow-hidden relative">
-            {renderMainContent(false)}
-          </div>
-        </div>
-      </div>
-
-      {/* ── MOBILE layout (< md) ─────────────────────────────────────────── */}
-      <div className="flex md:hidden h-full flex-col overflow-hidden">
-
-        {/* Mobile header — taller (h-14 vs the previous h-12) so the
-            balance chip + deposit CTA have proper tap targets and
-            breathing room. */}
-        <header className="flex items-center justify-between gap-2 px-4 h-14 bg-[#1d2130] border-b border-[#2a2e3b] flex-shrink-0">
-          {/* Logo */}
-          <div className="flex-shrink min-w-0">
-            <Logo size="sm" />
-          </div>
-
-
-          {/* Right: balance + deposit */}
-          <div className="flex items-center gap-1.5 min-w-0">
-            {/* Balance chip — shrinks if needed; h-10 sets a consistent
-                size with the deposit button alongside it. Icon + label +
-                balance are all gated on `headerMounted` so the SVG tree
-                matches between SSR and first client paint (see the long
-                comment by safeIsDemo/safeBalance — same reason as the
-                desktop Header.tsx fix). */}
-            <div className="relative min-w-0">
-              <button
-                onClick={() => setMobileAccountOpen(v => !v)}
-                className="flex items-center gap-1.5 h-10 px-2.5 rounded-lg bg-[#252a3a] border border-[#2a2e3b] max-w-full"
-              >
-                {safeIsDemo
-                  ? <GraduationCap size={18} className="text-yellow-400 flex-shrink-0" />
-                  : <level.Icon size={18} className={cn(level.color, 'flex-shrink-0')} />
-                }
-                <div className="text-left min-w-0">
-                  <div className={cn('text-[10px] font-bold leading-tight whitespace-nowrap', safeIsDemo ? 'text-yellow-400' : 'text-green-400')}>
-                    {safeIsDemo ? 'CONTA DEMO' : 'CONTA REAL'}
-                  </div>
-                  <div className="text-sm font-bold text-white leading-tight whitespace-nowrap">
-                    R${safeBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                </div>
-                <ChevronDown size={12} className={cn('text-[#8b8f9a] transition-transform flex-shrink-0', mobileAccountOpen && 'rotate-180')} />
-              </button>
-
-              {mobileAccountOpen && (
-                <div className="absolute top-full right-0 mt-1 z-50">
-                  <AccountDropdown
-                    isDemo={isDemo}
-                    onSelectDemo={() => { handleSelectDemo(); setMobileAccountOpen(false) }}
-                    onSelectReal={() => { handleSelectReal(); setMobileAccountOpen(false) }}
-                    demoBalance={demoBalance}
-                    realBalance={realBalance}
-                    userEmail={authStore.user?.email ?? ''}
-                    userId={authStore.user?.id ?? ''}
-                    onClose={() => setMobileAccountOpen(false)}
-                    onLogout={() => { authStore.logout().then(() => router.replace('/login')) }}
-                    onResetDemo={() => authStore.resetDemo()}
-                    onDeposito={() => { setDepositoOpen(true); setMobileAccountOpen(false) }}
-                    onRetirada={() => { setContaInitialTab('retirada'); setSidebarTab('CONTA'); setMobileAccountOpen(false) }}
-                    onTransacoes={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA'); setMobileAccountOpen(false) }}
-                    onOperacoes={() => { setSidebarTab('TRADE'); setMobileAccountOpen(false) }}
-                    onMinhaConta={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA'); setMobileAccountOpen(false) }}
-                    onNiveis={() => { setNiveisOpen(true); setMobileAccountOpen(false) }}
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Deposit — text hides on very narrow screens (< 380px).
-                h-10 matches the balance chip alongside for a consistent
-                row height on the new (taller) mobile header. */}
-            <button
-              onClick={() => setDepositoOpen(true)}
-              className="flex items-center gap-1.5 h-10 px-3 rounded-lg bg-green-500 hover:bg-green-400 text-sm font-bold text-white transition-colors flex-shrink-0"
-            >
-              <Plus size={15} strokeWidth={2.5} />
-              <span className="hidden min-[380px]:inline">Depósito</span>
-            </button>
-          </div>
-        </header>
-
-        {/* Main content area */}
-        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-          {renderMainContent(true)}
-        </div>
-
-        {/* Mobile compact trading card (always visible on TRADE tab) */}
-        {sidebarTab === 'TRADE' && (
-          <TradingCompactCard
-            asset={selectedAsset}
-            marketPrice={displayPrice}
-            accountId={currentAccount?.id}
-            onOpenSelector={() => setAssetSelectorOpen(true)}
-            onTradePlaced={handleTradePlaced}
-          />
-        )}
-
-        {/* Mobile bottom navigation */}
-        <MobileNav activeTab={sidebarTab} onTabChange={setSidebarTab} />
-      </div>
-
-      {/* ── Global modals (shared desktop + mobile) ──────────────────────── */}
-      {niveisOpen && (
-        <NiveisModal realBalance={realBalance} onClose={() => setNiveisOpen(false)} />
-      )}
-      {assetSelectorOpen && (
-        <AssetSelectorModal selectedAsset={selectedAsset} assets={assets} onSelect={handleSelectAsset} onClose={() => setAssetSelectorOpen(false)} />
-      )}
-      {assetInfoOpen && (
-        <AssetInfoModal asset={selectedAsset} marketPrice={displayPrice} onClose={() => setAssetInfoOpen(false)} onTrade={() => setAssetInfoOpen(false)} />
-      )}
-      {depositoOpen && (
-        <DepositoModal
-          onClose={() => { setDepositoOpen(false); setDepositoBonusCode(undefined) }}
-          initialBonusCode={depositoBonusCode}
-        />
-      )}
-      {switchModal && (
-        <AccountSwitchModal switchedTo={switchModal} demoBalance={demoBalance} realBalance={realBalance} onClose={() => setSwitchModal(null)} />
-      )}
-
-      {/* Welcome bonus — opens once per session AFTER auth hydrates.
-          Self-dismisses on X, backdrop click, or "Depositar agora" (which
-          also pre-fills the deposit modal with the bonus code). */}
-      <BonusWelcomeModal
-        enabled={!!authStore.user && !authStore.loading}
-        onDeposit={(code) => { setDepositoBonusCode(code); setDepositoOpen(true) }}
-      />
+    <div className="min-h-screen bg-[#0b0d12] text-white antialiased">
+      <SiteHeader />
+      <main>
+        <Hero />
+        <StatsBar />
+        <Features />
+        <Markets />
+        <HowItWorks />
+        <FinalCTA />
+      </main>
+      <SiteFooter />
     </div>
   )
 }
 
-function ComingSoon({ title, message, onClose }: { title: string; message: string; onClose?: () => void }) {
+// ────────────────────────────────────────────────────────────────────────────
+// Header
+// ────────────────────────────────────────────────────────────────────────────
+
+function SiteHeader() {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 text-center bg-[#151822] relative">
-      {onClose && (
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 w-9 h-9 flex items-center justify-center rounded-full text-[#8b8f9a] hover:text-white hover:bg-white/10 transition-colors"
-          title="Fechar"
-        >
-          <X size={16} />
-        </button>
-      )}
-      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-cyan-400/20 border border-blue-500/30 flex items-center justify-center mb-5">
-        <span className="text-2xl">🚀</span>
+    <header className="sticky top-0 z-40 border-b border-[#1f232e] bg-[#0b0d12]/85 backdrop-blur">
+      <div className="mx-auto max-w-7xl flex items-center justify-between px-4 sm:px-6 lg:px-8 h-16">
+        <Logo size="md" />
+
+        <nav className="hidden md:flex items-center gap-7 text-sm text-[#cfd2d8]">
+          <a href="#mercados"      className="hover:text-white transition-colors">Mercados</a>
+          <a href="#como-funciona" className="hover:text-white transition-colors">Como funciona</a>
+          <a href="#features"      className="hover:text-white transition-colors">Plataforma</a>
+        </nav>
+
+        <div className="flex items-center gap-2">
+          <Link
+            href="/login"
+            className="hidden sm:inline-flex items-center px-4 h-9 rounded-lg text-sm font-semibold text-white/90 hover:text-white transition-colors"
+          >
+            Entrar
+          </Link>
+          <Link
+            href="/register"
+            className="inline-flex items-center gap-1.5 px-4 h-9 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-sm font-bold text-white transition-colors"
+          >
+            Criar conta
+            <ArrowRight size={14} />
+          </Link>
+        </div>
       </div>
-      <h2 className="text-white text-xl font-bold mb-2">{title}</h2>
-      <p className="text-[#8b8f9a] text-sm max-w-md leading-relaxed">{message}</p>
-      <span className="mt-6 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-400 text-[10px] font-bold tracking-widest uppercase">
-        Em breve
-      </span>
+    </header>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Hero
+// ────────────────────────────────────────────────────────────────────────────
+
+function Hero() {
+  return (
+    <section className="relative overflow-hidden">
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-32 -left-24 w-[520px] h-[520px] rounded-full bg-emerald-500/10 blur-3xl" />
+        <div className="absolute top-20 right-0 w-[420px] h-[420px] rounded-full bg-blue-500/10 blur-3xl" />
+      </div>
+
+      <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-16 pb-20 lg:pt-24 lg:pb-28 grid lg:grid-cols-[1.05fr_1fr] gap-10 lg:gap-16 items-center">
+        <div>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[11px] font-bold tracking-wider uppercase text-emerald-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Plataforma ao vivo
+          </span>
+
+          <h1 className="mt-5 text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.05]">
+            Negocie opções digitais em <span className="text-emerald-400">segundos</span>.
+          </h1>
+
+          <p className="mt-5 text-base sm:text-lg text-[#cfd2d8] max-w-xl leading-relaxed">
+            Gráficos em tempo real, mais de 200 ativos entre Forex, Criptomoedas e OTC.
+            Comece grátis com a conta demo de R$ 10.000.
+          </p>
+
+          <div className="mt-8 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <Link
+              href="/register"
+              className="inline-flex items-center justify-center gap-2 h-12 px-6 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-base font-bold text-white transition-colors shadow-[0_8px_24px_-8px_rgba(16,185,129,0.5)]"
+            >
+              Começar agora
+              <ArrowRight size={18} />
+            </Link>
+            <Link
+              href="/login"
+              className="inline-flex items-center justify-center gap-2 h-12 px-6 rounded-lg border border-[#2a2f3b] bg-[#13161f] hover:bg-[#1a1e2a] text-base font-semibold text-white transition-colors"
+            >
+              Testar conta demo
+            </Link>
+          </div>
+
+          <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-[#8b8f9a]">
+            <span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-emerald-400" /> Saques via PIX</span>
+            <span className="flex items-center gap-1.5"><Clock      size={14} className="text-emerald-400" /> Operações a partir de 30s</span>
+            <span className="flex items-center gap-1.5"><Smartphone size={14} className="text-emerald-400" /> Web e mobile</span>
+          </div>
+        </div>
+
+        <HeroChartCard />
+      </div>
+    </section>
+  )
+}
+
+function HeroChartCard() {
+  return (
+    <div className="relative">
+      <div className="absolute -inset-4 rounded-2xl bg-gradient-to-br from-emerald-500/20 via-transparent to-blue-500/20 blur-2xl" aria-hidden />
+      <div className="relative rounded-2xl border border-[#1f232e] bg-[#13161f]/90 backdrop-blur p-5 shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-lg bg-orange-500/15 border border-orange-500/30 flex items-center justify-center">
+              <Bitcoin size={18} className="text-orange-400" />
+            </div>
+            <div>
+              <div className="text-sm font-bold text-white">BTC/USD</div>
+              <div className="text-[10px] text-[#8b8f9a]">Bitcoin</div>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-sm font-bold text-emerald-400 tabular-nums">$ 72.418,30</div>
+            <div className="text-[10px] text-emerald-400 flex items-center gap-1 justify-end">
+              <TrendingUp size={10} /> +2,84%
+            </div>
+          </div>
+        </div>
+
+        <div className="relative h-44 rounded-lg border border-[#1f232e] bg-[#0f1117] overflow-hidden">
+          <svg viewBox="0 0 400 160" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="hero-area" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"   stopColor="rgb(16,185,129)" stopOpacity="0.35" />
+                <stop offset="100%" stopColor="rgb(16,185,129)" stopOpacity="0" />
+              </linearGradient>
+              <linearGradient id="hero-line" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%"   stopColor="rgb(16,185,129)" />
+                <stop offset="100%" stopColor="rgb(52,211,153)" />
+              </linearGradient>
+            </defs>
+            <g stroke="rgba(255,255,255,0.04)" strokeWidth="1">
+              <line x1="0" y1="40"  x2="400" y2="40"  />
+              <line x1="0" y1="80"  x2="400" y2="80"  />
+              <line x1="0" y1="120" x2="400" y2="120" />
+            </g>
+            <path
+              d="M0,110 L25,95 L50,100 L80,85 L110,90 L140,72 L170,80 L200,60 L230,68 L260,48 L290,55 L320,40 L350,32 L400,22 L400,160 L0,160 Z"
+              fill="url(#hero-area)"
+            />
+            <path
+              d="M0,110 L25,95 L50,100 L80,85 L110,90 L140,72 L170,80 L200,60 L230,68 L260,48 L290,55 L320,40 L350,32 L400,22"
+              fill="none"
+              stroke="url(#hero-line)"
+              strokeWidth="2.5"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+            <circle cx="400" cy="22" r="4" fill="rgb(52,211,153)" />
+            <circle cx="400" cy="22" r="9" fill="rgb(52,211,153)" fillOpacity="0.2" />
+          </svg>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2.5">
+          <div className="rounded-lg bg-emerald-500/15 border border-emerald-500/40 px-4 py-3 flex items-center justify-between">
+            <span className="text-xs font-bold text-emerald-400">COMPRAR</span>
+            <ArrowUpRight size={16} className="text-emerald-400" />
+          </div>
+          <div className="rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-3 flex items-center justify-between">
+            <span className="text-xs font-bold text-red-400">VENDER</span>
+            <ArrowUpRight size={16} className="text-red-400 rotate-90" />
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+          {[{ k: 'Investimento', v: 'R$ 100' }, { k: 'Tempo', v: '60s' }, { k: 'Payout', v: '92%' }].map((x) => (
+            <div key={x.k} className="rounded-lg bg-[#0f1117] border border-[#1f232e] px-2 py-2">
+              <div className="text-[9px] text-[#8b8f9a] uppercase tracking-wider">{x.k}</div>
+              <div className="text-[13px] font-bold text-white mt-0.5">{x.v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Stats
+// ────────────────────────────────────────────────────────────────────────────
+
+function StatsBar() {
+  const stats = [
+    { v: '+200',    k: 'Ativos disponíveis' },
+    { v: 'até 92%', k: 'Payout por operação' },
+    { v: '30s',     k: 'Operação mais curta' },
+    { v: '24/7',    k: 'Mercados OTC' },
+  ]
+  return (
+    <section className="border-y border-[#1f232e] bg-[#0f1117]/60">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-2 lg:grid-cols-4 gap-6">
+        {stats.map((s) => (
+          <div key={s.k} className="text-center lg:text-left">
+            <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">{s.v}</div>
+            <div className="text-xs text-[#8b8f9a] mt-1">{s.k}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Features
+// ────────────────────────────────────────────────────────────────────────────
+
+function Features() {
+  const items = [
+    {
+      icon: <LineChart size={20} className="text-emerald-400" />,
+      title: 'Gráficos profissionais',
+      text:  'Velas em tempo real, indicadores e ferramentas de desenho. A mesma experiência das mesas profissionais.',
+    },
+    {
+      icon: <Zap size={20} className="text-emerald-400" />,
+      title: 'Execução instantânea',
+      text:  'Abra e feche operações em milissegundos. Sem requote, sem atrasos.',
+    },
+    {
+      icon: <Wallet size={20} className="text-emerald-400" />,
+      title: 'PIX e saques rápidos',
+      text:  'Depósito via PIX. Retiradas processadas rapidamente, direto na sua conta.',
+    },
+    {
+      icon: <ShieldCheck size={20} className="text-emerald-400" />,
+      title: 'Segurança em primeiro lugar',
+      text:  'Autenticação em dois fatores e separação de saldo real e demo.',
+    },
+  ]
+  return (
+    <section id="features" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 lg:py-28">
+      <SectionHeading
+        eyebrow="Plataforma"
+        title="Tudo que você precisa para operar"
+        subtitle="Ferramentas projetadas para quem está começando e para quem opera sério."
+      />
+      <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {items.map((f) => (
+          <div
+            key={f.title}
+            className="rounded-xl border border-[#1f232e] bg-[#13161f] p-6 hover:border-emerald-500/40 transition-colors"
+          >
+            <div className="w-11 h-11 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
+              {f.icon}
+            </div>
+            <h3 className="mt-4 text-base font-bold text-white">{f.title}</h3>
+            <p className="mt-2 text-sm text-[#8b8f9a] leading-relaxed">{f.text}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Markets
+// ────────────────────────────────────────────────────────────────────────────
+
+function Markets() {
+  const markets = [
+    { icon: <Globe     size={18} />, label: 'Forex',        pairs: 'EUR/USD, GBP/USD, USD/JPY, +30', iconText: 'text-blue-400',   iconBg: 'bg-blue-500/10',   iconBorder: 'border-blue-500/30'   },
+    { icon: <Bitcoin   size={18} />, label: 'Criptomoedas', pairs: 'BTC, ETH, SOL, XRP, +20',         iconText: 'text-orange-400', iconBg: 'bg-orange-500/10', iconBorder: 'border-orange-500/30' },
+    { icon: <BarChart3 size={18} />, label: 'OTC',          pairs: 'Pares OTC ativos 24/7',           iconText: 'text-purple-400', iconBg: 'bg-purple-500/10', iconBorder: 'border-purple-500/30' },
+    { icon: <Banknote  size={18} />, label: 'Commodities',  pairs: 'Ouro, Prata, Petróleo, +5',       iconText: 'text-yellow-400', iconBg: 'bg-yellow-500/10', iconBorder: 'border-yellow-500/30' },
+  ]
+  return (
+    <section id="mercados" className="border-y border-[#1f232e] bg-[#0f1117]/40 py-20 lg:py-28">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <SectionHeading
+          eyebrow="Mercados"
+          title="Mais de 200 ativos para operar"
+          subtitle="Acesse os principais mercados do mundo em uma única conta."
+        />
+        <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {markets.map((m) => (
+            <div key={m.label} className="rounded-xl border border-[#1f232e] bg-[#13161f] p-6">
+              <div className={`w-11 h-11 rounded-lg ${m.iconBg} border ${m.iconBorder} flex items-center justify-center ${m.iconText}`}>
+                {m.icon}
+              </div>
+              <h3 className="mt-4 text-base font-bold text-white">{m.label}</h3>
+              <p className="mt-1.5 text-xs text-[#8b8f9a]">{m.pairs}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// How it works
+// ────────────────────────────────────────────────────────────────────────────
+
+function HowItWorks() {
+  const steps = [
+    { n: 1, title: 'Crie sua conta',   text: 'Cadastro em menos de 1 minuto. Comece com a conta demo de R$ 10.000.' },
+    { n: 2, title: 'Deposite via PIX', text: 'Depósito instantâneo a partir de R$ 50. Sem taxas escondidas.' },
+    { n: 3, title: 'Opere e saque',    text: 'Compre opções de alta ou baixa. Retire seus lucros via PIX.' },
+  ]
+  return (
+    <section id="como-funciona" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 lg:py-28">
+      <SectionHeading
+        eyebrow="Como funciona"
+        title="Comece em 3 passos simples"
+      />
+      <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-4">
+        {steps.map((s) => (
+          <div key={s.n} className="relative rounded-xl border border-[#1f232e] bg-[#13161f] p-6">
+            <div className="w-10 h-10 rounded-full bg-emerald-500 text-white font-bold flex items-center justify-center text-lg shadow-[0_6px_18px_-6px_rgba(16,185,129,0.6)]">
+              {s.n}
+            </div>
+            <h3 className="mt-5 text-lg font-bold text-white">{s.title}</h3>
+            <p className="mt-2 text-sm text-[#8b8f9a] leading-relaxed">{s.text}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Final CTA
+// ────────────────────────────────────────────────────────────────────────────
+
+function FinalCTA() {
+  return (
+    <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-24">
+      <div className="relative overflow-hidden rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-[#13161f] via-[#13161f] to-emerald-950/40 px-6 sm:px-12 py-12 sm:py-16 text-center">
+        <div aria-hidden className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-[600px] h-[300px] rounded-full bg-emerald-500/15 blur-3xl" />
+        <div className="relative">
+          <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
+            Pronto para começar a operar?
+          </h2>
+          <p className="mt-3 text-[#cfd2d8] text-base max-w-xl mx-auto">
+            Crie sua conta gratuita agora e ganhe R$ 10.000 em saldo demo para praticar.
+          </p>
+          <div className="mt-7 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <Link
+              href="/register"
+              className="inline-flex items-center justify-center gap-2 h-12 px-7 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-base font-bold text-white transition-colors shadow-[0_8px_24px_-8px_rgba(16,185,129,0.5)]"
+            >
+              Criar conta grátis
+              <ArrowRight size={18} />
+            </Link>
+            <Link
+              href="/login"
+              className="inline-flex items-center justify-center h-12 px-7 rounded-lg border border-[#2a2f3b] bg-[#0f1117] hover:bg-[#1a1e2a] text-base font-semibold text-white transition-colors"
+            >
+              Já tenho conta
+            </Link>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Footer
+// ────────────────────────────────────────────────────────────────────────────
+
+function SiteFooter() {
+  return (
+    <footer className="border-t border-[#1f232e] bg-[#0a0c11]">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 grid grid-cols-2 lg:grid-cols-4 gap-8">
+        <div className="col-span-2 lg:col-span-1">
+          <Logo size="md" />
+          <p className="mt-4 text-xs text-[#8b8f9a] leading-relaxed max-w-xs">
+            Plataforma de opções digitais para o trader moderno.
+          </p>
+        </div>
+
+        <FooterCol title="Plataforma" items={[
+          { label: 'Mercados',       href: '#mercados'      },
+          { label: 'Como funciona',  href: '#como-funciona' },
+          { label: 'Recursos',       href: '#features'      },
+        ]} />
+        <FooterCol title="Conta" items={[
+          { label: 'Entrar',      href: '/login'    },
+          { label: 'Criar conta', href: '/register' },
+        ]} />
+        <FooterCol title="Legal" items={[
+          { label: 'Termos de uso',           href: '#' },
+          { label: 'Política de privacidade', href: '#' },
+          { label: 'Aviso de risco',          href: '#' },
+        ]} />
+      </div>
+
+      <div className="border-t border-[#1f232e]">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-[11px] text-[#6f7480]">
+          <p className="max-w-3xl leading-relaxed">
+            <strong className="text-[#8b8f9a]">Aviso de risco:</strong> a negociação de opções digitais envolve risco
+            elevado e pode resultar na perda total do capital investido. Opere apenas com valores
+            que você pode se dar ao luxo de perder.
+          </p>
+          <p className="flex-shrink-0">© {new Date().getFullYear()} VX Global. Todos os direitos reservados.</p>
+        </div>
+      </div>
+    </footer>
+  )
+}
+
+function FooterCol({ title, items }: { title: string; items: { label: string; href: string }[] }) {
+  return (
+    <div>
+      <div className="text-xs font-bold text-white uppercase tracking-wider">{title}</div>
+      <ul className="mt-4 space-y-2.5">
+        {items.map((i) => (
+          <li key={i.label}>
+            <Link href={i.href} className="text-sm text-[#8b8f9a] hover:text-white transition-colors">
+              {i.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Shared
+// ────────────────────────────────────────────────────────────────────────────
+
+function SectionHeading({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle?: string }) {
+  return (
+    <div className="max-w-2xl">
+      <div className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-400">{eyebrow}</div>
+      <h2 className="mt-3 text-3xl sm:text-4xl font-extrabold tracking-tight text-white">{title}</h2>
+      {subtitle && <p className="mt-4 text-base text-[#8b8f9a] leading-relaxed">{subtitle}</p>}
     </div>
   )
 }

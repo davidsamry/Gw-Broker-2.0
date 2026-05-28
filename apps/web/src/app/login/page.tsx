@@ -90,7 +90,7 @@ function LoginPageInner() {
     setLoading(true)
     try {
       await login(email, password, twoFA ? code : undefined)
-      router.replace('/')
+      router.replace('/trade')
     } catch (err: any) {
       const errCode = err.response?.data?.error
       if (errCode === 'REQUIRES_2FA') {
@@ -125,7 +125,7 @@ function LoginPageInner() {
       // Use email prefix as name since we don't ask for name
       const name = rEmail.split('@')[0]
       await register(name, rEmail, rPassword, cpfDigits)
-      router.replace('/')
+      router.replace('/trade')
     } catch (err: any) {
       const code = err.response?.data?.error
       if      (code === 'EMAIL_TAKEN') setError('Este e-mail já está em uso.')
