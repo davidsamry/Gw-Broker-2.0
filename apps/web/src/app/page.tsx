@@ -225,6 +225,44 @@ export default function TradingPage() {
   // for entryTime/expiryTime so the chart renders both with one formula.
   const BRT_OFFSET = -3 * 3600
   useEffect(() => {
+    // Detect ops that were OPEN in our local activeTrades but the store now
+    // reports as resolved (WON/LOST). These are remote/bot trades that
+    // never went through handleTradePlaced — so the result card would
+    // never paint without this branch. Build a RESOLVED ChartTradeEvent
+    // per match and push to chartTradeEvents (same shape handleTradePlaced
+    // uses for UI-placed trades). CANCELLED skips the card on purpose:
+    // a failed-to-place trade shouldn't celebrate a result.
+    const storeById = new Map(storeOps.map((o) => [o.id, o]))
+    const resolvedFromActive: ChartTradeEvent[] = []
+    for (const t of activeTrades) {
+      const op = storeById.get(t.id)
+      if (!op) continue                            // store hasn't seen it yet — keep waiting
+      if (op.status === 'OPEN') continue           // still in flight — keep marker
+      if (op.status === 'CANCELLED') continue      // silent removal — no card
+      if (op.assetId !== selectedAsset.id) continue // only the on-screen asset
+      resolvedFromActive.push({
+        id:         op.id,
+        entryPrice: parseFloat(op.entryPrice ?? '0'),
+        entryTime:  Math.floor(new Date(op.openedAt).getTime() / 1000) + BRT_OFFSET,
+        expiryTime: Math.floor(new Date(op.expiresAt).getTime() / 1000) + BRT_OFFSET,
+        direction:  op.direction,
+        amount:     parseFloat(op.amount),
+        payout:     op.payout,
+        status:     'RESOLVED',
+        won:        op.status === 'WON',
+        profit:     parseFloat(op.profit ?? '0'),
+      })
+    }
+    if (resolvedFromActive.length > 0) {
+      // Dedupe by id — if handleTradePlaced already pushed (UI trade), the
+      // last write wins (same payload anyway). Bot/remote trades always
+      // land here for the first time.
+      setChartTradeEvents((prev) => {
+        const incomingIds = new Set(resolvedFromActive.map((e) => e.id))
+        return [...prev.filter((e) => !incomingIds.has(e.id)), ...resolvedFromActive]
+      })
+    }
+
     setActiveTrades((prev) => {
       const prevIds        = new Set(prev.map((t) => t.id))
       const storeOpenIds   = new Set(storeOps.filter((o) => o.status === 'OPEN').map((o) => o.id))
@@ -251,6 +289,7 @@ export default function TradingPage() {
       if (trimmed.length === prev.length && additions.length === 0) return prev
       return [...trimmed, ...additions]
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeOps, selectedAsset.id])
   const binanceTicker = useBinanceTicker(selectedAsset.source === 'BINANCE' ? selectedAsset.marketSymbol : undefined)
   const displayPrice  = binanceTicker?.price ?? selectedAsset.price
