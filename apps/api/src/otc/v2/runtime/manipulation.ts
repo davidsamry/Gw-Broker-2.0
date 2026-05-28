@@ -123,9 +123,19 @@ export function isSlotUnderManipulation(
 // When all 4 conditions met, pushes price toward open + ε (CALL) or
 // open - ε (PUT) so the candle finalises with the configured direction.
 
-const NUDGE_WINDOW_MS = 8_000   // start nudging in the final 8s of the slot
-const NUDGE_MAGNITUDE = 0.0015  // 15bp from open — small enough to look natural,
-                                // big enough to dominate normal tick noise
+// Window during which the nudge is active. For M1 (60s slots) this means
+// the first (60 - NUDGE_WINDOW_SEC) seconds tick 100% naturally — the
+// engine's regime FSM, micro-dynamics + liquidity all drive price on
+// their own — and only the final NUDGE_WINDOW_SEC blend toward target.
+// 20s window on M1 = 40s natural + 20s smooth pull-to-target.
+const NUDGE_WINDOW_MS = 20_000
+
+// Target distance from open as a fraction of price. The final close
+// lands near open*(1 ± NUDGE_MAGNITUDE). 25bp on EUR/USD at 1.085 ≈
+// 27 pips — visibly larger than the typical natural M1 body (~10-15
+// pips) so manipulated candles stand out a bit more on the chart
+// without looking absurd.
+const NUDGE_MAGNITUDE = 0.0025
 
 export function maybeManipulatePrice(
   assetId:    string,
