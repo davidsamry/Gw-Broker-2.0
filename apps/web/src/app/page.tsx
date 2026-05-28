@@ -170,6 +170,31 @@ export default function TradingPage() {
   // the BonusPanel's "Depositar agora" CTA so the user doesn't have to
   // copy/paste the code manually.
   const [depositoBonusCode, setDepositoBonusCode] = useState<string | undefined>(undefined)
+
+  // Deep-link support — landing on the trading page with `?deposit=1` or
+  // `?bonus=CODE` (or both) opens the deposit modal automatically, with
+  // the bonus code pre-applied when present. Same effect as clicking the
+  // BonusPanel's "Depositar agora" CTA. Used by email campaigns, shareable
+  // promo links, and the BÔNUS welcome modal's call-to-action so the
+  // recipient lands one step away from depositing.
+  //
+  // After consuming the params we wipe them via history.replaceState so a
+  // page refresh doesn't reopen the modal indefinitely. We use the raw
+  // History API (not router.replace) because router.replace would re-run
+  // the page render and unmount the modal we just opened.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params  = new URLSearchParams(window.location.search)
+    const bonus   = params.get('bonus')?.trim() || null
+    const wantOpen = params.get('deposit') === '1' || !!bonus
+    if (!wantOpen) return
+    if (bonus) setDepositoBonusCode(bonus)
+    setDepositoOpen(true)
+    const url = new URL(window.location.href)
+    url.searchParams.delete('deposit')
+    url.searchParams.delete('bonus')
+    window.history.replaceState({}, '', url.toString())
+  }, [])
   const [contaInitialTab, setContaInitialTab] = useState<'retirada' | 'minha-conta'>('minha-conta')
   const [configOpen, setConfigOpen] = useState(false)
   const [niveisOpen, setNiveisOpen] = useState(false)
@@ -277,13 +302,21 @@ export default function TradingPage() {
   const realBalance = parseFloat(accounts.find(a => a.type === 'REAL')?.balance ?? '0')
   const balance     = isDemo ? demoBalance : realBalance
 
-  // Mobile-header level icon — same logic as desktop Header.tsx. The
-  // `mounted` gate avoids a hydration mismatch: SSR has realBalance=0
-  // (no auth on the server), client may render the persisted balance.
-  // Both render PADRÃO until mounted, then swap to the real level.
+  // Mobile-header level icon + chip — same logic as desktop Header.tsx.
+  // The `mounted` gate avoids a hydration mismatch: SSR has no auth, so
+  // isDemo defaults to true (DEMO) AND realBalance is 0. The client,
+  // after rehydrating from localStorage, may show REAL with a non-zero
+  // balance — which would swap the lucide icon component itself
+  // (different SVG <path> tree). React's `suppressHydrationWarning` only
+  // covers the immediate element, not child SVG paths, so we must keep
+  // the rendered tree identical on first paint. Defer ALL account-state
+  // reads (isDemo + balance + realBalance) until after mount; render the
+  // DEMO chip during SSR + first client paint, then swap in a single tick.
   const [headerMounted, setHeaderMounted] = useState(false)
   useEffect(() => { setHeaderMounted(true) }, [])
-  const level = getAccountLevel(headerMounted ? realBalance : 0)
+  const safeIsDemo  = headerMounted ? isDemo  : true
+  const safeBalance = headerMounted ? balance : 0
+  const level       = getAccountLevel(headerMounted ? realBalance : 0)
 
   function handleSelectAsset(asset: Asset) {
     setSelectedAsset(asset)
@@ -428,27 +461,26 @@ export default function TradingPage() {
           {/* Right: balance + deposit */}
           <div className="flex items-center gap-1.5 min-w-0">
             {/* Balance chip — shrinks if needed; h-10 sets a consistent
-                size with the deposit button alongside it.
-                suppressHydrationWarning: isDemo comes from the auth store
-                which rehydrates from localStorage on the client only.
-                Server renders the default (DEMO) icon; client may render
-                the persisted (REAL) icon. The diff is intentional. */}
+                size with the deposit button alongside it. Icon + label +
+                balance are all gated on `headerMounted` so the SVG tree
+                matches between SSR and first client paint (see the long
+                comment by safeIsDemo/safeBalance — same reason as the
+                desktop Header.tsx fix). */}
             <div className="relative min-w-0">
               <button
                 onClick={() => setMobileAccountOpen(v => !v)}
                 className="flex items-center gap-1.5 h-10 px-2.5 rounded-lg bg-[#252a3a] border border-[#2a2e3b] max-w-full"
-                suppressHydrationWarning
               >
-                {isDemo
+                {safeIsDemo
                   ? <GraduationCap size={18} className="text-yellow-400 flex-shrink-0" />
                   : <level.Icon size={18} className={cn(level.color, 'flex-shrink-0')} />
                 }
                 <div className="text-left min-w-0">
-                  <div className={cn('text-[10px] font-bold leading-tight whitespace-nowrap', isDemo ? 'text-yellow-400' : 'text-green-400')}>
-                    {isDemo ? 'CONTA DEMO' : 'CONTA REAL'}
+                  <div className={cn('text-[10px] font-bold leading-tight whitespace-nowrap', safeIsDemo ? 'text-yellow-400' : 'text-green-400')}>
+                    {safeIsDemo ? 'CONTA DEMO' : 'CONTA REAL'}
                   </div>
                   <div className="text-sm font-bold text-white leading-tight whitespace-nowrap">
-                    R${balance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    R${safeBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                 </div>
                 <ChevronDown size={12} className={cn('text-[#8b8f9a] transition-transform flex-shrink-0', mobileAccountOpen && 'rotate-180')} />

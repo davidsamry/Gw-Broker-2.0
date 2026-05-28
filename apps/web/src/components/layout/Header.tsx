@@ -62,15 +62,20 @@ export function Header({
   // Level icon for the REAL chip — PADRÃO=Send, PRO=Trophy, VIP=Gem.
   // For DEMO accounts we keep the GraduationCap regardless of balance.
   //
-  // The `mounted` gate prevents a hydration mismatch: SSR renders with
-  // realBalance=0 (no auth on the server), client may render with the
-  // persisted balance, which would swap the icon component itself
-  // (different SVG tree). Render with PADRÃO until mounted, then swap
-  // to the real level — no visible flash because the icon position is
-  // identical and the swap happens in the same tick as auth hydration.
+  // The `mounted` gate prevents a hydration mismatch: SSR has no auth,
+  // so isDemo defaults to true (DEMO) AND realBalance is 0. The client,
+  // after rehydrating from localStorage, may show REAL with a non-zero
+  // balance — which would swap the lucide icon component itself
+  // (different SVG <path> tree). React's `suppressHydrationWarning` only
+  // covers the immediate element, not child SVG paths, so we must keep
+  // the rendered tree identical on first paint. Defer ALL account-state
+  // reads (isDemo + realBalance) until after mount; render the DEMO
+  // chip during SSR + first client paint, then swap in a single tick.
   const [mounted, setMounted] = useState(false)
   useEffect(() => { setMounted(true) }, [])
-  const level = getAccountLevel(mounted ? realBalance : 0)
+  const safeIsDemo  = mounted ? isDemo      : true
+  const safeBalance = mounted ? balance     : 0
+  const level       = getAccountLevel(mounted ? realBalance : 0)
 
   return (
     <div className="flex-shrink-0">
@@ -147,22 +152,17 @@ export function Header({
                   ? 'bg-[#252a3a] border-blue-500/60'
                   : 'bg-[#252a3a] border-[#2a2e3b] hover:border-blue-500/40'
               )}
-              // isDemo comes from the auth store which rehydrates from
-              // localStorage on the client only. SSR renders the default
-              // (DEMO) icon; client may render the persisted (REAL) icon.
-              // Suppress the (intentional) mismatch on first render.
-              suppressHydrationWarning
             >
-              {isDemo
+              {safeIsDemo
                 ? <GraduationCap size={18} className="text-yellow-400 flex-shrink-0" />
                 : <level.Icon size={18} className={cn(level.color, 'flex-shrink-0')} />
               }
               <div className="text-left">
-                <div className={cn('text-[10px] font-bold leading-tight', isDemo ? 'text-yellow-400' : 'text-green-400')}>
-                  {isDemo ? 'CONTA DEMO' : 'CONTA REAL'}
+                <div className={cn('text-[10px] font-bold leading-tight', safeIsDemo ? 'text-yellow-400' : 'text-green-400')}>
+                  {safeIsDemo ? 'CONTA DEMO' : 'CONTA REAL'}
                 </div>
                 <div className="text-sm font-bold text-white leading-tight">
-                  R${balance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  R${safeBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </div>
               </div>
               <ChevronDown size={12} className={cn('text-[#8b8f9a] transition-transform', accountOpen && 'rotate-180')} />

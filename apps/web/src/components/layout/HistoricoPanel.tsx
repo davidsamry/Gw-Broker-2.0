@@ -160,8 +160,12 @@ function HistoricoItem({ item }: { item: Item }) {
   const sign = net > 0 ? '+' : net < 0 ? '' : ''
   const netColor = won ? 'text-green-400' : lost ? 'text-red-400' : 'text-[#8b8f9a]'
 
-  // FlagPair handles both ISO country codes ('us') and crypto codes ('crypto:btc')
-  const hasFlags = Boolean(item.code1 && item.code2)
+  // FlagPair handles dual-flag pairs (us/eu), crypto pairs (crypto:btc/us),
+  // and single-icon assets like 'asset:gold' / 'stock:aapl' (where code2 is
+  // empty by design). Only require code1 — FlagPair routes internally based
+  // on its prefix. Fallback below only fires for assets missing from the
+  // catalog entirely (orphan / deleted IDs).
+  const hasFlags = Boolean(item.code1)
 
   return (
     <div className="px-3 mb-px">
