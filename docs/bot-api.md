@@ -53,7 +53,7 @@ Use este documento como spec autoritativo para construir:
 | Ambiente | URL base                              |
 | -------- | ------------------------------------- |
 | Local    | `http://localhost:3001/bot/v1`        |
-| Produção | `https://api.gwbroker.com.br/bot/v1`  |
+| Produção | `https://api.vx-global.com/bot/v1`  |
 
 > O domínio de produção pode ser ajustado pelo time de infra — confira sempre a URL ativa no painel admin em `/admin/api`.
 
@@ -98,7 +98,7 @@ Authorization: Bearer <access_token>
 Exemplo:
 
 ```bash
-curl -H "Authorization: Bearer eyJhbGciOi..." https://api.gwbroker.com.br/bot/v1/balance
+curl -H "Authorization: Bearer eyJhbGciOi..." https://api.vx-global.com/bot/v1/balance
 ```
 
 ### Erros de autenticação
@@ -308,7 +308,7 @@ Autentica com email + senha e devolve um par de tokens.
 **Exemplo cURL**
 
 ```bash
-curl -X POST https://api.gwbroker.com.br/bot/v1/login \
+curl -X POST https://api.vx-global.com/bot/v1/login \
   -H "Content-Type: application/json" \
   -d '{"email":"trader@example.com","password":"senhaForte123"}'
 ```
@@ -316,7 +316,7 @@ curl -X POST https://api.gwbroker.com.br/bot/v1/login \
 **Exemplo JavaScript**
 
 ```js
-const res = await fetch('https://api.gwbroker.com.br/bot/v1/login', {
+const res = await fetch('https://api.vx-global.com/bot/v1/login', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ email, password }),
@@ -520,7 +520,7 @@ Abre uma operação na **conta REAL** do usuário.
 **Exemplo cURL**
 
 ```bash
-curl -X POST https://api.gwbroker.com.br/bot/v1/trade \
+curl -X POST https://api.vx-global.com/bot/v1/trade \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"symbol":"BTCUSDT","direction":"up","stake":10,"duration_seconds":60}'
