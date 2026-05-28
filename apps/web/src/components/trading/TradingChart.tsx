@@ -457,6 +457,25 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
         }
       }
 
+      // Defensive guard — lightweight-charts asserts strict-ASC by time
+      // and crashes the whole chart (uncaught) if two candles share a
+      // timestamp. The server should already return clean data (state-map
+      // dedupes), but a stray duplicate (Binance, mock, race condition,
+      // future regression) used to take the entire trading UI down.
+      // Sort ASC then collapse equal-time pairs keeping the LAST entry.
+      if (candles.length > 1) {
+        candles.sort((a, b) => a.time - b.time)
+        const cleaned: typeof candles = [candles[0]]
+        for (let i = 1; i < candles.length; i++) {
+          if (candles[i].time === cleaned[cleaned.length - 1].time) {
+            cleaned[cleaned.length - 1] = candles[i]
+          } else {
+            cleaned.push(candles[i])
+          }
+        }
+        candles = cleaned
+      }
+
       // Main series based on chart type
       let mainSeries: any
       if (chartType === 'area') {
