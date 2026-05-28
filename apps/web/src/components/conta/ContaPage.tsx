@@ -441,6 +441,9 @@ function NovaRetiradaModal({
       const body = err?.response?.data
       if      (code === 'INSUFFICIENT_BALANCE') setError('Saldo insuficiente.')
       else if (code === 'ACCOUNT_NOT_FOUND')    setError('Conta não encontrada.')
+      else if (code === 'KYC_NOT_APPROVED')     setError(
+        'Verificação de identidade pendente. Vá em Minha Conta → Verificação para enviar seus documentos.'
+      )
       else if (code === 'ROLLOVER_INCOMPLETE')  setError(
         `Rollover incompleto: você precisa operar mais R$ ${Number(body.remaining ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} antes de sacar.`
       )
@@ -563,7 +566,122 @@ function NovaRetiradaModal({
   )
 }
 
-function RetiradaTab() {
+// Blocks withdrawal flow when the user hasn't completed KYC. Shown by
+// RetiradaTab when the "Solicitar retirada" button is clicked but the
+// auth-store user.kycStatus isn't APPROVED. Different copy per status
+// so SUBMITTED users know we're already reviewing, REJECTED users know
+// to re-upload, and PENDING users get the "start verification" CTA.
+function KycRequiredModal({
+  kycStatus, onClose, onVerify,
+}: {
+  kycStatus: string
+  onClose:   () => void
+  onVerify:  () => void
+}) {
+  // Per-status copy. SUBMITTED can still click "Ver status" — it just
+  // takes them to the KYC card where they see "Em análise" + can re-send
+  // if they realize they uploaded the wrong file.
+  const copy = {
+    PENDING:   {
+      title:    'Verificação necessária',
+      body:     'Para solicitar saques, você precisa primeiro verificar sua identidade. É rápido — envie um documento com foto e fique apto a retirar seus ganhos.',
+      cta:      'Verificar agora',
+      tone:     'emerald' as const,
+    },
+    SUBMITTED: {
+      title:    'Verificação em análise',
+      body:     'Seus documentos foram enviados e estão sendo analisados. Você poderá solicitar saques assim que a verificação for aprovada — geralmente em até 24h.',
+      cta:      'Ver status',
+      tone:     'blue'    as const,
+    },
+    REJECTED:  {
+      title:    'Verificação rejeitada',
+      body:     'Sua última verificação foi rejeitada. Verifique o motivo em Minha Conta e envie novos documentos para destravar os saques.',
+      cta:      'Reenviar documentos',
+      tone:     'red'     as const,
+    },
+    APPROVED:  {
+      // Should never render — RetiradaTab gates on APPROVED before opening
+      // this modal. Defensive copy in case of a race condition.
+      title:    'Verificação concluída',
+      body:     'Sua conta já está verificada. Tente novamente.',
+      cta:      'Fechar',
+      tone:     'emerald' as const,
+    },
+  }[kycStatus] ?? {
+    title: 'Verificação necessária',
+    body:  'Para solicitar saques, você precisa verificar sua identidade primeiro.',
+    cta:   'Verificar agora',
+    tone:  'emerald' as const,
+  }
+
+  // Per-tone classes — kept inline (no Tailwind dynamic class composition)
+  // so the JIT compiler can statically extract them.
+  const toneClasses = {
+    emerald: {
+      iconBg:  'bg-emerald-500/15 border-emerald-500/40',
+      iconFg:  'text-emerald-400',
+      button:  'bg-emerald-500 hover:bg-emerald-400 text-black',
+    },
+    blue: {
+      iconBg:  'bg-blue-500/15 border-blue-500/40',
+      iconFg:  'text-blue-400',
+      button:  'bg-blue-600 hover:bg-blue-500 text-white',
+    },
+    red: {
+      iconBg:  'bg-red-500/15 border-red-500/40',
+      iconFg:  'text-red-400',
+      button:  'bg-red-600 hover:bg-red-500 text-white',
+    },
+  }[copy.tone]
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[400px] bg-[#1a1e2e] border border-[#2a2e3b] rounded-2xl shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-end px-5 pt-4">
+          <button onClick={onClose} className="text-[#8b8f9a] hover:text-white transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-6 pb-6 flex flex-col items-center text-center">
+          <div className={cn('w-14 h-14 rounded-full border flex items-center justify-center mb-4', toneClasses.iconBg)}>
+            <AlertCircle size={26} className={toneClasses.iconFg} />
+          </div>
+
+          <h2 className="text-base font-bold text-white mb-2">{copy.title}</h2>
+          <p className="text-xs text-[#b8bcc8] leading-relaxed mb-5">{copy.body}</p>
+
+          <div className="flex flex-col w-full gap-2">
+            <button
+              onClick={onVerify}
+              className={cn(
+                'w-full h-10 rounded-lg text-sm font-bold transition-colors',
+                toneClasses.button,
+              )}
+            >
+              {copy.cta}
+            </button>
+            <button
+              onClick={onClose}
+              className="w-full h-9 rounded-lg text-xs font-semibold text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RetiradaTab({ onNavigateToMyAccount }: { onNavigateToMyAccount: () => void }) {
   const authStore   = useAuthStore()
   const withdrawals = useWithdrawalsStore((s) => s.withdrawals)
   const upsertOne   = useWithdrawalsStore((s) => s.upsertOne)
@@ -573,6 +691,12 @@ function RetiradaTab() {
   // /auth/me hasn't resolved yet (matches the migration default).
   const settings    = useAuthStore((s) => s.settings)
   const WD_MIN      = settings?.withdrawalMin ?? 60
+
+  // KYC gate — backend rejects POST /withdrawals with 403 if not APPROVED.
+  // Mirror that on the click handler so we never even show the form when
+  // the user isn't verified (better UX than failing on submit).
+  const kycStatus = authStore.user?.kycStatus ?? 'PENDING'
+  const kycOk     = kycStatus === 'APPROVED'
 
   // Real account (always REAL — demo withdrawals don't make sense).
   const realAccount   = authStore.user?.accounts.find((a) => a.type === 'REAL')
@@ -587,9 +711,21 @@ function RetiradaTab() {
   // "Na conta" displays balance + pending (what the user originally had).
   const totalOnAccount = balance + pendingTotal
 
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [expandedId, setExpandedId]   = useState<string | null>(null)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
-  const [createOpen, setCreateOpen] = useState(false)
+  const [createOpen, setCreateOpen]   = useState(false)
+  const [kycBlockOpen, setKycBlockOpen] = useState(false)
+
+  // Click handler for the "Solicitar retirada" button. KYC check happens
+  // here so the user gets a friendly redirect modal instead of having the
+  // form open and then fail on submit with a cryptic error.
+  function handleRequestClick() {
+    if (!kycOk) {
+      setKycBlockOpen(true)
+      return
+    }
+    setCreateOpen(true)
+  }
 
   async function handleCancel(id: string) {
     if (cancellingId) return
@@ -624,6 +760,16 @@ function RetiradaTab() {
           }}
         />
       )}
+      {kycBlockOpen && (
+        <KycRequiredModal
+          kycStatus={kycStatus}
+          onClose={() => setKycBlockOpen(false)}
+          onVerify={() => {
+            setKycBlockOpen(false)
+            onNavigateToMyAccount()
+          }}
+        />
+      )}
       {/* Layout: stacked on mobile, 3 columns on desktop. */}
       <div className="flex flex-col md:flex-row min-h-full">
 
@@ -652,7 +798,7 @@ function RetiradaTab() {
           <div className="flex items-center justify-between mb-3 md:mb-4">
             <p className="text-sm font-semibold text-white">Retirada:</p>
             <button
-              onClick={() => setCreateOpen(true)}
+              onClick={handleRequestClick}
               disabled={balance < WD_MIN}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -1339,7 +1485,7 @@ export function ContaPage({ initialTab = 'minha-conta', onClose }: { initialTab?
 
 
       {/* Tab content */}
-      {activeTab === 'retirada'    && <RetiradaTab />}
+      {activeTab === 'retirada'    && <RetiradaTab onNavigateToMyAccount={() => setActiveTab('minha-conta')} />}
       {activeTab === 'transacoes'  && <TransacoesTab />}
       {activeTab === 'operacoes'   && <OperacoesTab />}
       {activeTab === 'minha-conta' && <MinhaContaTab />}

@@ -14,6 +14,19 @@ export class RolloverIncompleteError extends Error {
   get remaining(): number { return Math.max(0, this.required - this.progress) }
 }
 
+// Thrown by createWithdrawal when the user hasn't completed identity
+// verification yet. Route handler maps to HTTP 403 so the UI can pop
+// the "verifique sua conta" modal and redirect to Minha Conta > KYC.
+// Carries the current status so the frontend can show a different
+// message for PENDING (never started) vs SUBMITTED (under review) vs
+// REJECTED (admin denied — needs re-upload).
+export class KycNotApprovedError extends Error {
+  constructor(public kycStatus: string) {
+    super('KYC_NOT_APPROVED')
+    this.name = 'KycNotApprovedError'
+  }
+}
+
 export interface WithdrawalRow {
   id:          string
   accountId:   string
@@ -30,16 +43,31 @@ export interface WithdrawalRow {
 // Atomic create — single CTE: validate ownership + balance, debit balance,
 // insert withdrawal, insert ledger transaction. Mirrors createOperation.
 export async function createWithdrawal(userId: string, input: CreateWithdrawalInput) {
-  // Rollover gate (REAL accounts only). Even when balance is sufficient,
-  // saque is blocked until trade volume on the REAL account ≥ accumulated
-  // rolloverRequired (set by each confirmed deposit × settings.depositRollover
-  // multiplier, and by admin-set lump-sums via /admin/usuarios bonus card).
+  // Pre-flight gates (REAL accounts only). Both KYC + rollover are read
+  // in the same query — kyc lives on User, the rest on Account, so we
+  // include the user relation. DEMO withdrawals don't have either gate
+  // (they only exist as a sandbox).
   const acc = await prisma.account.findFirst({
     where:  { id: input.accountId, userId },
-    select: { type: true, rolloverRequired: true, rolloverProgress: true },
+    select: {
+      type:             true,
+      rolloverRequired: true,
+      rolloverProgress: true,
+      user:             { select: { kycStatus: true } },
+    },
   })
   if (!acc) throw new Error('ACCOUNT_NOT_FOUND')
   if (acc.type === 'REAL') {
+    // 1) KYC gate — checked FIRST because it's the more fundamental
+    //    requirement. No point telling the user "faltam X de rollover"
+    //    when they can't withdraw at all until they verify.
+    if (acc.user.kycStatus !== 'APPROVED') {
+      throw new KycNotApprovedError(acc.user.kycStatus)
+    }
+    // 2) Rollover gate. Even when balance is sufficient, saque is blocked
+    //    until trade volume on the REAL account ≥ accumulated rolloverRequired
+    //    (set by each confirmed deposit × settings.depositRollover multiplier,
+    //    and by admin-set lump-sums via /admin/usuarios bonus card).
     const required = Number(acc.rolloverRequired)
     const progress = Number(acc.rolloverProgress)
     if (progress < required) {

@@ -41,6 +41,14 @@ export async function withdrawalRoutes(app: FastifyInstance) {
           remaining: err.remaining,
         })
       }
+      if (err.name === 'KycNotApprovedError') {
+        // 403 — semantic "forbidden until you verify". Frontend pops the
+        // "verifique sua conta" modal and offers a direct link to KYC.
+        return reply.status(403).send({
+          error:     'KYC_NOT_APPROVED',
+          kycStatus: err.kycStatus,
+        })
+      }
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }
