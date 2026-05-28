@@ -131,11 +131,11 @@ export function isSlotUnderManipulation(
 const NUDGE_WINDOW_MS = 20_000
 
 // Target distance from open as a fraction of price. The final close
-// lands near open*(1 ± NUDGE_MAGNITUDE). 25bp on EUR/USD at 1.085 ≈
-// 27 pips — visibly larger than the typical natural M1 body (~10-15
-// pips) so manipulated candles stand out a bit more on the chart
-// without looking absurd.
-const NUDGE_MAGNITUDE = 0.0025
+// lands near open*(1 ± NUDGE_MAGNITUDE). 35bp on EUR/USD at 1.085 ≈
+// 38 pips — clearly larger than the typical natural M1 body (~10-15
+// pips) so manipulated candles read as a decisive move on the chart
+// instead of blending in with normal volatility.
+const NUDGE_MAGNITUDE = 0.0035
 
 export function maybeManipulatePrice(
   assetId:    string,
