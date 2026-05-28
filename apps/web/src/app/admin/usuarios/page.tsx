@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Users, Search, RefreshCw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   ShieldCheck, ShieldAlert, CheckCircle2, XCircle, Clock as ClockIcon,
+  SlidersHorizontal, X,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -105,8 +106,10 @@ export default function AdminUsersPage() {
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="bg-[#13161f] border border-[#1f232e] rounded-xl p-4 flex flex-wrap items-center gap-3 mb-5">
+      {/* Filters — search bar inline, advanced filters tucked in a popover.
+          activeCount badge surfaces when any non-default filter is set so the
+          admin sees at a glance that the list is narrowed. */}
+      <div className="bg-[#13161f] border border-[#1f232e] rounded-xl p-3 flex items-center gap-3 mb-5">
         <div className="relative flex-1 min-w-[200px]">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b8f9a]" />
           <input
@@ -116,9 +119,10 @@ export default function AdminUsersPage() {
             className="w-full h-9 bg-[#1a1e2a] border border-[#1f232e] rounded-lg pl-8 pr-3 text-xs text-white placeholder-[#8b8f9a] outline-none focus:border-emerald-500/50"
           />
         </div>
-        <FilterPills label="Perfil"  value={role}    options={[['ALL','Todos'],['USER','Usuário'],['ADMIN','Admin']]}                  onChange={(v) => setRole(v as RoleFilter)} />
-        <FilterPills label="KYC"     value={kyc}     options={[['ALL','Todos'],['PENDING','Pendente'],['SUBMITTED','Enviado'],['APPROVED','Aprovado'],['REJECTED','Rejeitado']]} onChange={(v) => setKyc(v as KycFilter)} />
-        <FilterPills label="Status"  value={blocked} options={[['ALL','Todos'],['NO','Ativos'],['YES','Bloqueados']]}                  onChange={(v) => setBlocked(v as BlockedFilter)} />
+        <FiltersPopover
+          role={role} kyc={kyc} blocked={blocked}
+          onRole={setRole} onKyc={setKyc} onBlocked={setBlocked}
+        />
       </div>
 
       {error && (
@@ -229,22 +233,124 @@ function FilterPills({
   label, value, options, onChange,
 }: { label: string; value: string; options: [string, string][]; onChange: (v: string) => void }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[10px] text-[#8b8f9a] mr-1">{label}:</span>
-      {options.map(([v, lbl]) => (
-        <button
-          key={v}
-          onClick={() => onChange(v)}
-          className={cn(
-            'px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors',
-            value === v
-              ? 'bg-emerald-500 text-black'
-              : 'bg-[#1a1e2a] text-[#8b8f9a] hover:text-white border border-[#1f232e]'
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[10px] font-semibold text-[#8b8f9a] uppercase tracking-wide">{label}</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {options.map(([v, lbl]) => (
+          <button
+            key={v}
+            onClick={() => onChange(v)}
+            className={cn(
+              'px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors',
+              value === v
+                ? 'bg-emerald-500 text-black'
+                : 'bg-[#1a1e2a] text-[#8b8f9a] hover:text-white border border-[#1f232e]'
+            )}
+          >
+            {lbl}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Popover holding all three filter groups behind a single "Filtros" button.
+// Anchored to the trigger via relative+absolute (no portal — popover is
+// small and lives inside the same overflow container). Closes on outside
+// click, Escape, or the X button. activeCount drives the badge on the
+// trigger so the admin always sees if filters are narrowing the list.
+function FiltersPopover({
+  role, kyc, blocked, onRole, onKyc, onBlocked,
+}: {
+  role:      RoleFilter
+  kyc:       KycFilter
+  blocked:   BlockedFilter
+  onRole:    (v: RoleFilter) => void
+  onKyc:     (v: KycFilter) => void
+  onBlocked: (v: BlockedFilter) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef         = useRef<HTMLDivElement>(null)
+
+  const activeCount =
+    (role    !== 'ALL' ? 1 : 0) +
+    (kyc     !== 'ALL' ? 1 : 0) +
+    (blocked !== 'ALL' ? 1 : 0)
+
+  // Outside-click + ESC to close. Listener only mounts while the popover is
+  // open so we're not paying for it on every page.
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown',   onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown',   onKey)
+    }
+  }, [open])
+
+  const clearAll = () => {
+    onRole('ALL')
+    onKyc('ALL')
+    onBlocked('ALL')
+  }
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          'flex items-center gap-1.5 h-9 px-3 rounded-lg border text-xs font-semibold transition-colors',
+          open || activeCount > 0
+            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+            : 'bg-[#1a1e2a] border-[#1f232e] text-[#8b8f9a] hover:text-white',
+        )}
+      >
+        <SlidersHorizontal size={13} />
+        Filtros
+        {activeCount > 0 && (
+          <span className="ml-1 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full bg-emerald-500 text-black text-[10px] font-bold">
+            {activeCount}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-[280px] bg-[#13161f] border border-[#1f232e] rounded-xl shadow-2xl z-30 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-white">Filtros</span>
+            <button
+              onClick={() => setOpen(false)}
+              className="p-1 rounded text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors"
+              aria-label="Fechar"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            <FilterPills label="Perfil"  value={role}    options={[['ALL','Todos'],['USER','Usuário'],['ADMIN','Admin']]} onChange={(v) => onRole(v as RoleFilter)} />
+            <FilterPills label="KYC"     value={kyc}     options={[['ALL','Todos'],['PENDING','Pendente'],['SUBMITTED','Enviado'],['APPROVED','Aprovado'],['REJECTED','Rejeitado']]} onChange={(v) => onKyc(v as KycFilter)} />
+            <FilterPills label="Status"  value={blocked} options={[['ALL','Todos'],['NO','Ativos'],['YES','Bloqueados']]} onChange={(v) => onBlocked(v as BlockedFilter)} />
+          </div>
+
+          {activeCount > 0 && (
+            <button
+              onClick={clearAll}
+              className="mt-4 w-full h-8 rounded-lg border border-[#1f232e] bg-[#1a1e2a] text-[11px] font-semibold text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors"
+            >
+              Limpar filtros
+            </button>
           )}
-        >
-          {lbl}
-        </button>
-      ))}
+        </div>
+      )}
     </div>
   )
 }
