@@ -19,6 +19,10 @@ interface TradingPanelProps {
   accountId?: string
   marketPrice?: number
   onTradePlaced?: (trade: ChartTradeEvent | null) => void
+  // Click on a pending trade card → switch the chart to that asset.
+  // When the trade is already for the on-screen asset, the click toggles
+  // the inline x2/Vender actions instead (legacy behavior preserved).
+  onSelectAsset?: (asset: Asset) => void
 }
 
 // Durações em segundos — correspondem aos horários absolutos exibidos como no Quotex
@@ -61,7 +65,22 @@ function FloatingBox({ label, link, children }: {
   )
 }
 
-function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: boolean }) {
+function TradeItem({
+  trade, shortLabels, currentAssetId, onSelectAsset,
+}: {
+  trade:          OpenTrade
+  shortLabels:    boolean
+  currentAssetId: string
+  onSelectAsset?: (asset: Asset) => void
+}) {
+  // Dual-purpose card click — UX inspired by Quotex:
+  //   - Click on a card whose asset != on-screen chart → switch the chart
+  //     to that asset (user is checking on another pair's pending trade).
+  //   - Click on a card whose asset == on-screen chart → toggle the
+  //     inline x2 / Vender action row (the user already sees the chart;
+  //     they're drilling into the trade itself).
+  const isCurrent = trade.asset.id === currentAssetId
+  // -- countdown below --
   // Regressive countdown synchronized with the chart marker:
   // both use `expiryTime - (Date.now()/1000 + BRT_OFFSET)`.
   const [remaining, setRemaining] = useState(() => Math.max(0, trade.expiryTime - (Math.floor(Date.now() / 1000) + BRT_OFFSET)))
@@ -108,7 +127,11 @@ function TradeItem({ trade, shortLabels }: { trade: OpenTrade; shortLabels: bool
     <div className="px-2 mb-px">
       <div
         className="px-2 py-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer group"
-        onClick={() => setExpanded(v => !v)}
+        onClick={() => {
+          if (isCurrent || !onSelectAsset) setExpanded(v => !v)
+          else                              onSelectAsset(trade.asset)
+        }}
+        title={isCurrent ? undefined : `Abrir gráfico de ${trade.asset.label}`}
       >
         <div className="flex items-center gap-1.5">
           <ChevronDown size={11} className={cn('text-[#8b8f9a] flex-shrink-0 transition-transform', expanded && 'rotate-180')} />
@@ -194,7 +217,7 @@ function ClosedTradeItem({ trade }: { trade: ClosedTrade }) {
   )
 }
 
-export function TradingPanel({ asset, shortLabels = true, mobile = false, compact = false, accountId, marketPrice, onTradePlaced }: TradingPanelProps) {
+export function TradingPanel({ asset, shortLabels = true, mobile = false, compact = false, accountId, marketPrice, onTradePlaced, onSelectAsset }: TradingPanelProps) {
   const [investment, setInvestment] = useState(10)
   const [investmentRaw, setInvestmentRaw] = useState('')
   const [editingInvestment, setEditingInvestment] = useState(false)
@@ -656,7 +679,13 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
                       </div>
                     </div>
                     {allOpenTrades.map((trade) => (
-                      <TradeItem key={trade.id} trade={trade} shortLabels={shortLabels} />
+                      <TradeItem
+                        key={trade.id}
+                        trade={trade}
+                        shortLabels={shortLabels}
+                        currentAssetId={asset.id}
+                        onSelectAsset={onSelectAsset}
+                      />
                     ))}
                   </>
                 )}

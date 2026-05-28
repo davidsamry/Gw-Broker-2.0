@@ -403,7 +403,7 @@ export default function TradingPage() {
           <ConfiguracoesPanel onClose={() => setConfigOpen(false)} theme={theme} onThemeChange={setTheme} settings={tradeSettings} onSettingsChange={setTradeSettings} />
         )}
         <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        {!isMobile && <TradingPanel asset={selectedAsset} marketPrice={displayPrice} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={handleTradePlaced} />}
+        {!isMobile && <TradingPanel asset={selectedAsset} marketPrice={displayPrice} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={handleTradePlaced} onSelectAsset={handleSelectAsset} />}
       </div>
     )
   }
