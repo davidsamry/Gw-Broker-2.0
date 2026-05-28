@@ -15,6 +15,7 @@ const updateSchema = z.object({
   operationMax:           z.number().min(0).max(10_000_000).optional(),
   operationMinIntervalMs: z.number().int().min(0).max(60_000).optional(),
   copyTradeEnabled:       z.boolean().optional(),
+  safeModeEnabled:        z.boolean().optional(),
 }).refine(
   (v) => Object.values(v).some((x) => x !== undefined),
   { message: 'Envie pelo menos um campo.' },

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
+import { SafeMode } from '@/components/system/SafeMode'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -19,6 +20,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="pt-BR" className="h-full">
       <body className={`${inter.className} h-full overflow-hidden`}>
+        {/* Anti-DevTools deterrent — no-op until admin toggles
+            safeModeEnabled in /admin/configuracoes. Self-skips on /admin/*. */}
+        <SafeMode />
         {children}
       </body>
     </html>

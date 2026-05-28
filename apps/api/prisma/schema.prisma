@@ -727,6 +727,10 @@ model PlatformSettings {
 
   // Feature toggles
   copyTradeEnabled  Boolean  @default(true)
+  // Modo Seguro (Anti-DevTools) — UX-level deterrent that the frontend's
+  // <SafeMode /> component reacts to (blocks F12/right-click, closes the
+  // tab on devtools detection, periodic console.clear). Off by default.
+  safeModeEnabled   Boolean  @default(false)
 
   updatedAt         DateTime @updatedAt
   createdAt         DateTime @default(now())

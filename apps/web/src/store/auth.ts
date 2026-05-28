@@ -64,6 +64,7 @@ export interface PublicSettings {
   operationMax:           number
   operationMinIntervalMs: number
   copyTradeEnabled:       boolean
+  safeModeEnabled:        boolean
 }
 
 // Safe fallbacks for the brief window before /auth/me lands (or when
@@ -78,6 +79,7 @@ export const SETTINGS_FALLBACK: PublicSettings = {
   operationMax:           100_000,
   operationMinIntervalMs: 1000,
   copyTradeEnabled:       true,
+  safeModeEnabled:        false,
 }
 
 interface AuthState {

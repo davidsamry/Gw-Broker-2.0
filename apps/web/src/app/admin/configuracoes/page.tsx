@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Settings, Save, RefreshCw, Check, AlertCircle, Loader2,
-  Banknote, TrendingUp, BarChart2, Timer, Copy,
+  Banknote, TrendingUp, BarChart2, Timer, Copy, Shield, ShieldCheck,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -24,6 +24,7 @@ interface PlatformSettings {
   operationMax:           number
   operationMinIntervalMs: number
   copyTradeEnabled:       boolean
+  safeModeEnabled:        boolean
 }
 
 interface Response { settings: PlatformSettings }
@@ -183,8 +184,73 @@ export default function AdminConfiguracoesPage() {
             </Card>
           </div>
 
+          {/* Modo Seguro (Anti-DevTools) — full row, status banner + toggle */}
+          <div className="md:col-span-2">
+            <SafeModeCard
+              enabled={form.safeModeEnabled}
+              onChange={(v) => patch('safeModeEnabled', v)}
+            />
+          </div>
+
         </div>
       )}
+    </div>
+  )
+}
+
+// Dedicated Modo Seguro card — matches the mocked design (header with
+// shield, green "Proteção Ativa" banner when on, feature bullets at the
+// bottom). The /admin area is exempt from the protection by design so
+// admins can debug the platform without locking themselves out.
+function SafeModeCard({ enabled, onChange }: {
+  enabled:  boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <div className="rounded-xl bg-[#1a1f2e] border border-[#2a2e3b] p-5 flex flex-col gap-4">
+      <div className="flex items-start gap-3">
+        <Shield size={20} className="text-blue-400 flex-shrink-0 mt-0.5" />
+        <div>
+          <h2 className="text-sm font-bold text-white">Modo Seguro (Anti-DevTools)</h2>
+          <p className="text-xs text-[#8b8f9a] mt-1 leading-relaxed">
+            Bloqueia o acesso ao DevTools do navegador. Quando ativado, a aba será
+            fechada automaticamente se o usuário tentar abrir as ferramentas de
+            desenvolvedor.
+          </p>
+        </div>
+      </div>
+
+      {enabled && (
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-3 flex items-start gap-3">
+          <ShieldCheck size={18} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <div className="text-sm font-bold text-emerald-400">Proteção Ativa</div>
+            <div className="text-xs text-[#9aa3b6] mt-0.5">
+              DevTools bloqueado. A aba será fechada automaticamente se detectado.
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Toggle
+        label="Habilitar Modo Seguro"
+        hint="Bloqueia DevTools e fecha a aba ao detectar"
+        value={enabled}
+        onChange={onChange}
+      />
+
+      <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-3">
+        <div className="text-xs font-bold text-white mb-1.5">Funcionalidades do Modo Seguro:</div>
+        <ul className="text-[11px] text-[#9aa3b6] space-y-1 leading-relaxed">
+          <li>• Detecta abertura do DevTools (F12, Ctrl+Shift+I, etc.)</li>
+          <li>• Fecha a aba automaticamente quando DevTools é detectado</li>
+          <li>• Bloqueia menu de contexto (botão direito)</li>
+          <li>• Limpa o console periodicamente</li>
+        </ul>
+        <div className="text-[10px] text-[#5d6275] mt-2 italic">
+          O painel administrativo (/admin/*) é exento — você consegue inspecionar normalmente.
+        </div>
+      </div>
     </div>
   )
 }

@@ -154,6 +154,7 @@ export async function authRoutes(app: FastifyInstance) {
         operationMax:           s.operationMax,
         operationMinIntervalMs: s.operationMinIntervalMs,
         copyTradeEnabled:       s.copyTradeEnabled,
+        safeModeEnabled:        s.safeModeEnabled,
       }
       return reply.send({ user, operations, withdrawals, transactions, kycSubmission, settings })
     } catch {

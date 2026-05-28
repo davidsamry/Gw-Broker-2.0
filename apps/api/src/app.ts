@@ -16,6 +16,7 @@ import { otcV2Routes } from './otc/v2/routes.js'
 import { bonusRoutes } from './bonuses/routes.js'
 import { rankingRoutes } from './ranking/routes.js'
 import { botRoutes } from './bot/routes.js'
+import { publicRoutes } from './public/routes.js'
 import { metricsRoute } from './metrics/route.js'
 import { httpRequestDurationSeconds } from './metrics/registry.js'
 import { prisma } from './prisma.js'
@@ -122,6 +123,9 @@ export async function buildApp() {
   // Bot API — public REST surface for external bots & automations.
   // Auth is JWT with `kind: 'bot'` claim so web tokens can't be reused.
   await app.register(botRoutes,          { prefix: '/bot/v1'   })
+  // Public — small read-only surface that pre-auth pages need (login,
+  // register, reset). Currently exposes only the Modo Seguro toggle.
+  await app.register(publicRoutes,       { prefix: '/public'   })
 
   return app
 }

@@ -18,6 +18,7 @@ export interface PlatformSettings {
   operationMax:            number
   operationMinIntervalMs:  number
   copyTradeEnabled:        boolean
+  safeModeEnabled:         boolean
   updatedAt:               Date
 }
 
@@ -34,6 +35,7 @@ const DEFAULTS: PlatformSettings = {
   operationMax:           100_000,
   operationMinIntervalMs: 1000,
   copyTradeEnabled:       true,
+  safeModeEnabled:        false,
   updatedAt:              new Date(0),
 }
 
@@ -58,6 +60,7 @@ export async function refreshSettingsCache(): Promise<PlatformSettings> {
       operationMax:           Number(row.operationMax),
       operationMinIntervalMs: row.operationMinIntervalMs,
       copyTradeEnabled:       row.copyTradeEnabled,
+      safeModeEnabled:        row.safeModeEnabled,
       updatedAt:              row.updatedAt,
     }
   } catch (err) {
@@ -83,6 +86,7 @@ export interface UpdateSettingsInput {
   operationMax?:           number
   operationMinIntervalMs?: number
   copyTradeEnabled?:       boolean
+  safeModeEnabled?:        boolean
 }
 
 export async function updateSettings(input: UpdateSettingsInput): Promise<PlatformSettings> {
