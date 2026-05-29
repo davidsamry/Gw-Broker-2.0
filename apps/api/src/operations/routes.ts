@@ -101,6 +101,13 @@ export async function operationRoutes(app: FastifyInstance) {
         if (err.message === 'TOO_FAST') {
           return reply.status(429).send({ error: 'TOO_FAST' })
         }
+        if (err.message?.startsWith?.('MARKET_NOT_ALLOWED:')) {
+          // Format: MARKET_NOT_ALLOWED:forex|otc|crypto. Surface the
+          // market in the response so the UI knows which permission is
+          // off (in case admin disabled multiple after the page loaded).
+          const market = err.message.split(':')[1] ?? ''
+          return reply.status(403).send({ error: 'MARKET_NOT_ALLOWED', market })
+        }
         req.log.error(err)
         return reply.status(500).send({ error: 'INTERNAL_ERROR' })
       }

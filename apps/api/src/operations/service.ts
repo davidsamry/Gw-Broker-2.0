@@ -5,8 +5,17 @@ import type { CreateOperationInput } from './schema.js'
 import { resolveOperationIfExpired } from './worker.js'
 import { getSettings } from '../settings/service.js'
 import { publishOperationEvent } from './events.js'
+import { assertMarketAllowed } from './marketPermissions.js'
 
 export async function createOperation(userId: string, input: CreateOperationInput) {
+  // Per-user market permission gate. Admin toggles canTradeForex/Otc/Crypto
+  // on /admin/usuarios — if the user's flag for THIS asset's market is
+  // FALSE, refuse with MARKET_NOT_ALLOWED:<market>. Route handler maps
+  // to 403 + the market name so the frontend shows the right message.
+  // Runs BEFORE the throttle so an admin clarification is faster than a
+  // rate-limit response.
+  await assertMarketAllowed(userId, { id: input.assetId, marketSymbol: input.marketSymbol })
+
   // Min-interval guard — admin-configurable on /admin/configuracoes.
   // Prevents bot-style spam clicking and protects the engine from a
   // single user hammering operations at >10Hz.

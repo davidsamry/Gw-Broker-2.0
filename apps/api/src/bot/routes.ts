@@ -321,6 +321,10 @@ export async function botRoutes(app: FastifyInstance) {
       if (err.message === 'TOO_FAST') {
         return reply.status(429).send({ error: 'TOO_FAST' })
       }
+      if (err.message?.startsWith?.('MARKET_NOT_ALLOWED:')) {
+        const market = err.message.split(':')[1] ?? ''
+        return reply.status(403).send({ error: 'MARKET_NOT_ALLOWED', market })
+      }
       if (err.message === 'ACCOUNT_NOT_FOUND') {
         return reply.status(404).send({ error: 'ACCOUNT_NOT_FOUND' })
       }

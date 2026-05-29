@@ -8,6 +8,7 @@ import { FlagPair } from '@/components/ui/FlagPair'
 import { api } from '@/lib/api'
 import { useOperationsStore, type ApiOperation } from '@/store/operations'
 import { useAuthStore } from '@/store/auth'
+import { getAssetMarket, isMarketAllowed, marketLabel } from '@/lib/marketPermissions'
 import { useOtcLivePrice } from '@/lib/otcMarket'
 import { useBinanceTicker } from '@/lib/binanceMarket'
 
@@ -209,6 +210,13 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
   const [placing, setPlacing] = useState(false)
   const [tradeError, setTradeError] = useState('')
   const [tradeResult, setTradeResult] = useState<{ direction: 'CALL' | 'PUT'; amount: number; profit: number; won: boolean } | null>(null)
+
+  // Reactive read of the logged-in user — needed for market-permission
+  // gate below. Subscribing to the slice means an admin-flipped flag
+  // re-renders this panel on the next /auth/me revalidate.
+  const user = useAuthStore((s) => s.user)
+  const market = getAssetMarket(asset)
+  const marketAllowed = isMarketAllowed(user ?? undefined, market)
 
   // Closed-trades come from the shared operations store (hydrated by /auth/me
   // on app mount). When a trade resolves, placeTrade upserts the new op into
@@ -617,30 +625,45 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
         </div>
       </div>
 
-      {/* CALL / PUT buttons */}
-      <div className="px-3 pt-3 pb-3 flex flex-col gap-2">
-        <button
-          onClick={() => placeTrade('CALL')}
-          disabled={placing}
-          className="w-full h-12 rounded-xl bg-green-500 hover:bg-green-400 active:scale-[0.98] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-green-900/30 disabled:opacity-50"
-        >
-          <span>Para cima</span>
-          <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
-            <ArrowUp size={16} strokeWidth={2.5} />
+      {/* CALL / PUT buttons — replaced by "Mercado Fechado" banner when
+          the user's market permissions block trading on this asset's
+          market. Asset still renders (chart, header, lists), only the
+          place-trade actions are hidden — admin can revoke access mid-
+          session and the user sees the change on next /auth/me sync. */}
+      {marketAllowed ? (
+        <div className="px-3 pt-3 pb-3 flex flex-col gap-2">
+          <button
+            onClick={() => placeTrade('CALL')}
+            disabled={placing}
+            className="w-full h-12 rounded-xl bg-green-500 hover:bg-green-400 active:scale-[0.98] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-green-900/30 disabled:opacity-50"
+          >
+            <span>Para cima</span>
+            <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+              <ArrowUp size={16} strokeWidth={2.5} />
+            </div>
+          </button>
+          <button
+            onClick={() => placeTrade('PUT')}
+            disabled={placing}
+            className="w-full h-12 rounded-xl bg-red-500 hover:bg-red-400 active:scale-[0.98] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-red-900/30 disabled:opacity-50"
+          >
+            <span>Para baixo</span>
+            <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+              <ArrowDown size={16} strokeWidth={2.5} />
+            </div>
+          </button>
+          {tradeError && <p className="text-red-400 text-xs text-center">{tradeError}</p>}
+        </div>
+      ) : (
+        <div className="px-3 pt-3 pb-3">
+          <div className="w-full rounded-xl border border-amber-500/40 bg-amber-500/10 px-5 py-4 flex flex-col items-center gap-1 text-center">
+            <span className="text-base font-bold text-amber-300">Mercado Fechado</span>
+            <span className="text-[11px] text-amber-200/80">
+              Seu acesso ao mercado <strong>{marketLabel(market)}</strong> está desativado.
+            </span>
           </div>
-        </button>
-        <button
-          onClick={() => placeTrade('PUT')}
-          disabled={placing}
-          className="w-full h-12 rounded-xl bg-red-500 hover:bg-red-400 active:scale-[0.98] transition-all flex items-center justify-between px-5 font-bold text-white text-base shadow-lg shadow-red-900/30 disabled:opacity-50"
-        >
-          <span>Para baixo</span>
-          <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
-            <ArrowDown size={16} strokeWidth={2.5} />
-          </div>
-        </button>
-        {tradeError && <p className="text-red-400 text-xs text-center">{tradeError}</p>}
-      </div>
+        </div>
+      )}
 
       {/* Divider + operations list — hidden in compact (mobile) mode */}
       {!compact && (

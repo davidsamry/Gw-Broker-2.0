@@ -49,6 +49,13 @@ export interface User {
   country?:          string | null
   address?:          string | null
   updatedAt?:        string         // used to re-sync MinhaContaTab local state
+  // Per-user market gates (admin /admin/usuarios). Backend enforces;
+  // frontend uses these to hide trade buttons + show "Mercado Fechado".
+  // Optional in the type so older cached payloads don't break — readers
+  // fall back to "allowed" when missing.
+  canTradeForex?:    boolean
+  canTradeOtc?:      boolean
+  canTradeCrypto?:   boolean
 }
 
 // Subset of PlatformSettings (api/src/settings/service.ts) exposed publicly
