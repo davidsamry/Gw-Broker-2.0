@@ -1,7 +1,11 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 import { publishOperationEvent } from './events.js'
-import { isOpForcedLoss, clearOpForcedLoss, clearLiquiditySignalsForOp } from './liquidityManipulation.js'
+import {
+  isOpForcedLoss, clearOpForcedLoss,
+  isOpForcedWin,  clearOpForcedWin,
+  clearLiquiditySignalsForOp,
+} from './liquidityManipulation.js'
 
 // Polls the DB for OPEN operations whose expiresAt has passed and resolves
 // them. Survives restarts: on boot it catches up on any backlog from downtime.
@@ -220,17 +224,18 @@ async function resolveOperation(op: {
     // wins (admin shouldn't combine, but we err on the safe side).
     //
     //  1. isFake — every resolution forced to WON.
-    //  2. liquidity force-loss marker — set at OPEN time in createOperation
-    //     (70% roll happens ONCE per op there, not here). Reading from the
-    //     in-memory marker means an op can't re-roll partway. For OTC,
-    //     the candle was ALSO nudged by the tick loop's liquidity signal,
-    //     so the natural price compare would usually give LOSS anyway —
-    //     this marker is the safety net for OTC + the silent gate for
-    //     Binance (where no candle manipulation exists).
+    //  2. liquidity cycle markers — set at OPEN time in createOperation.
+    //     A liquidity user has a shuffled queue of 7 LOSS + 3 WIN per 10
+    //     ops; whichever the slot picked, the corresponding marker was
+    //     added (forceWin or forceLoss). isFake wins over both if both
+    //     are set (admin shouldn't combine isFake + liquidityMode, but we
+    //     defend by checking isFake first). For OTC the candle was ALSO
+    //     nudged in the matching direction (same dir for WIN, opposite
+    //     for LOSS), so vela coerente in both branches.
     //
     // Defaults (no marker present) keep the existing CALL/PUT-vs-price
     // logic untouched. NO real user without admin opt-in lands here.
-    const forcedWin  = op.isFake === true
+    const forcedWin  = op.isFake === true || isOpForcedWin(op.id)
     const forcedLoss = !forcedWin && isOpForcedLoss(op.id)
 
     const won = forcedWin
@@ -241,9 +246,10 @@ async function resolveOperation(op: {
           (op.direction === 'PUT'  && exitPrice < entry)
 
     // Cleanup the in-memory markers regardless of outcome — keeps the
-    // Set + signal map from growing unbounded. Safe to call even if no
-    // entry exists (both helpers are no-ops in that case).
+    // Sets + signal map from growing unbounded. Safe to call even if no
+    // entry exists (all three helpers are no-ops in that case).
     clearOpForcedLoss(op.id)
+    clearOpForcedWin(op.id)
     clearLiquiditySignalsForOp(op.id)
 
     const profit = won ? parseFloat((amount * (op.payout / 100)).toFixed(2)) : 0
@@ -315,17 +321,18 @@ async function resolveOperation(op: {
 
     // Single structured log per resolution — grepable for auditing
     // resolution quality. Should see ~0% source=random in healthy runs.
-    // fake/liquidity audit tags appear only when the override actually
-    // changed the outcome (the 70% loss roll happened at OPEN time;
-    // a marker on resolve means the op was selected).
+    // fake / liquidity_win / liquidity_loss tags appear only when the
+    // override actually changed the outcome. isFake fires fake=true even
+    // if the liquidity cycle also picked WIN (isFake takes precedence).
     const tfStr        = exit.candleTf ? ` candle_tf=${exit.candleTf}` : ''
-    const fakeStr      = forcedWin  ? ' fake=true' : ''
-    const liquidityStr = forcedLoss ? ' liquidity_forced=true' : ''
+    const fakeStr      = op.isFake === true  ? ' fake=true' : ''
+    const liqWinStr    = forcedWin && op.isFake !== true ? ' liquidity_win=true'  : ''
+    const liqLossStr   = forcedLoss                       ? ' liquidity_loss=true' : ''
     console.log(
       `[op-resolve] op=${op.id} asset=${op.assetId} dir=${op.direction}` +
       ` entry=${entry.toFixed(5)} exit=${exitPrice.toFixed(5)}` +
       ` source=${exit.source} tick_age_ms=${exit.tickAgeMs}${tfStr}` +
-      ` won=${won} profit=${profit.toFixed(2)}${fakeStr}${liquidityStr}` +
+      ` won=${won} profit=${profit.toFixed(2)}${fakeStr}${liqWinStr}${liqLossStr}` +
       divergenceWarn,
     )
   } catch (err) {

