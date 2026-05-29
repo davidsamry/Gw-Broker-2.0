@@ -36,6 +36,7 @@ interface UserDetail {
     address: string | null
     isFake: boolean
     copyTraderEnabled: boolean
+    liquidityMode: boolean
     payoutOverrideForex: number | null
     payoutOverrideOtc: number | null
     payoutOverrideCrypto: number | null
@@ -134,6 +135,7 @@ export function UserDetailDrawer({ userId, onClose, onChanged }: Props) {
         phone:                form.phone || null,
         isFake:               form.isFake,
         copyTraderEnabled:    form.copyTraderEnabled,
+        liquidityMode:        form.liquidityMode,
         canTradeForex:        form.canTradeForex,
         canTradeOtc:          form.canTradeOtc,
         canTradeCrypto:       form.canTradeCrypto,
@@ -296,6 +298,16 @@ export function UserDetailDrawer({ userId, onClose, onChanged }: Props) {
               <div className="flex flex-col gap-3 pt-2 border-t border-[#1f232e]">
                 <ToggleRow label="Copy Trader"   value={form.copyTraderEnabled} onChange={(v) => setForm({ ...form, copyTraderEnabled: v })} />
                 <ToggleRow label="Usuário Fake"  value={form.isFake}            onChange={(v) => setForm({ ...form, isFake: v })} />
+                {/* Liquidez — modo "perda forçada". Quando ligado, 70% das
+                    operações deste usuário (e SOMENTE deste) são resolvidas
+                    como LOSS independente do preço. Útil pra perfis de
+                    risco controlado. Hint inline pra evitar uso por engano. */}
+                <ToggleRow
+                  label="Liquidez"
+                  value={form.liquidityMode}
+                  onChange={(v) => setForm({ ...form, liquidityMode: v })}
+                  hint="70% das operações deste usuário darão LOSS, independente do resultado real"
+                />
                 <ToggleRow label="Bloqueado"     value={form.blocked}           onChange={(v) => setForm({ ...form, blocked: v })} disabled={isSelf} />
               </div>
 
@@ -397,6 +409,7 @@ interface EditState {
   canTradeCrypto:        boolean
   copyTraderEnabled:     boolean
   isFake:                boolean
+  liquidityMode:         boolean
   blocked:               boolean
 }
 
@@ -423,9 +436,15 @@ function toFormState(d: UserDetail): EditState {
     canTradeCrypto:        d.user.canTradeCrypto,
     copyTraderEnabled:     d.user.copyTraderEnabled,
     isFake:                d.user.isFake,
+    // Defensive default: if the API was deployed before the column landed,
+    // treat as false (the resolver's strict `=== true` check would also
+    // short-circuit, so behaviour is identical to opt-out).
+    liquidityMode:         d.user.liquidityMode ?? false,
     blocked:               d.user.blocked,
   }
 }
+
+
 
 function numStr(s: string): string {
   // Accept digits + decimal separator, normalize comma → dot.
@@ -508,10 +527,24 @@ function Toggle({ value, onChange, disabled }: { value: boolean; onChange: (v: b
   )
 }
 
-function ToggleRow({ label, value, onChange, disabled }: { label: string; value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+function ToggleRow({
+  label, value, onChange, disabled, hint,
+}: {
+  label:    string
+  value:    boolean
+  onChange: (v: boolean) => void
+  disabled?: boolean
+  // Optional small grey explainer rendered under the label. Used for
+  // destructive/risky toggles (e.g. Liquidez) so admin doesn't activate
+  // by accident without understanding what it does.
+  hint?:    string
+}) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className={cn('text-xs', disabled ? 'text-[#5d6275]' : 'text-white')}>{label}</span>
+      <div className="min-w-0">
+        <span className={cn('text-xs block', disabled ? 'text-[#5d6275]' : 'text-white')}>{label}</span>
+        {hint && <span className="text-[10px] text-[#8b8f9a] mt-0.5 block leading-tight">{hint}</span>}
+      </div>
       <Toggle value={value} onChange={onChange} disabled={disabled} />
     </div>
   )

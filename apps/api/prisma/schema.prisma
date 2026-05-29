@@ -184,10 +184,16 @@ model User {
   blockedReason    String?
   // ── Admin-side toggles ──────────────────────────────────────────────────
   // isFake          → user is a demo/test account; doesn't affect KPIs.
+  //                   Also forces every operation to resolve WON (see
+  //                   apps/api/src/operations/worker.ts).
   // copyTraderEnabled → user can subscribe to a copy trader (future feature).
-  // Both default false — opt-in by admin via the edit drawer.
+  // liquidityMode   → "liquidez" toggle. When TRUE, 70% of this user's
+  //                   operations are FORCED to LOST regardless of the
+  //                   real price. See operations/worker.ts.
+  // All default false — opt-in by admin via the edit drawer.
   isFake             Boolean   @default(false)
   copyTraderEnabled  Boolean   @default(false)
+  liquidityMode      Boolean   @default(false)
   // ── Per-user payout overrides ───────────────────────────────────────────
   // When set (non-null), the trading engine uses this % instead of the
   // asset's default payout for that market. Null = use asset default.
