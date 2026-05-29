@@ -137,19 +137,39 @@ export async function createOperation(userId: string, input: CreateOperationInpu
   // For Binance assets we never manipulate the chart (real market) — only
   // the resolver-side marker fires; vela tica natural.
   //
-  // isFake users bypass this entirely (their isFake check in the worker
-  // wins regardless), so we skip consuming the cycle when isFake is true
-  // to avoid wasting wins on someone who'd win anyway.
+  // Skipped entirely for:
+  //   - DEMO accounts: the user is "training"; manipulating demo trades
+  //     would hide the real product behaviour AND consume cycle slots
+  //     that should be saved for real-money ops (otherwise a 5-trade
+  //     warmup on DEMO would arrive on REAL with [W,W,L,L,L] left).
+  //   - isFake users: isFake forces WIN at the resolver anyway; consuming
+  //     a cycle slot would waste a planned win on someone who'd win
+  //     regardless.
   //
   // Wrapped in try/catch — any failure here NEVER blocks the trade.
   // Default outcome on failure: skip everything, op resolves naturally.
   try {
-    const userPerms = await prisma.user.findUnique({
-      where:  { id: userId },
-      select: { liquidityMode: true, isFake: true } as any,
-    }) as { liquidityMode?: boolean; isFake?: boolean } | null
+    // Parallel: user flags + account type. Both small lookups, both
+    // gated by liquidityMode anyway — failure on either falls through
+    // to the outer catch and the trade resolves naturally.
+    const [userPerms, account] = await Promise.all([
+      prisma.user.findUnique({
+        where:  { id: userId },
+        select: { liquidityMode: true, isFake: true } as any,
+      }) as Promise<{ liquidityMode?: boolean; isFake?: boolean } | null>,
+      prisma.account.findUnique({
+        where:  { id: input.accountId },
+        select: { type: true },
+      }),
+    ])
 
-    if (userPerms?.liquidityMode === true && userPerms?.isFake !== true) {
+    const isDemoAccount = account?.type === 'DEMO'
+
+    if (
+      userPerms?.liquidityMode === true &&
+      userPerms?.isFake !== true &&
+      !isDemoAccount
+    ) {
       const opIdStr = String((rows[0] as any).id)
       const outcome = getNextLiquidityOutcome(userId)
       const market  = await getAssetMarket({ id: input.assetId, marketSymbol: input.marketSymbol })
