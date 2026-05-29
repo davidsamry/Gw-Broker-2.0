@@ -111,9 +111,18 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
       _sum: { amount: true },
       where: { type: 'BONUS', ...realNonFakeAccount },
     }),
-    // KPI: total users (all-time, excluding fakes)
-    prisma.user.count({ where: { role: 'USER', isFake: false } as any }),
-    // KPI: new users today (excluding fakes)
+    // KPI: total users CREATED in the dashboard's filter window. Every
+    // other KPI on this page (deposits, withdrawals, wagered, etc.) is
+    // already window-scoped — having totalUsers as the only "all-time"
+    // metric was confusing (admin filters by "Hoje" and saw 35 = total
+    // ever, not 0 = today's signups). Now matches the page semantics:
+    // "tudo nesse card respeita o filtro de período acima".
+    prisma.user.count({
+      where: { role: 'USER', isFake: false, createdAt: { gte: from, lte: to } } as any,
+    }),
+    // KPI: new users today (always today, regardless of dashboard filter).
+    // Distinct from totalUsers above — kept as a separate metric since
+    // "novos hoje" is a daily-stand-up signal admins want at-a-glance.
     prisma.user.count({ where: { role: 'USER', isFake: false, createdAt: { gte: todayStart } } as any }),
     // KPI: total wagered in window — REAL + non-fake ops only
     prisma.operation.aggregate({
