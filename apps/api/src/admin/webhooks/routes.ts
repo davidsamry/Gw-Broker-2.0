@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
-  listWebhookConfigs, updateWebhookConfig, type WebhookKey,
+  listWebhookConfigs, updateWebhookConfig, getWebhookConfig, type WebhookKey,
 } from '../../webhooks/service.js'
 
 const WEBHOOK_KEYS = ['REGISTRATION', 'FIRST_DEPOSIT', 'SUBSEQUENT_DEPOSIT'] as const
@@ -46,5 +46,67 @@ export async function webhooksAdminRoutes(app: FastifyInstance) {
     const updated = await updateWebhookConfig(p.data.key as WebhookKey, b.data)
     if (!updated) return reply.status(404).send({ error: 'NOT_FOUND' })
     return reply.send({ config: updated })
+  })
+
+  // POST /:key/test — dispatches a sample payload to the configured URL
+  // and returns the live result (status code + duration) so the admin can
+  // verify the receiver is reachable WITHOUT having to register a real
+  // user or wait for a real deposit. Unlike the production flows this is
+  // SYNCHRONOUS: we await the POST so the admin sees the outcome inline.
+  //
+  // The URL must already be saved (we read from the DB, not the request
+  // body) so the admin can't accidentally test something different from
+  // what'll fire in production. Test fires even if `active` is false —
+  // toggle is a "production gate" only, not a "block all traffic" gate.
+  app.post('/:key/test', async (req, reply) => {
+    const p = paramsSchema.safeParse(req.params)
+    if (!p.success) return reply.status(400).send({ error: 'INVALID_KEY' })
+
+    const cfg = await getWebhookConfig(p.data.key as WebhookKey)
+    if (!cfg)                                return reply.status(404).send({ error: 'NOT_FOUND' })
+    if (!cfg.url || cfg.url.trim() === '')   return reply.status(400).send({ error: 'URL_EMPTY' })
+
+    // Sample payload matching the TrackFlow spec for each key. Admin
+    // recognises this came from the test button via the obviously-fake
+    // email; production payloads always use the real user email.
+    const samplePayload =
+      cfg.key === 'REGISTRATION'
+        ? { event_name: 'Registration',  email: 'test@vx-global.com' }
+        : cfg.key === 'FIRST_DEPOSIT'
+          ? { value: 100.00, event_name: 'FirstDeposit', email: 'test@vx-global.com' }
+          : { value: 250.00, event_name: 'Deposit',      email: 'test@vx-global.com' }
+
+    const startedAt = Date.now()
+    try {
+      const res = await fetch(cfg.url.trim(), {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(samplePayload),
+        signal:  AbortSignal.timeout(30_000),
+      })
+      const durationMs = Date.now() - startedAt
+      let responseBody: string | null = null
+      try {
+        responseBody = (await res.text()).slice(0, 500)   // cap to avoid huge dumps
+      } catch { /* body unreadable — ignore */ }
+
+      return reply.send({
+        ok:           res.ok,
+        status:       res.status,
+        statusText:   res.statusText,
+        durationMs,
+        payloadSent:  samplePayload,
+        responseBody,
+      })
+    } catch (err: any) {
+      const durationMs = Date.now() - startedAt
+      return reply.status(502).send({
+        ok:          false,
+        error:       err?.name === 'TimeoutError' ? 'TIMEOUT' : 'NETWORK_ERROR',
+        message:     err?.message ?? String(err),
+        durationMs,
+        payloadSent: samplePayload,
+      })
+    }
   })
 }

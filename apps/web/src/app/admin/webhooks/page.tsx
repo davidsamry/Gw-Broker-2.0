@@ -6,7 +6,7 @@
 // URL input, save on blur/Enter, status feedback.
 
 import { useCallback, useEffect, useState } from 'react'
-import { Webhook, DollarSign, ArrowRightLeft, UserPlus, RefreshCw, Check } from 'lucide-react'
+import { Webhook, DollarSign, ArrowRightLeft, UserPlus, RefreshCw, Check, Send, X as XIcon } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -148,6 +148,15 @@ function WebhookCard({
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const [err, setErr]       = useState('')
+  // Test-send state — independent of save state so a save in flight
+  // doesn't block clicking Test, and vice versa.
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{
+    ok:         boolean
+    status?:    number
+    durationMs: number
+    message?:   string
+  } | null>(null)
 
   // Sync local state when the parent re-hydrates the config (e.g. after
   // a manual refresh). Don't fight the user: only sync if they haven't
@@ -192,6 +201,30 @@ function WebhookCard({
     save({ url: trimmed })
   }
 
+  // Send a test payload to the configured URL. Backend returns the live
+  // result (status + duration) so we surface it inline — no inbox / log
+  // tailing required to confirm reachability.
+  async function sendTest() {
+    if (testing || !config) return
+    if (!url.trim()) { setErr('Salve uma URL antes de testar.'); return }
+    setTesting(true); setErr(''); setTestResult(null)
+    try {
+      const res = await api.post(`/admin/webhooks/${meta.key}/test`)
+      const data = res.data as { ok: boolean; status?: number; durationMs: number }
+      setTestResult({ ok: data.ok, status: data.status, durationMs: data.durationMs })
+    } catch (e: any) {
+      const body = e?.response?.data ?? {}
+      setTestResult({
+        ok:         false,
+        status:     body.status,
+        durationMs: body.durationMs ?? 0,
+        message:    body.message ?? body.error ?? 'Erro desconhecido',
+      })
+    } finally {
+      setTesting(false)
+    }
+  }
+
   return (
     <div className="bg-[#13161f] border border-[#1f232e] rounded-xl p-4">
       <div className="flex items-start justify-between gap-3 mb-2">
@@ -204,26 +237,37 @@ function WebhookCard({
         </div>
       </div>
 
-      {/* Toggle row */}
+      {/* Toggle row — track + thumb sized with inline style so a flex
+          parent can't squash it. Tailwind's `w-11 h-6` was being
+          shrunk to 35×19 in practice (sub-pixel rounding from the
+          flex-shrink chain), pushing the thumb visually outside. */}
       <div className="flex items-center justify-between gap-3 mt-3 mb-3">
-        <div>
+        <div className="min-w-0">
           <div className="text-[11px] font-semibold text-white">Ativo</div>
           <div className="text-[10px] text-[#8b8f9a]">Ativar disparo deste webhook</div>
         </div>
         <button
           onClick={toggleActive}
           disabled={saving || !config}
+          style={{ width: 44, height: 24 }}
           className={cn(
-            'relative w-11 h-6 rounded-full transition-colors flex-shrink-0',
+            'relative rounded-full transition-colors flex-shrink-0',
             active ? 'bg-emerald-500' : 'bg-[#252a3a]',
-            (saving || !config) && 'opacity-50',
+            (saving || !config) && 'opacity-50 cursor-not-allowed',
           )}
           aria-label={active ? 'Desativar' : 'Ativar'}
         >
-          <span className={cn(
-            'absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform',
-            active ? 'translate-x-5' : 'translate-x-0.5',
-          )} />
+          <span
+            style={{
+              width:     20,
+              height:    20,
+              top:       2,
+              left:      2,
+              transform: `translateX(${active ? 20 : 0}px)`,
+              transition: 'transform 200ms',
+            }}
+            className="absolute rounded-full bg-white shadow"
+          />
         </button>
       </div>
 
@@ -249,6 +293,41 @@ function WebhookCard({
           )}
         </div>
         {err && <p className="text-[11px] text-red-400 mt-1.5">{err}</p>}
+      </div>
+
+      {/* Test row — sends a sample payload (one shot, no retry) and
+          surfaces the live response status + duration so the admin can
+          verify the receiver is reachable without registering a fake
+          user or making a real deposit. Fires regardless of `active`
+          (toggle is the production gate, not a global block). */}
+      <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-[#1f232e]">
+        <div className="flex-1 min-w-0">
+          {testResult ? (
+            <div className={cn(
+              'inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold border',
+              testResult.ok
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                : 'bg-red-500/15 border-red-500/40 text-red-300',
+            )}>
+              {testResult.ok ? <Check size={11} /> : <XIcon size={11} />}
+              {testResult.ok
+                ? `Sucesso · HTTP ${testResult.status} · ${testResult.durationMs}ms`
+                : `Falhou${testResult.status ? ` · HTTP ${testResult.status}` : ''}${testResult.durationMs ? ` · ${testResult.durationMs}ms` : ''}${testResult.message ? ` · ${testResult.message}` : ''}`}
+            </div>
+          ) : (
+            <span className="text-[10px] text-[#8b8f9a]">
+              Envia um payload de exemplo para verificar a URL
+            </span>
+          )}
+        </div>
+        <button
+          onClick={sendTest}
+          disabled={testing || saving || !config || !url.trim()}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1f232e] bg-[#1a1e2a] text-[11px] font-semibold text-white hover:bg-white/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+        >
+          <Send size={11} />
+          {testing ? 'Enviando…' : 'Enviar teste'}
+        </button>
       </div>
     </div>
   )
