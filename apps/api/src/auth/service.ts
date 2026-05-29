@@ -7,7 +7,10 @@ import { sendEmailAsync } from '../email/service.js'
 
 const DEMO_BALANCE = Number(process.env.DEMO_INITIAL_BALANCE ?? 10000)
 
-export async function registerUser(input: RegisterInput) {
+export async function registerUser(input: RegisterInput, requestMeta?: {
+  ip?:        string | null
+  userAgent?: string | null
+}) {
   const existing = await prisma.user.findUnique({ where: { email: input.email } })
   if (existing) throw new Error('EMAIL_TAKEN')
 
@@ -58,6 +61,30 @@ export async function registerUser(input: RegisterInput) {
   void import('../webhooks/service.js').then(({ sendRegistrationWebhook }) => {
     sendRegistrationWebhook(user.email)
   }).catch(() => { /* dynamic import only fails on bundler weirdness */ })
+
+  // Meta Conversions API — save attribution + fire CompleteRegistration.
+  // Both fire-and-forget. Attribution save MUST happen before the event
+  // fires so the event includes fbp/fbc; we await it briefly (sub-ms in
+  // practice — single UPSERT) and then dispatch the event. Failure on
+  // either side is logged, never thrown.
+  void (async () => {
+    try {
+      const { saveUserTracking } = await import('../meta/tracking.js')
+      await saveUserTracking(user.id, {
+        ...(input.tracking ?? {}),
+        ip:        requestMeta?.ip        ?? null,
+        userAgent: requestMeta?.userAgent ?? null,
+      })
+    } catch (err) {
+      console.error('[meta] saveUserTracking failed (non-fatal)', err)
+    }
+    try {
+      const { sendCompleteRegistrationAsync } = await import('../meta/service.js')
+      sendCompleteRegistrationAsync({ id: user.id, email: user.email })
+    } catch (err) {
+      console.error('[meta] CompleteRegistration enqueue failed (non-fatal)', err)
+    }
+  })()
 
   return sanitizeUser(user)
 }

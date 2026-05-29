@@ -11,6 +11,21 @@ export const registerSchema = z.object({
               .transform(s => s.replace(/\D/g, ''))
               .refine(s => s.length === 11, 'CPF deve ter 11 dígitos.')
               .refine(isValidCpfChecksum, 'CPF inválido.'),
+  // Optional Meta Conversions API attribution. Frontend captures fbp/
+  // fbc/utm from cookies + query string and forwards them here so the
+  // server-side CompleteRegistration event has full attribution context.
+  // ALL optional — absence just degrades attribution quality, never blocks
+  // registration.
+  tracking: z.object({
+    fbp:         z.string().max(200).optional().nullable(),
+    fbc:         z.string().max(200).optional().nullable(),
+    fbclid:      z.string().max(200).optional().nullable(),
+    utmSource:   z.string().max(200).optional().nullable(),
+    utmMedium:   z.string().max(200).optional().nullable(),
+    utmCampaign: z.string().max(200).optional().nullable(),
+    utmContent:  z.string().max(200).optional().nullable(),
+    utmTerm:     z.string().max(200).optional().nullable(),
+  }).optional(),
 })
 
 // Standard Brazilian CPF mod-11 checksum. Rejects strings of repeated

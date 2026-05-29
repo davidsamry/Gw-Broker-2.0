@@ -23,7 +23,13 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     try {
-      const user  = await registerUser(parsed.data)
+      // Forward request IP + user-agent so registerUser can persist them
+      // into user_tracking alongside the client-supplied fbp/fbc/utm.
+      // x-forwarded-for honoured for the EasyPanel reverse proxy case.
+      const xfwd = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+      const ip   = xfwd || req.ip || null
+      const ua   = (req.headers['user-agent'] as string | undefined) ?? null
+      const user  = await registerUser(parsed.data, { ip, userAgent: ua })
       const token = await issueTokens(app, reply, user.id)
       return reply.send({ token, user })
     } catch (err: any) {

@@ -216,6 +216,9 @@ model User {
   ticketMessages      TicketMessage[]
   passwordResetTokens PasswordResetToken[]
   botRefreshTokens    BotRefreshToken[]
+  // Meta Conversions API attribution data captured at register time.
+  // 1-to-1 (one row per user) — see UserTracking model below.
+  tracking            UserTracking?
 
   @@map("users")
 }
@@ -820,6 +823,59 @@ model BotRefreshToken {
   @@index([userId])
   @@index([expiresAt])
   @@map("bot_refresh_tokens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Meta Conversions API integration. Three tables — admin configures Pixel ID
+// + token at /admin/meta-pixel (NOT via env vars), backend sends server-side
+// events on user register + deposit confirmation. See apps/api/src/meta/.
+
+model MetaPixelSettings {
+  id            String   @id @default("global")
+  enabled       Boolean  @default(false)
+  pixelId       String?
+  pixelToken    String?
+  testEventCode String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@map("meta_pixel_settings")
+}
+
+model UserTracking {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fbp         String?
+  fbc         String?
+  fbclid      String?
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@map("user_tracking")
+}
+
+model MetaEventLog {
+  id           String   @id @default(cuid())
+  eventName    String
+  eventId      String
+  userId       String?
+  depositId    String?
+  payload      Json
+  response     Json?
+  success      Boolean  @default(false)
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  @@index([eventId])
+  @@index([userId])
+  @@index([createdAt(sort: Desc)])
+  @@map("meta_events_log")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

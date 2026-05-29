@@ -293,5 +293,34 @@ export async function confirmDepositById(depositId: string) {
     console.error(`[deposits] webhook dispatch failed for deposit=${depositId}`, err)
   }
 
+  // Meta Conversions API — Purchase event. Only fires on the confirm
+  // transition (this function is the ONLY caller for PENDING→PAID), so
+  // dedupe via meta_events_log catches the rare double-confirm race.
+  // Pulls user id + email + amount in one extra query. Phone is omitted
+  // intentionally — the User model doesn't carry a verified phone field
+  // we'd want to hash + send to Meta.
+  try {
+    const purchaseLookup = await prisma.$queryRaw<Array<{
+      userId: string; email: string; amount: string;
+    }>>`
+      SELECT u.id AS "userId", u.email, d.amount::text AS amount
+      FROM deposits d
+      JOIN accounts a ON a.id = d."accountId"
+      JOIN users    u ON u.id = a."userId"
+      WHERE d.id = ${depositId}
+      LIMIT 1
+    `
+    const row = purchaseLookup[0]
+    if (row) {
+      const { sendPurchaseAsync } = await import('../meta/service.js')
+      sendPurchaseAsync(
+        { id: row.userId, email: row.email },
+        { id: depositId, amount: Number(row.amount) },
+      )
+    }
+  } catch (err) {
+    console.error(`[meta] Purchase enqueue failed for deposit=${depositId} (non-fatal)`, err)
+  }
+
   return true
 }

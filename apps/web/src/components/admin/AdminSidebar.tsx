@@ -44,6 +44,7 @@ const MENU: MenuItem[] = [
   { href: '/admin/configuracoes',  label: 'Configurações',   icon: <Settings size={15} /> },
   { href: '/admin/api',            label: 'API',             icon: <Plug size={15} /> },
   { href: '/admin/webhooks',       label: 'Webhooks',        icon: <Webhook size={15} /> },
+  { href: '/admin/meta-pixel',     label: 'Meta Pixel',      icon: <Activity size={15} /> },
 ]
 
 interface AdminSidebarProps {

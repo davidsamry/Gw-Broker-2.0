@@ -184,7 +184,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   register: async (name, email, password, cpf) => {
-    const { data } = await api.post('/auth/register', { name, email, password, cpf })
+    // Attach Meta attribution captured from the landing page / current
+    // URL (fbp/fbc cookies + utm_* query params). Backend persists it in
+    // user_tracking and uses it on the CompleteRegistration Conversions
+    // API event. NEVER throw from this — register must succeed even if
+    // the metaTracking module is broken or window unavailable.
+    let tracking: Record<string, unknown> | undefined
+    try {
+      const { captureMetaTracking } = await import('@/lib/metaTracking')
+      tracking = captureMetaTracking() as Record<string, unknown>
+    } catch { /* swallow — attribution is best-effort */ }
+    const { data } = await api.post('/auth/register', { name, email, password, cpf, tracking })
     localStorage.setItem('token', data.token)
     saveUserCache(data.user)
     set({ user: data.user, token: data.token })
