@@ -253,5 +253,45 @@ export async function confirmDepositById(depositId: string) {
     console.error('[deposits] confirmation email lookup failed', err)
   }
 
+  // Outbound webhook (TrackFlow integration). Distinguish first-time
+  // deposit (FTD) from subsequent: query the count of PAID deposits for
+  // this user. If this is the only one, it's the first. Fire-and-forget,
+  // failure never affects the deposit flow.
+  //
+  // We re-fetch user.email here (instead of reusing `info` above) so the
+  // webhook still fires even if the email block above threw early.
+  try {
+    const lookup = await prisma.$queryRaw<Array<{
+      email: string; amount: string; paid_count: bigint;
+    }>>`
+      SELECT
+        u.email,
+        d.amount::text AS amount,
+        (
+          SELECT COUNT(*)::bigint
+          FROM deposits d2
+          INNER JOIN accounts a2 ON a2.id = d2."accountId"
+          WHERE a2."userId" = u.id
+            AND d2.status = 'PAID'::"DepositStatus"
+        ) AS paid_count
+      FROM deposits d
+      JOIN accounts a ON a.id = d."accountId"
+      JOIN users    u ON u.id = a."userId"
+      WHERE d.id = ${depositId}
+      LIMIT 1
+    `
+    const row = lookup[0]
+    if (row) {
+      const isFirst = Number(row.paid_count) === 1
+      const value   = Number(row.amount)
+      const { sendFirstDepositWebhook, sendSubsequentDepositWebhook } =
+        await import('../webhooks/service.js')
+      if (isFirst) sendFirstDepositWebhook(row.email, value)
+      else         sendSubsequentDepositWebhook(row.email, value)
+    }
+  } catch (err) {
+    console.error(`[deposits] webhook dispatch failed for deposit=${depositId}`, err)
+  }
+
   return true
 }

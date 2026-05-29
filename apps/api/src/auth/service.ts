@@ -52,6 +52,13 @@ export async function registerUser(input: RegisterInput) {
     vars:        { name: user.name },
   })
 
+  // Fire-and-forget outbound webhook (TrackFlow integration). Admin
+  // toggles + URL configurable via /admin/webhooks. Like the email above,
+  // never blocks the registration flow — service swallows all errors.
+  void import('../webhooks/service.js').then(({ sendRegistrationWebhook }) => {
+    sendRegistrationWebhook(user.email)
+  }).catch(() => { /* dynamic import only fails on bundler weirdness */ })
+
   return sanitizeUser(user)
 }
 

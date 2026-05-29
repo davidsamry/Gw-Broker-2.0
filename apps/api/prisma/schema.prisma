@@ -815,3 +815,22 @@ model BotRefreshToken {
   @@index([expiresAt])
   @@map("bot_refresh_tokens")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Outbound webhook configuration — per-event URL + on/off toggle.
+//
+// `key` is one of: REGISTRATION, FIRST_DEPOSIT, SUBSEQUENT_DEPOSIT (enforced
+// at the service layer, not the DB, so new event types can ship without a
+// migration). The fire-and-forget sender in apps/api/src/webhooks/ looks up
+// the row, no-ops if `active` is false or `url` is empty, otherwise POSTs
+// the event payload with retry + 30s timeout. Admin manages via /admin/webhooks.
+model WebhookConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  url       String   @default("")
+  active    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("webhook_configs")
+}
