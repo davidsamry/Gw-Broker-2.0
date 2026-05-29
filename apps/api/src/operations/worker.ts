@@ -1,11 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 import { publishOperationEvent } from './events.js'
-import {
-  isOpForcedLoss, clearOpForcedLoss,
-  isOpForcedWin,  clearOpForcedWin,
-  clearLiquiditySignalsForOp,
-} from './liquidityManipulation.js'
+import { clearLiquiditySignalsForOp } from './liquidityManipulation.js'
 
 // Polls the DB for OPEN operations whose expiresAt has passed and resolves
 // them. Survives restarts: on boot it catches up on any backlog from downtime.
@@ -186,12 +182,12 @@ async function resolveOperation(op: {
   // ever fails (returns undefined), the falsy default means normal price
   // comparison applies. Fail-safe is "behave like a real user".
   isFake?:      boolean
-  // Per User.liquidityMode — admin "liquidez" toggle. When true, 70% of
-  // this user's resolutions are FORCED to LOST regardless of price
-  // (each op rolls independently for natural variance). Same JOIN-loaded
-  // pattern + fail-safe as isFake. isFake wins if both flags are set
-  // (it's checked first below) — admin shouldn't combine them anyway.
-  liquidityMode?: boolean
+  // Per-op liquidity-cycle outcome decided at OPEN time in
+  // createOperation and persisted on the row itself. Values: 'WIN',
+  // 'LOSS', or null (not a liquidity op). Reading from the row instead
+  // of an in-memory Set means restarts/redeploys between open and
+  // resolve don't drop the plan — the worker always honours the cycle.
+  liquidityOutcome?: string | null
 }) {
   try {
     const entry = Number(op.entryPrice)
@@ -217,26 +213,27 @@ async function resolveOperation(op: {
       }
     }
 
-    // ── Per-user resolution overrides ──
+    // ── Per-op resolution overrides ──
     //
-    // STRICT gates — `=== true` only. Order matters: isFake checked FIRST
-    // so a demo-fake user marked as liquidityMode by mistake still always
-    // wins (admin shouldn't combine, but we err on the safe side).
+    // STRICT gates — `=== true` / explicit string match only. Order
+    // matters: isFake checked FIRST so a demo-fake user marked as
+    // liquidityMode by mistake still always wins (admin shouldn't
+    // combine, but we err on the safe side).
     //
     //  1. isFake — every resolution forced to WON.
-    //  2. liquidity cycle markers — set at OPEN time in createOperation.
-    //     A liquidity user has a shuffled queue of 7 LOSS + 3 WIN per 10
-    //     ops; whichever the slot picked, the corresponding marker was
-    //     added (forceWin or forceLoss). isFake wins over both if both
-    //     are set (admin shouldn't combine isFake + liquidityMode, but we
-    //     defend by checking isFake first). For OTC the candle was ALSO
-    //     nudged in the matching direction (same dir for WIN, opposite
-    //     for LOSS), so vela coerente in both branches.
+    //  2. liquidity-cycle outcome — read from op.liquidityOutcome on the
+    //     row (persisted at OPEN time). 'WIN' forces WON, 'LOSS' forces
+    //     LOST, null/anything-else falls through. Reading from the row
+    //     means the plan survives restarts between open and resolve.
+    //     For OTC the candle was ALSO nudged in the matching direction
+    //     at OPEN time (in-memory signal), so vela tica coerente. Even
+    //     if the candle signal was lost to a restart, the OP outcome is
+    //     still correct (forced from the persisted column).
     //
-    // Defaults (no marker present) keep the existing CALL/PUT-vs-price
-    // logic untouched. NO real user without admin opt-in lands here.
-    const forcedWin  = op.isFake === true || isOpForcedWin(op.id)
-    const forcedLoss = !forcedWin && isOpForcedLoss(op.id)
+    // Defaults (NULL liquidityOutcome) keep the existing CALL/PUT-vs-
+    // price logic untouched. NO real user without admin opt-in lands here.
+    const forcedWin  = op.isFake === true || op.liquidityOutcome === 'WIN'
+    const forcedLoss = !forcedWin && op.liquidityOutcome === 'LOSS'
 
     const won = forcedWin
       ? true
@@ -245,11 +242,9 @@ async function resolveOperation(op: {
         : (op.direction === 'CALL' && exitPrice > entry) ||
           (op.direction === 'PUT'  && exitPrice < entry)
 
-    // Cleanup the in-memory markers regardless of outcome — keeps the
-    // Sets + signal map from growing unbounded. Safe to call even if no
-    // entry exists (all three helpers are no-ops in that case).
-    clearOpForcedLoss(op.id)
-    clearOpForcedWin(op.id)
+    // Cleanup the in-memory candle signal (vela nudge) — bounded GC for
+    // the signal map. The persisted column is left untouched: it's the
+    // audit trail of WHY this op resolved the way it did.
     clearLiquiditySignalsForOp(op.id)
 
     const profit = won ? parseFloat((amount * (op.payout / 100)).toFixed(2)) : 0
@@ -351,25 +346,22 @@ async function tick() {
       select:  {
         id: true, accountId: true, assetId: true, assetSymbol: true, amount: true, payout: true,
         entryPrice: true, expiresAt: true, openedAt: true, direction: true, marketSymbol: true,
-        // JOIN to read the per-user override flags. accountId → account
-        // → user is FK-indexed; cost is negligible. `as any` on the
-        // inner select because Prisma client types may lag the new
-        // `liquidityMode` field until next `prisma generate` — the
-        // runtime query is fine, the column exists post-migration.
-        account: { select: { user: { select: { isFake: true, liquidityMode: true } as any } } },
+        liquidityOutcome: true,
+        // JOIN to read User.isFake (still in-memory at the user level,
+        // not per-op). `as any` on the inner select because the Prisma
+        // client may lag schema briefly post-deploy — the runtime query
+        // is fine, the column exists post-migration.
+        account: { select: { user: { select: { isFake: true } as any } } },
       } as any,
     })
 
     if (expiredRaw.length === 0) return
 
-    // Flatten override flags onto the op so resolveOperation's shape
-    // stays flat. Use `as any` access because the Prisma client may be
-    // stale locally for the new `liquidityMode` field until next gen —
-    // typecheck on the schema-aware build is fine.
+    // Flatten isFake onto the op so resolveOperation's shape stays flat.
+    // liquidityOutcome is already a top-level column.
     const expired = (expiredRaw as any[]).map((o) => ({
       ...o,
-      isFake:        o.account.user.isFake,
-      liquidityMode: o.account.user.liquidityMode === true,
+      isFake: o.account.user.isFake,
     }))
 
     // Resolve in parallel — each call's atomic claim prevents double-processing.
@@ -399,15 +391,15 @@ export async function resolveOperationIfExpired(operationId: string): Promise<vo
     select: {
       id: true, accountId: true, assetId: true, assetSymbol: true, amount: true, payout: true,
       entryPrice: true, expiresAt: true, openedAt: true, direction: true, marketSymbol: true,
-      account: { select: { user: { select: { isFake: true, liquidityMode: true } as any } } },
+      liquidityOutcome: true,
+      account: { select: { user: { select: { isFake: true } as any } } },
     } as any,
   })
   if (!raw) return
   const rawAny = raw as any
   await resolveOperation({
     ...rawAny,
-    isFake:        rawAny.account.user.isFake,
-    liquidityMode: rawAny.account.user.liquidityMode === true,
+    isFake: rawAny.account.user.isFake,
   })
 }
 

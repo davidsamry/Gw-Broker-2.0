@@ -7,9 +7,9 @@ import { getSettings } from '../settings/service.js'
 import { publishOperationEvent } from './events.js'
 import { assertMarketAllowed, getAssetMarket } from './marketPermissions.js'
 import {
-  markOpForcedLoss, markOpForcedWin,
   registerLiquiditySignal,
   getNextLiquidityOutcome,
+  type LiquidityOutcome,
 } from './liquidityManipulation.js'
 
 const M1_SLOT_MS = 60_000
@@ -69,6 +69,43 @@ export async function createOperation(userId: string, input: CreateOperationInpu
     }
   }
 
+  // ── Liquidity-cycle decision (BEFORE the INSERT so the outcome can
+  // be persisted in the operations row itself, not just in memory).
+  //
+  // Each user with liquidityMode=true has a shuffled queue of 10 outcomes
+  // (7 'LOSS' + 3 'WIN'); each call consumes one. The picked outcome is
+  // stored as a STRING column on the row, surviving any restart.
+  //
+  // Skipped entirely for:
+  //   - DEMO accounts: user is "training"; don't waste cycle slots and
+  //     don't manipulate demo trades (must reflect real behaviour).
+  //   - isFake users: isFake forces WIN at the resolver regardless;
+  //     consuming a cycle slot would waste a planned win.
+  //   - Any error in the lookup: silently skip — op resolves naturally.
+  let liquidityOutcome: LiquidityOutcome | null = null
+  try {
+    const [userPerms, account] = await Promise.all([
+      prisma.user.findUnique({
+        where:  { id: userId },
+        select: { liquidityMode: true, isFake: true } as any,
+      }) as Promise<{ liquidityMode?: boolean; isFake?: boolean } | null>,
+      prisma.account.findUnique({
+        where:  { id: input.accountId },
+        select: { type: true },
+      }),
+    ])
+    const isDemoAccount = account?.type === 'DEMO'
+    if (
+      userPerms?.liquidityMode === true &&
+      userPerms?.isFake !== true &&
+      !isDemoAccount
+    ) {
+      liquidityOutcome = getNextLiquidityOutcome(userId)
+    }
+  } catch (err) {
+    console.error('[liquidity] decision failed (non-fatal — op resolves naturally)', err)
+  }
+
   const rows = await prisma.$queryRaw<Array<Record<string, unknown>>>`
     WITH
       valid AS (
@@ -79,12 +116,12 @@ export async function createOperation(userId: string, input: CreateOperationInpu
       ),
       ins_op AS (
         INSERT INTO operations
-          (id, "accountId", "assetId", "assetSymbol", "marketSymbol", direction, amount, payout, "entryPrice", "expiresAt", status, "openedAt")
+          (id, "accountId", "assetId", "assetSymbol", "marketSymbol", direction, amount, payout, "entryPrice", "expiresAt", status, "openedAt", "liquidityOutcome")
         SELECT
           ${operationId}, id, ${input.assetId}, ${input.assetSymbol}, ${input.marketSymbol ?? null},
           ${input.direction}::"Direction", ${new Prisma.Decimal(input.amount)},
           ${input.payout}, ${new Prisma.Decimal(entryPrice)},
-          ${expiresAt}, 'OPEN'::"OperationStatus", NOW()
+          ${expiresAt}, 'OPEN'::"OperationStatus", NOW(), ${liquidityOutcome}
         FROM valid
         RETURNING *
       ),
@@ -117,100 +154,46 @@ export async function createOperation(userId: string, input: CreateOperationInpu
     throw new Error('INSUFFICIENT_BALANCE')
   }
 
-  // ── Liquidity-mode cycle (per-user "modo liquidez" → 7L+3W per 10 ops).
-  // Replaces the previous Math.random() < 0.7 independent per-op roll.
-  // Each user with liquidityMode=true has a shuffled queue of 10 outcomes
-  // (7 'LOSS' + 3 'WIN'); each call consumes one. When the queue empties,
-  // a fresh shuffle is generated.
+  // ── Post-INSERT: register the candle nudge signal (in-memory, OTC only).
   //
-  // Why deterministic instead of independent rolls: with 70% per-op the
-  // user could see 10 losses in a row by chance; with the cycle the user
-  // sees EXACTLY 7L+3W per 10 ops, but the position of the 3 wins is
-  // unpredictable (Fisher-Yates).
+  // The OUTCOME (WIN/LOSS) was already persisted in the operations row
+  // above — that's what the worker reads to force the resolution. This
+  // block is purely visual: nudges the OTC candle so it closes coherent
+  // with the forced outcome (vela vermelha quando user CALL e cycle=LOSS,
+  // vela verde quando user CALL e cycle=WIN).
   //
-  // What we do per outcome:
-  //   LOSS → markOpForcedLoss + (OTC) register signal in OPPOSITE direction
-  //          → vela vermelha quando user CALL, verde quando user PUT
-  //   WIN  → markOpForcedWin  + (OTC) register signal in SAME direction
-  //          → vela verde quando user CALL, vermelha quando user PUT
+  // For Binance/crypto we never touch the candle (real market).
   //
-  // For Binance assets we never manipulate the chart (real market) — only
-  // the resolver-side marker fires; vela tica natural.
-  //
-  // Skipped entirely for:
-  //   - DEMO accounts: the user is "training"; manipulating demo trades
-  //     would hide the real product behaviour AND consume cycle slots
-  //     that should be saved for real-money ops (otherwise a 5-trade
-  //     warmup on DEMO would arrive on REAL with [W,W,L,L,L] left).
-  //   - isFake users: isFake forces WIN at the resolver anyway; consuming
-  //     a cycle slot would waste a planned win on someone who'd win
-  //     regardless.
-  //
-  // Wrapped in try/catch — any failure here NEVER blocks the trade.
-  // Default outcome on failure: skip everything, op resolves naturally.
-  try {
-    // Parallel: user flags + account type. Both small lookups, both
-    // gated by liquidityMode anyway — failure on either falls through
-    // to the outer catch and the trade resolves naturally.
-    const [userPerms, account] = await Promise.all([
-      prisma.user.findUnique({
-        where:  { id: userId },
-        select: { liquidityMode: true, isFake: true } as any,
-      }) as Promise<{ liquidityMode?: boolean; isFake?: boolean } | null>,
-      prisma.account.findUnique({
-        where:  { id: input.accountId },
-        select: { type: true },
-      }),
-    ])
-
-    const isDemoAccount = account?.type === 'DEMO'
-
-    if (
-      userPerms?.liquidityMode === true &&
-      userPerms?.isFake !== true &&
-      !isDemoAccount
-    ) {
-      const opIdStr = String((rows[0] as any).id)
-      const outcome = getNextLiquidityOutcome(userId)
-      const market  = await getAssetMarket({ id: input.assetId, marketSymbol: input.marketSymbol })
+  // In-memory only by design: the signal is meaningful only inside the
+  // M1 slot it targets (<60s), so even on restart the worst case is
+  // "vela ticou natural pelos últimos segundos, mas o resultado da op
+  // ainda é forçado pelo DB". The op outcome is safe.
+  if (liquidityOutcome) {
+    try {
+      const opIdStr   = String((rows[0] as any).id)
+      const market    = await getAssetMarket({ id: input.assetId, marketSymbol: input.marketSymbol })
       const expiresMs = expiresAt.getTime()
       const slotEndMs = (Math.floor(expiresMs / M1_SLOT_MS) + 1) * M1_SLOT_MS
+      // LOSS → vela na direção OPOSTA à aposta. WIN → mesma direção.
+      const nudgeDir: 'CALL' | 'PUT' = liquidityOutcome === 'LOSS'
+        ? (input.direction === 'CALL' ? 'PUT' : 'CALL')
+        : input.direction
 
-      if (outcome === 'LOSS') {
-        markOpForcedLoss(opIdStr)
-        if (market !== 'crypto') {
-          // Vela coerente: fechar OPOSTO ao que o user apostou para perder.
-          const opposite: 'CALL' | 'PUT' = input.direction === 'CALL' ? 'PUT' : 'CALL'
-          registerLiquiditySignal({
-            opId:        opIdStr,
-            assetId:     input.assetId,
-            direction:   opposite,
-            slotEndMs,
-            expiresAtMs: expiresMs,
-          })
-          console.log(`[liquidity] cycle=LOSS OTC nudge op=${opIdStr} asset=${input.assetId} dir=${opposite}`)
-        } else {
-          console.log(`[liquidity] cycle=LOSS silent force-loss op=${opIdStr} asset=${input.assetId} (binance)`)
-        }
-      } else { // WIN
-        markOpForcedWin(opIdStr)
-        if (market !== 'crypto') {
-          // Vela coerente: fechar IGUAL ao que o user apostou para ganhar.
-          registerLiquiditySignal({
-            opId:        opIdStr,
-            assetId:     input.assetId,
-            direction:   input.direction,   // SAME direction as user's bet
-            slotEndMs,
-            expiresAtMs: expiresMs,
-          })
-          console.log(`[liquidity] cycle=WIN  OTC nudge op=${opIdStr} asset=${input.assetId} dir=${input.direction}`)
-        } else {
-          console.log(`[liquidity] cycle=WIN  silent force-win op=${opIdStr} asset=${input.assetId} (binance)`)
-        }
+      if (market !== 'crypto') {
+        registerLiquiditySignal({
+          opId:        opIdStr,
+          assetId:     input.assetId,
+          direction:   nudgeDir,
+          slotEndMs,
+          expiresAtMs: expiresMs,
+        })
+        console.log(`[liquidity] cycle=${liquidityOutcome} OTC nudge op=${opIdStr.slice(0,8)} dir=${nudgeDir}`)
+      } else {
+        console.log(`[liquidity] cycle=${liquidityOutcome} silent op=${opIdStr.slice(0,8)} (binance)`)
       }
+    } catch (err) {
+      console.error('[liquidity] post-insert signal failed (non-fatal)', err)
     }
-  } catch (err) {
-    console.error('[liquidity] cycle failed (non-fatal — op resolves naturally)', err)
   }
 
   // Resolution is handled by the expiration worker (polls DB every second) —

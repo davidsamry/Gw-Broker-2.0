@@ -1,25 +1,21 @@
-// Per-op liquidity manipulation state — in-memory only.
+// Per-asset OTC candle nudge signals + per-user liquidity cycle queue.
 //
-// Used by the User.liquidityMode flow ("modo liquidez") to coordinate
-// between createOperation (where the 70% roll happens) and either:
-//   - resolveOperation (Binance assets — force-loss in the resolver,
-//     same "silent" behaviour as before)
-//   - the OTC tick loop (OTC assets — register a signal that pulls the
-//     close in the opposite direction, so the user loses on a coherent
-//     vela vermelha, not a "vela verde mas perdeu" mismatch).
+// Used by the User.liquidityMode flow ("modo liquidez"):
+//   - The cycle queue (per user) decides each op's WIN/LOSS slot inside
+//     a deterministic 7L+3W shuffle. Consumed at createOperation time.
+//   - The WIN/LOSS verdict itself is persisted on the operations row
+//     (column `liquidityOutcome`) — see service.ts and worker.ts. That
+//     persistence is what makes the resolver restart-safe.
+//   - The candle nudge signal (per asset) is the ONLY in-memory piece
+//     left. It lives <60s (until the M1 slot expires) and is consulted
+//     by the OTC tick loop to drag the candle close in the matching
+//     direction. If lost to a restart, the worst case is "vela ticou
+//     natural pelos últimos segundos" — the op outcome is still forced
+//     correctly from the DB column.
 //
-// Design choices:
-//  - State is in-memory: Map<opId, true> and Map<assetId, signal[]>.
-//    Lost on restart — fail-safe is "resolve naturally", which is the
-//    same outcome the system had before any of this existed.
-//  - 70% roll happens ONCE per op (at create), not at resolve. Same op
-//    can never re-roll partway through; signal + forced-loss flag are
-//    paired by opId.
-//  - Auto-cleanup on resolve + periodic GC for orphans (op never
-//    resolved for some reason → entry sits forever otherwise).
-//  - Strict opt-in: every public function returns falsy/empty by
-//    default. NO real user without an explicit admin
-//    User.liquidityMode = true ever touches this code path.
+// Strict opt-in: every public function returns falsy/empty by default.
+// NO real user without an explicit admin User.liquidityMode = true ever
+// touches this code path.
 
 export interface LiquiditySignal {
   opId:         string
@@ -35,40 +31,10 @@ export interface LiquiditySignal {
   expiresAtMs:  number
 }
 
-// ── Per-op force-loss flag (used by resolveOperation) ───────────────────
-// Set at op-create time when the cycle slot picks "lose". Read at resolve
-// time by the worker. NOT a re-roll — pre-decided outcome.
-const forceLossOpIds = new Set<string>()
-
-export function markOpForcedLoss(opId: string): void {
-  forceLossOpIds.add(opId)
-}
-
-export function isOpForcedLoss(opId: string): boolean {
-  return forceLossOpIds.has(opId)
-}
-
-export function clearOpForcedLoss(opId: string): void {
-  forceLossOpIds.delete(opId)
-}
-
-// ── Per-op force-WIN flag (mirror of force-loss) ────────────────────────
-// Set at op-create time when the cycle slot picks "win" for a liquidity
-// user. Read by resolveOperation: forcedWin = isFake || isOpForcedWin.
-// Keeps the worker logic symmetric with force-loss.
-const forceWinOpIds = new Set<string>()
-
-export function markOpForcedWin(opId: string): void {
-  forceWinOpIds.add(opId)
-}
-
-export function isOpForcedWin(opId: string): boolean {
-  return forceWinOpIds.has(opId)
-}
-
-export function clearOpForcedWin(opId: string): void {
-  forceWinOpIds.delete(opId)
-}
+// NB: the per-op force-loss / force-win in-memory Sets were removed
+// when the outcome moved to the persisted `liquidityOutcome` column on
+// operations. The resolver now reads `op.liquidityOutcome === 'WIN' |
+// 'LOSS'` directly from the row — restart-safe by construction.
 
 // ── Per-user liquidity cycle (deterministic 7 loss + 3 win shuffle) ─────
 // Each user with liquidityMode=true gets a shuffled queue of CYCLE_SIZE
@@ -184,14 +150,11 @@ export function startLiquidityGc(): void {
       if (fresh.length === 0) liquiditySignalsByAsset.delete(assetId)
       else                    liquiditySignalsByAsset.set(assetId, fresh)
     }
-    // forceLoss/forceWin Sets have no timestamp — capped via the same op
-    // cleanup path called from resolveOperation. GC for those would
-    // require tracking insertion time per id; the sets are small (1
-    // entry per pending op, ~minutes lifetime) so the cost of NOT GC-ing
-    // them is negligible vs the complexity.
-    // cycleQueueByUser is also untouched — each user has at most
-    // CYCLE_SIZE=10 entries and the map only grows by unique liquidity
-    // users (bounded by admin opt-ins).
+    // cycleQueueByUser is untouched — each user has at most CYCLE_SIZE=10
+    // entries and the map only grows by unique liquidity users (bounded
+    // by admin opt-ins). The persisted liquidityOutcome column doesn't
+    // need GC either — it lives on each operations row and follows the
+    // normal retention of that table.
     if (dropped > 0) console.log(`[liquidity] gc dropped ${dropped} stale signals`)
   }, GC_INTERVAL_MS)
 }

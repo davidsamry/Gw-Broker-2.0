@@ -265,6 +265,11 @@ model Operation {
   expiresAt    DateTime
   openedAt     DateTime        @default(now())
   closedAt     DateTime?
+  // Liquidity-cycle outcome decided at OPEN time for users with
+  // liquidityMode=true. Persists across restarts so the worker always
+  // honours the cycle plan even if the API crashed/redeployed between
+  // open and resolve. Values: NULL (non-liquidity op), 'WIN', 'LOSS'.
+  liquidityOutcome String?
 
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
