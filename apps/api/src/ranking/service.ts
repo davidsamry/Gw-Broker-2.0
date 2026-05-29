@@ -29,6 +29,13 @@ export interface PublicRankingResponse {
 
 const ROTATION_MS = 3 * 60 * 60 * 1000   // 3 hours
 const LEADERBOARD_SIZE = 25
+// Amount range used to generate per-window fictional earnings. The
+// admin-supplied `amount` in the DB is IGNORED for the public view —
+// see the comment inside getPublicRanking. Tweak these constants if
+// the platform's bet sizes change and the leaderboard starts looking
+// implausible.
+const AMOUNT_MIN = 5_000
+const AMOUNT_MAX = 40_000
 
 export async function getPublicRanking(): Promise<PublicRankingResponse> {
   const now             = Date.now()
@@ -49,30 +56,45 @@ export async function getPublicRanking(): Promise<PublicRankingResponse> {
     return { entries: [], rotatesAt: rotatesAt.toISOString(), windowStartedAt: windowStartedAt.toISOString() }
   }
 
-  // Two-stage selection:
+  // Three-stage selection (window-deterministic, same for everyone for 3h):
   //   1. Shuffle the pool with a window-seeded PRNG → picks WHICH 25
   //      entries appear (rotates every 3h).
-  //   2. Sort the chosen 25 by amount DESC → ranks 1..25 are honest
-  //      ("Líderes" = leaders, so the largest amount must be #1).
-  //
-  // Earlier versions skipped step 2 and the leaderboard showed entries
-  // out of monetary order — the admin pool had IA Axecash at R$ 41k as
-  // the top, but the visible list put Bruno C. at R$ 35k in position 1.
+  //   2. Generate a fresh amount per slot from the SAME PRNG. The
+  //      admin-supplied amount in `ranking_entries.amount` is INTENTIONALLY
+  //      IGNORED here — earlier we used it directly, which meant the
+  //      top names with the largest DB amounts were locked at ranks 1-3
+  //      every rotation (Yonathan/Joseph/Felipe never moved). Generating
+  //      amounts in [AMOUNT_MIN, AMOUNT_MAX] per window means even if
+  //      the same 25 names repeat (small pool), the order changes
+  //      drastically — different rotation, different ranks.
+  //   3. Sort the chosen 25 by generated amount DESC → "líderes" still
+  //      means "leaders by money".
   const rand = mulberry32(windowIndex >>> 0)
   const shuffled = [...pool]
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1))
     ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
   }
-  const slice = shuffled
-    .slice(0, LEADERBOARD_SIZE)
-    .sort((a, b) => Number(b.amount) - Number(a.amount))
+  const slice = shuffled.slice(0, LEADERBOARD_SIZE)
 
-  const entries: PublicRankingEntry[] = slice.map((e, i) => ({
+  // Generate amounts AFTER the slice so the PRNG state is consumed
+  // consistently regardless of pool size (otherwise adding entries to
+  // the admin pool would silently change every existing rank). Each
+  // slot pulls one rand() — fully determined by windowIndex.
+  const withAmounts = slice.map((e) => ({
+    name:        e.name,
+    countryCode: e.countryCode,
+    amount:      AMOUNT_MIN + rand() * (AMOUNT_MAX - AMOUNT_MIN),
+  }))
+  withAmounts.sort((a, b) => b.amount - a.amount)
+
+  const entries: PublicRankingEntry[] = withAmounts.map((e, i) => ({
     rank:   i + 1,
     name:   e.name,
     code:   e.countryCode,
-    amount: Number(e.amount),
+    // 2-decimal currency precision — round once here so the wire payload
+    // matches what the frontend renders (no Math.floor in the panel).
+    amount: Math.round(e.amount * 100) / 100,
   }))
 
   return {
