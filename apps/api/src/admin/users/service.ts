@@ -435,10 +435,23 @@ export async function deleteUser(adminId: string, targetUserId: string): Promise
       DELETE FROM withdrawals
       WHERE "accountId" IN (SELECT id FROM accounts WHERE "userId" = ${targetUserId})
     `
+    // BonusGrant has userId + depositId directly (no accountId column).
+    // The earlier query filtered by accountId which doesn't exist on this
+    // table — Postgres raised "column accountId does not exist", the
+    // transaction rolled back, the whole delete failed silently.
     await tx.$executeRaw`
-      DELETE FROM bonus_grants
-      WHERE "accountId" IN (SELECT id FROM accounts WHERE "userId" = ${targetUserId})
+      DELETE FROM bonus_grants WHERE "userId" = ${targetUserId}
     `
+    // Clean nullable userId references in meta_events_log so the audit
+    // trail doesn't carry dangling references after the user vanishes.
+    // The column is String?, so NULL is allowed; no FK to enforce, but
+    // setting NULL keeps reports clean.
+    await tx.$executeRaw`
+      UPDATE meta_events_log SET "userId" = NULL WHERE "userId" = ${targetUserId}
+    `
+    // user_tracking + bot_refresh_tokens have ON DELETE CASCADE FKs in
+    // the DB (see schema.prisma), so they're wiped automatically when
+    // the users row goes. No explicit DELETE needed for those.
     // Tickets + messages — messages reference tickets, so messages first.
     await tx.$executeRaw`
       DELETE FROM ticket_messages
