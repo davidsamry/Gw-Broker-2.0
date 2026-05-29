@@ -26,6 +26,14 @@ export interface ChartTradeEvent {
   status: 'OPEN' | 'RESOLVED' | 'CANCELLED'
   won?: boolean
   profit?: number
+  // Promotion signal for OPEN events: when present, the consumer should
+  // RENAME the active marker whose id === replacesId to the new `id`
+  // (the server-issued uuid) instead of adding a NEW marker.
+  // Used by TradingPanel after the POST /operations response returns the
+  // real uuid for a previously-emitted local-* optimistic trade. Without
+  // this, the SSE 'created' event (also keyed by the uuid) would add a
+  // second marker for the same trade → 1 click = 2 markers on chart.
+  replacesId?: string
 }
 
 // Catalog: 22 Binance-priced crypto + 34 OTC v2 server-priced assets

@@ -306,8 +306,18 @@ export default function TradingPage() {
     if (!trade) return
 
     if (trade.status === 'OPEN') {
+      // `replacesId` present → promotion call from TradingPanel after
+      // the POST returned. Drop both the old local-* entry AND any
+      // entry already keyed by the server uuid (the SSE 'created'
+      // upsert may have raced ahead and inserted one in the useEffect
+      // above). Then insert the canonical uuid entry. Net result: 1
+      // marker per trade regardless of POST-vs-SSE arrival order.
+      // Without this branch the user sees "1 click → 2 markers" (and
+      // the local-* one gets pruned a moment later by the useEffect,
+      // matching the reported "abre normal, depois tenta abrir outra,
+      // some dos pendentes mas fica no gráfico" behaviour).
       setActiveTrades(prev => [
-        ...prev.filter(t => t.id !== trade.id),
+        ...prev.filter(t => t.id !== trade.id && t.id !== trade.replacesId),
         {
           id:         trade.id,
           entryPrice: trade.entryPrice,

@@ -391,6 +391,24 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
       // deduped against this row instead of rendering as a duplicate.
       setOpenTrades(prev => prev.map(t => t.id === clientTradeId ? { ...t, id: operationId } : t))
 
+      // Same promotion for the chart marker living in page.tsx's
+      // activeTrades. Without this, the SSE 'created' event (which the
+      // parent's useEffect upserts keyed by the server uuid) would add
+      // a SECOND marker — the user reports it as "1 click → 2 trades
+      // on chart". `replacesId` tells handleTradePlaced to RENAME the
+      // existing local-* entry instead of appending a new uuid entry.
+      onTradePlaced?.({
+        id:         operationId,
+        replacesId: clientTradeId,
+        entryPrice,
+        entryTime,
+        expiryTime,
+        direction,
+        amount:     investment,
+        payout:     asset.payout,
+        status:     'OPEN',
+      })
+
       // Schedule result popup at the EXACT server expiry. GETs the real
       // operationId, but emits chart events keyed by clientTradeId
       // (matches the OPEN above). If the first GET races the backend
@@ -409,7 +427,15 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
           const profit = won ? parseFloat(operation?.profit ?? '0') : 0
 
           const resolvedTrade: ChartTradeEvent = {
-            id: clientTradeId,
+            // Key by the server uuid (operationId), NOT clientTradeId. The
+            // chart's chartTradeEvents dedupes by id, and the parent's
+            // useEffect on storeOps ALSO pushes a 'resolved' event keyed
+            // by uuid when the SSE arrives — so if we'd kept clientTradeId
+            // here, the two would have different ids and BOTH would render
+            // as separate result cards (1 click → 2 cards on chart).
+            // operationId here always matches the uuid the rest of the
+            // pipeline uses, so dedup collapses to a single card.
+            id: operationId,
             entryPrice,
             entryTime,
             expiryTime,
