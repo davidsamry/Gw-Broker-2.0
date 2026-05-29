@@ -3,6 +3,7 @@ import { buildApp } from './app.js'
 import { startExpirationWorker, stopExpirationWorker } from './operations/worker.js'
 import { startOtcV2Worker, stopOtcV2Worker } from './otc/v2/worker.js'
 import { refreshSettingsCache } from './settings/service.js'
+import { startLiquidityGc, stopLiquidityGc } from './operations/liquidityManipulation.js'
 
 const port = Number(process.env.PORT ?? 3001)
 const host = process.env.HOST ?? '0.0.0.0'
@@ -18,6 +19,11 @@ try {
   await refreshSettingsCache()
   startExpirationWorker()
   app.log.info('Expiration worker started (polling every 1s)')
+  // Liquidity-mode in-memory signal GC — sweeps orphaned signals every
+  // 5 min. Cheap, fires fire-and-forget; main flow is the per-op cleanup
+  // in resolveOperation. This GC is just the safety net for ops that
+  // never resolved (worker crash, admin cancel, etc).
+  startLiquidityGc()
   // OTC v2 — the only OTC engine now (v1 retired in Etapa 8). Boots
   // in background (bootstrap of 3000 historical candles per asset/tf
   // can take ~10-30s on first deploy), doesn't block the API listen.
@@ -27,7 +33,10 @@ try {
   process.exit(1)
 }
 
+// Mirror the start sequence on shutdown — stop GC alongside the other
+// timers so the process exits cleanly after a SIGTERM.
 const shutdown = async (signal: string) => {
+  stopLiquidityGc()
   app.log.info(`Received ${signal}, shutting down...`)
   try {
     stopExpirationWorker()

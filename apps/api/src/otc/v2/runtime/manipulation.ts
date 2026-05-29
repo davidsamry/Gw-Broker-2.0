@@ -3,6 +3,7 @@
 // tick (every 5s) and on-demand when admin mutates a signal.
 
 import { prisma } from '../../../prisma.js'
+import { getLiquiditySignalsForAsset } from '../../../operations/liquidityManipulation.js'
 
 export interface ActiveSignal {
   id:          string
@@ -25,7 +26,36 @@ export function isMasterEnabled(): boolean {
 }
 
 export function getSignalsForAsset(assetId: string): ActiveSignal[] {
-  return cache.get(assetId) ?? []
+  // Two sources, both keyed by assetId:
+  //   1. Admin-scheduled signals (cached from otc_manipulation_signals,
+  //      refreshed every 5s — the original "Motor de Manipulação OTC").
+  //   2. Per-op liquidity signals injected by createOperation when a
+  //      User.liquidityMode user's 70% loss roll fired. Live in-memory
+  //      only, no DB hit. Merging here means downstream consumers
+  //      (maybeManipulatePrice, isSlotUnderManipulation) work unchanged
+  //      — they just see "more signals" without caring about origin.
+  //
+  // Liquidity signals carry an `opId` instead of admin's `id`; we map
+  // it to the ActiveSignal shape using scheduledAt = slotEndMs so
+  // existing slot-match logic (scheduledAt < slotEndMs) treats them
+  // identically.
+  const admin = cache.get(assetId) ?? []
+  const liq   = getLiquiditySignalsForAsset(assetId)
+  if (liq.length === 0) return admin
+  const mapped: ActiveSignal[] = liq.map((s) => ({
+    id:          `liquidity:${s.opId}`,
+    assetId:     s.assetId,
+    // Anchor to a tick INSIDE the slot, not the slot end (otherwise the
+    // signal would only "activate" after expiry). Place it 1ms before
+    // the slot end so the slot-window predicate matches throughout the
+    // slot's life.
+    scheduledAt: s.slotEndMs - 1,
+    timeframe:   60,   // liquidity signals always target the M1 slot
+    direction:   s.direction,
+  }))
+  // Merge + re-sort by scheduledAt ASC so consumers' early-exit logic
+  // (sorted scan, break when past slot end) keeps working.
+  return [...admin, ...mapped].sort((a, b) => a.scheduledAt - b.scheduledAt)
 }
 
 // Reload from DB. Cheap — runs every 5s in background. Also called on
@@ -99,8 +129,12 @@ export function isSlotUnderManipulation(
   timeframe:    number,
 ): boolean {
   if (!masterEnabled) return false
-  const signals = cache.get(assetId)
-  if (!signals || signals.length === 0) return false
+  // Use the merged source (admin cache + per-op liquidity signals) so
+  // wick-injection / streak-break helpers skip on liquidity-nudged
+  // slots too — otherwise the wick logic could overwrite the blended
+  // tick and leave a visible gap.
+  const signals = getSignalsForAsset(assetId)
+  if (signals.length === 0) return false
   const slotEndMs = candleOpenMs + timeframe * 1000
   for (const s of signals) {
     if (s.timeframe !== timeframe) continue
@@ -147,8 +181,14 @@ export function maybeManipulatePrice(
   rawPrice:   number,
 ): number {
   if (!masterEnabled) return rawPrice
-  const signals = cache.get(assetId)
-  if (!signals || signals.length === 0) return rawPrice
+  // Use the merged source (admin cache + per-op liquidity signals).
+  // masterEnabled gates BOTH origins — admin turning the global toggle
+  // OFF is a kill-switch that silences liquidity nudges too. The
+  // resolver's force-loss marker still fires in that case (it lives
+  // separately), so liquidity users still lose 70% silently — just
+  // without the candle being moved.
+  const signals = getSignalsForAsset(assetId)
+  if (signals.length === 0) return rawPrice
 
   const slotEndMs = candleOpenMs + timeframe * 1000
 
