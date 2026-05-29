@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { X, ChevronDown, Trophy, Globe } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -18,6 +18,12 @@ interface LeaderEntry {
   name:   string
   code:   string  // ISO 2-letter
   amount: number  // R$
+  // True when this entry is the currently logged-in user. The merge step
+  // below injects the user into the fictional pool, re-sorts by amount
+  // and re-ranks 1..N so the user appears in the position their winnings
+  // actually deserve (was previously a separate card on top — leaving
+  // the leaderboard with Bruno C. as #1 even when the user had more).
+  isMe?:  boolean
 }
 
 // Cache (sessionStorage) — the public ranking is identical for ALL users
@@ -79,6 +85,31 @@ export function RankingPanel({ onClose, userName = 'Você', userCode = 'br' }: R
       .catch(() => { /* not logged in or backend down — leave myStats null */ })
     return () => { cancelled = true }
   }, [])
+
+  // Inject the logged-in user into the leaderboard at the right rank.
+  // We treat the fictional pool + the user as one combined list, sort by
+  // amount DESC, take the top 25, then renumber 1..N. This way the user
+  // organically lands at #1 when their winnings beat every fictional
+  // entry — or somewhere in the middle/bottom otherwise. If the user
+  // has zero winnings (myStats.amount === 0) or isn't logged in
+  // (myStats === null), we render the pool unchanged.
+  const mergedLeaders = useMemo<LeaderEntry[]>(() => {
+    if (!myStats || myStats.amount <= 0) return leaders
+    const me: LeaderEntry = {
+      rank:   0, // re-numbered below
+      name:   userName ?? 'Você',
+      code:   userCode ?? 'br',
+      amount: myStats.amount,
+      isMe:   true,
+    }
+    // Stable sort: when amount ties, fictional entries keep their
+    // relative order (Array.prototype.sort in V8 is stable since 2018).
+    const combined = [me, ...leaders]
+    combined.sort((a, b) => b.amount - a.amount)
+    return combined
+      .slice(0, leaders.length || 25)
+      .map((e, i) => ({ ...e, rank: i + 1 }))
+  }, [leaders, myStats, userName, userCode])
 
   return (
     // Width: 320px on desktop (side panel beside chart). Full width + height
@@ -153,15 +184,16 @@ export function RankingPanel({ onClose, userName = 'Você', userCode = 'br' }: R
         )}
       </div>
 
-      {/* Leaderboard */}
+      {/* Leaderboard — merged: fictional pool + logged-in user inserted
+          in the position their REAL winnings put them in. */}
       <div className="flex-1 overflow-y-auto">
-        {leaders.length === 0 ? (
+        {mergedLeaders.length === 0 ? (
           <div className="text-center text-[#8b8f9a] text-xs py-12 px-4">
             Sem dados de ranking no momento.
           </div>
         ) : (
-          leaders.map((entry) => (
-            <LeaderRow key={entry.rank} entry={entry} />
+          mergedLeaders.map((entry) => (
+            <LeaderRow key={`${entry.rank}-${entry.isMe ? 'me' : entry.name}`} entry={entry} />
           ))
         )}
       </div>
@@ -179,13 +211,26 @@ export function RankingPanel({ onClose, userName = 'Você', userCode = 'br' }: R
 function LeaderRow({ entry }: { entry: LeaderEntry }) {
   const isTop3 = entry.rank <= 3
   return (
-    <div className="px-4 py-2.5 flex items-center gap-3 border-b border-[#2a2e3b]/40 hover:bg-white/[0.02] transition-colors">
+    <div className={cn(
+      'px-4 py-2.5 flex items-center gap-3 border-b border-[#2a2e3b]/40 transition-colors',
+      // Tinted row + left accent when the entry is the logged-in user,
+      // so the admin/trader can spot their own line at a glance even if
+      // they're in the middle of the list.
+      entry.isMe
+        ? 'bg-blue-500/10 border-l-2 border-l-blue-400 hover:bg-blue-500/15'
+        : 'hover:bg-white/[0.02]',
+    )}>
       <RankBadge rank={entry.rank} />
       <Flag code={entry.code} size={20} />
-      <span className="flex-1 text-sm font-medium text-white truncate">{entry.name}</span>
+      <span className={cn(
+        'flex-1 text-sm font-medium truncate',
+        entry.isMe ? 'text-blue-200' : 'text-white',
+      )}>
+        {entry.name}{entry.isMe && ' (Você)'}
+      </span>
       <span className={cn(
         'text-sm font-bold whitespace-nowrap',
-        isTop3 ? 'text-green-400' : 'text-white'
+        entry.isMe ? 'text-blue-300' : isTop3 ? 'text-green-400' : 'text-white',
       )}>
         R$ {entry.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </span>
