@@ -122,15 +122,21 @@ export async function getMyWeeklyRanking(userId: string): Promise<MeRanking> {
   const daysSinceMonday = (day + 6) % 7        // Mon=0, Sun=6
   const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysSinceMonday, 3, 0, 0, 0)) // 00:00 BRT == 03:00 UTC
 
+  // The OperationStatus enum is OPEN / WON / LOST / CANCELLED — there's
+  // NO 'RESOLVED' value, and there's NO `won` column on the operations
+  // table. The old query filtered on both, hit a SQL error, was swallowed
+  // by the route's try/catch and silently returned `amount: 0` — so
+  // every user (real OR fake) saw "Você ainda não teve nenhuma negociação
+  // lucrativa". Status='WON' alone is the win signal; profit on WON rows
+  // is always > 0 by construction.
   const rows = await prisma.$queryRaw<Array<{ total: string | null }>>`
     SELECT COALESCE(SUM(o.profit), 0)::text AS total
     FROM operations o
     JOIN accounts   a ON a.id = o."accountId"
-    WHERE a."userId" = ${userId}
-      AND a.type    = 'REAL'::"AccountType"
-      AND o.status  = 'RESOLVED'::"OperationStatus"
-      AND o.won     = true
-      AND o."createdAt" >= ${monday}
+    WHERE a."userId"  = ${userId}
+      AND a.type      = 'REAL'::"AccountType"
+      AND o.status    = 'WON'::"OperationStatus"
+      AND o."openedAt" >= ${monday}
   `
   const amount = Number(rows[0]?.total ?? 0)
 
