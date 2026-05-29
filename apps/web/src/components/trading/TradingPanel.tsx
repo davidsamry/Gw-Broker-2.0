@@ -656,9 +656,10 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
         </div>
       ) : (
         <div className="px-3 pt-3 pb-3">
-          <div className="w-full rounded-xl border border-amber-500/40 bg-amber-500/10 px-5 py-4 flex items-center justify-center text-center">
-            <span className="text-sm font-bold text-amber-300">
-              Ativo indisponível para operações
+          <div className="w-full rounded-xl border border-amber-500/40 bg-amber-500/10 px-5 py-4 flex flex-col items-center gap-1 text-center">
+            <span className="text-base font-bold text-amber-300">Mercado Fechado</span>
+            <span className="text-[11px] text-amber-200/80">
+              Ativo indisponível para operações.
             </span>
           </div>
         </div>
