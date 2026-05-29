@@ -120,7 +120,6 @@ export default function AdminDashboardPage() {
         <KpiCard label="Saldo + Bônus"        value={`R$ ${fmtBRL(data?.kpis.userBalancePlusBonus ?? 0)}`} icon={<Layers           size={14} />} tone="bg-purple-500/15 text-purple-400" />
         <KpiCard label="Total Usuários"
           value={String(data?.kpis.totalUsers ?? 0)}
-          hint={data && data.kpis.newUsersToday > 0 ? `+${data.kpis.newUsersToday} hoje` : undefined}
           icon={<UsersIcon size={14} />} tone="bg-emerald-500/15 text-emerald-400"
         />
 
