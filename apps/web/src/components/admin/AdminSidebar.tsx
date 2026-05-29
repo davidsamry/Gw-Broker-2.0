@@ -3,10 +3,10 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  LayoutGrid, Users, Wallet, Activity, ShieldCheck,
-  ArrowDownToLine, ArrowUpFromLine, MessageSquare, Network,
-  Copy, Layers, Gift, Zap, TrendingUp, Clock, FileSpreadsheet,
-  Trophy, Image as ImageIcon, FileText, Mail, CreditCard, Radio,
+  LayoutGrid, Users, Activity, ShieldCheck,
+  ArrowDownToLine, ArrowUpFromLine, MessageSquare,
+  Copy, Gift, TrendingUp, Clock, FileSpreadsheet,
+  Trophy, FileText, Mail, Radio,
   Settings, X, Plug, Webhook,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -17,30 +17,27 @@ interface MenuItem {
   icon:  React.ReactNode
 }
 
-// Order mirrors the reference admin design.
+// Order mirrors the reference admin design. Carteira / Afiliados /
+// Níveis / Boosters / Banner Promo / Pagamentos were placeholder
+// entries (no page.tsx, 404 on click) — removed in favour of a
+// shorter menu that only lists pages that actually render.
 const MENU: MenuItem[] = [
   { href: '/admin',                label: 'Dashboard',       icon: <LayoutGrid size={15} /> },
   { href: '/admin/usuarios',       label: 'Usuários',        icon: <Users size={15} /> },
-  { href: '/admin/carteira',       label: 'Carteira',        icon: <Wallet size={15} /> },
   { href: '/admin/operacoes',      label: 'Operações',       icon: <Activity size={15} /> },
   { href: '/admin/verificacao',    label: 'Verificação',     icon: <ShieldCheck size={15} /> },
   { href: '/admin/depositos',      label: 'Depósitos',       icon: <ArrowDownToLine size={15} /> },
   { href: '/admin/saques',         label: 'Saques',          icon: <ArrowUpFromLine size={15} /> },
   { href: '/admin/tickets',        label: 'Tickets',         icon: <MessageSquare size={15} /> },
-  { href: '/admin/afiliados',      label: 'Afiliados',       icon: <Network size={15} /> },
   { href: '/admin/copy-trading',   label: 'Copy Trading',    icon: <Copy size={15} /> },
-  { href: '/admin/niveis',         label: 'Níveis',          icon: <Layers size={15} /> },
   { href: '/admin/bonus',          label: 'Bônus',           icon: <Gift size={15} /> },
-  { href: '/admin/boosters',       label: 'Boosters',        icon: <Zap size={15} /> },
   { href: '/admin/ativos',         label: 'Ativos',          icon: <TrendingUp size={15} /> },
   { href: '/admin/otc',            label: 'Motor OTC',       icon: <Radio size={15} /> },
   { href: '/admin/horario-mercado',label: 'Horário Mercado', icon: <Clock size={15} /> },
   { href: '/admin/cadastro-otc',   label: 'Cadastro OTC',    icon: <FileSpreadsheet size={15} /> },
   { href: '/admin/ranking',        label: 'Ranking',         icon: <Trophy size={15} /> },
-  { href: '/admin/banner-promo',   label: 'Banner Promo',    icon: <ImageIcon size={15} /> },
   { href: '/admin/documentos',     label: 'Documentos',      icon: <FileText size={15} /> },
   { href: '/admin/emails',         label: 'Emails',          icon: <Mail size={15} /> },
-  { href: '/admin/pagamentos',     label: 'Pagamentos',      icon: <CreditCard size={15} /> },
   { href: '/admin/configuracoes',  label: 'Configurações',   icon: <Settings size={15} /> },
   { href: '/admin/api',            label: 'API',             icon: <Plug size={15} /> },
   { href: '/admin/webhooks',       label: 'Webhooks',        icon: <Webhook size={15} /> },
