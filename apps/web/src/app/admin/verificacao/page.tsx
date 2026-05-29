@@ -8,6 +8,7 @@ import {
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useDebounce } from '@/lib/useDebounce'
+import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer'
 
 interface KycRow {
   id:               string
@@ -47,6 +48,10 @@ export default function AdminVerificacaoPage() {
   const debouncedSearch     = useDebounce(search, 300)
   const [status, setStatus] = useState<StatusFilter>('SUBMITTED')
   const [viewing, setViewing] = useState<KycRow | null>(null)
+  // Click on the user name/email opens the same drawer used on
+  // /admin/usuarios — admin can edit profile, toggles, payout, etc.
+  // without leaving this page. Reuses /admin/users/:id endpoints.
+  const [editingUserId, setEditingUserId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -147,10 +152,14 @@ export default function AdminVerificacaoPage() {
         ) : (
           data?.submissions.map((s) => (
             <div key={s.id} className="grid grid-cols-1 md:grid-cols-[1fr_140px_140px_140px_1fr_180px] gap-3 px-4 py-3 border-b border-[#1f232e]/50 items-center">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-white truncate">{s.userName || '—'}</div>
-                <div className="text-[11px] text-[#8b8f9a] truncate">{s.userEmail}</div>
-              </div>
+              <button
+                onClick={() => setEditingUserId(s.userId)}
+                className="min-w-0 text-left group"
+                title={`Editar ${s.userName || s.userEmail}`}
+              >
+                <div className="text-sm font-semibold text-white truncate group-hover:text-emerald-400 transition-colors">{s.userName || '—'}</div>
+                <div className="text-[11px] text-[#8b8f9a] truncate group-hover:text-emerald-300/80 transition-colors">{s.userEmail}</div>
+              </button>
               <div className="text-sm text-emerald-400 font-semibold">R$ {fmtBRL(s.realBalance)}</div>
               <StatusChip status={s.status} />
               <div className="text-xs text-[#8b8f9a]">{formatDate(s.submittedAt)}</div>
@@ -176,6 +185,16 @@ export default function AdminVerificacaoPage() {
           submission={viewing}
           onClose={() => setViewing(null)}
           onDecided={async () => { await load(); setViewing(null) }}
+        />
+      )}
+
+      {editingUserId && (
+        <UserDetailDrawer
+          userId={editingUserId}
+          onClose={() => setEditingUserId(null)}
+          // Re-fetch the KYC list after admin edits so name / kycStatus
+          // changes propagate immediately (e.g. admin reverts approval).
+          onChanged={() => load()}
         />
       )}
     </div>
