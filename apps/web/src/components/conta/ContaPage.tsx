@@ -15,6 +15,7 @@ import { ASSETS } from '@/lib/mockData'
 import { api } from '@/lib/api'
 import { TwoFactorSetup } from '@/components/admin/TwoFactorSetup'
 import { KycUploadModal } from '@/components/conta/KycUploadModal'
+import { FlagPair } from '@/components/ui/FlagPair'
 
 type ContaTab = 'retirada' | 'transacoes' | 'operacoes' | 'minha-conta'
 
@@ -311,7 +312,13 @@ function OperacoesTab() {
                   {/* Desktop row */}
                   <div className="hidden md:grid grid-cols-[180px_220px_140px_180px_180px_120px_120px] gap-3 py-3 items-center">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-base flex-shrink-0">{asset?.flag1}{asset?.flag2}</span>
+                      {/* Same FlagPair pattern used in TradingPanel /
+                          AssetSelector / HistoricoPanel — renderiza ícone
+                          de cripto (crypto:btc) ou bandeira de país
+                          (flagcdn). Antes usava {asset.flag1}{asset.flag2}
+                          que é só emoji literal — em alguns devices não
+                          renderiza, ficava apagado/cinza. */}
+                      <FlagPair code1={asset?.code1 ?? ''} code2={asset?.code2 ?? ''} size={18} />
                       <span className="text-xs text-white truncate">{asset?.label ?? op.assetSymbol}</span>
                     </div>
                     <span className="text-[10px] text-[#8b8f9a] font-mono break-all leading-tight">{op.id}</span>
@@ -346,7 +353,10 @@ function OperacoesTab() {
                   <div className="md:hidden py-3 px-1">
                     <div className="flex items-start justify-between gap-3 mb-1.5">
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-base flex-shrink-0">{asset?.flag1}{asset?.flag2}</span>
+                        {/* Mesmo padrão do desktop — FlagPair (ícone real)
+                            em vez de emoji literal, que em alguns devices
+                            mobile não renderiza ou fica cinza. */}
+                        <FlagPair code1={asset?.code1 ?? ''} code2={asset?.code2 ?? ''} size={18} />
                         <div className="min-w-0">
                           <div className="text-xs text-white font-medium truncate">{asset?.label ?? op.assetSymbol}</div>
                           <div className="text-[10px] text-[#8b8f9a]">{formatDateTimeBR(op.openedAt)}</div>
