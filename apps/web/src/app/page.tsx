@@ -32,6 +32,7 @@ import { fetchMarketAssets, fetchDisabledAssetIds } from '@/lib/marketApi'
 import { useOperationsStream } from '@/lib/operationsStream'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { playResolveSound } from '@/lib/sounds'
 
 type SidebarTab = 'TRADE' | 'HISTORICO' | 'RANKING' | 'SUPORTE' | 'CONTA' | 'COPY' | 'BONUS'
 
@@ -261,6 +262,13 @@ export default function TradingPage() {
         const incomingIds = new Set(resolvedFromActive.map((e) => e.id))
         return [...prev.filter((e) => !incomingIds.has(e.id)), ...resolvedFromActive]
       })
+      // Sound: 1 toque por op (dedupe interno por id). Cobre tanto trades
+      // do bot/outro device (que NÃO passam por handleTradePlaced) quanto
+      // trades locais cujo card chegou aqui antes do GET resolver. Se já
+      // tocou via handleTradePlaced, o Set interno bloqueia o duplo.
+      for (const ev of resolvedFromActive) {
+        playResolveSound(ev.id, ev.won === true)
+      }
     }
 
     setActiveTrades((prev) => {
@@ -338,6 +346,9 @@ export default function TradingPage() {
       // (Previously auto-dismissed after 4s — founder feedback: traders want
       // to keep the result visible while they analyse the next setup.)
       setChartTradeEvents(prev => [...prev.filter(t => t.id !== trade.id), trade])
+      // Sound (deduped by op id internamente — se o useEffect [storeOps]
+      // abaixo também disparar pra mesma op, só tocará uma vez).
+      playResolveSound(trade.id, trade.won === true)
     }
 
     // No refreshAccounts() — balance is now mutated locally by the trading

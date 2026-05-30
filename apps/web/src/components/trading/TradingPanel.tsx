@@ -12,6 +12,7 @@ import { getAssetMarket, isMarketAllowed } from '@/lib/marketPermissions'
 import { useOtcLivePrice } from '@/lib/otcMarket'
 import { useBinanceTicker } from '@/lib/binanceMarket'
 import { alignExpirationToSlotClose } from '@/lib/expiration'
+import { playSound } from '@/lib/sounds'
 
 interface TradingPanelProps {
   asset: Asset
@@ -356,6 +357,12 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
       expiryTime,
     }
     setOpenTrades(prev => [newTrade, ...prev])
+
+    // Audio feedback — tocado SEMPRE no clique (user gesture context),
+    // mesmo que o POST acabe falhando. Razão: melhor som de "abriu" e
+    // depois erro visual, do que delay até o ack do server pra dar
+    // feedback sonoro. Falha silenciosa se autoplay bloqueado.
+    playSound('open')
 
     // Optimistically debit stake (mirrors what the server CTE does atomically)
     // — saves a /accounts RTT after the trade.
