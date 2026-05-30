@@ -101,7 +101,12 @@ export function sendPurchaseAsync(user: UserPayload, deposit: DepositPayload): v
     eventId,
     user,
     customData: {
-      currency:         'USD',
+      // BRL because deposit.amount is the PIX value in reais (BSPay is
+      // Brazil-only and admin caps are configured in R$ on
+      // /admin/configuracoes). Sending it as 'USD' would make Meta value
+      // the deposit at ~5x its actual size, inflating ROAS/CPM in every
+      // campaign report.
+      currency:         'BRL',
       value:            deposit.amount,
       content_name:     'Deposit',
       content_category: 'Broker Deposit',
