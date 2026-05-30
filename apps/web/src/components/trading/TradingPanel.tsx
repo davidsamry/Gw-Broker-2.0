@@ -380,29 +380,44 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
       const operationId:   string = res.data?.operation?.id ?? res.data?.id ?? clientTradeId
       // Authoritative server expiresAt — anchor the timer to wall-clock,
       // not "duration since now()", so we don't drift by the POST latency.
+      // Since the slot-close alignment landed (op expira no próximo close
+      // M1/M5/M15), the server expiry can be anywhere from 10s to ~70s
+      // away for a "1m" pick — NOT a fixed entryTime+60. Replace the
+      // optimistic local expiry with the server value so the chart
+      // marker, the openTrades countdown, AND the resolve-popup delay
+      // all line up with the actual close.
       const serverOp:      any    = res.data?.operation ?? res.data
       const serverExpiryMs: number = serverOp?.expiresAt
         ? new Date(serverOp.expiresAt).getTime()
         : (Date.now() + expiresInSec * 1000)
       const delayMs = Math.max(0, serverExpiryMs - Date.now())
+      // BRT-shifted epoch seconds — same formula used for entryTime
+      // above and matches what the chart marker / TradeItem countdown
+      // compare against `now`.
+      const serverExpiryTime = Math.floor(serverExpiryMs / 1000) + BRT_OFFSET
 
       // Promote the local optimistic trade's id to the server-issued one
       // so that the SSE 'created' event (also keyed by server id) gets
       // deduped against this row instead of rendering as a duplicate.
-      setOpenTrades(prev => prev.map(t => t.id === clientTradeId ? { ...t, id: operationId } : t))
+      // ALSO patch expiryTime — the optimistic value was entry+60, but
+      // the server may have aligned to a closer/farther M1 boundary.
+      setOpenTrades(prev => prev.map(t =>
+        t.id === clientTradeId ? { ...t, id: operationId, expiryTime: serverExpiryTime } : t
+      ))
 
       // Same promotion for the chart marker living in page.tsx's
       // activeTrades. Without this, the SSE 'created' event (which the
       // parent's useEffect upserts keyed by the server uuid) would add
-      // a SECOND marker — the user reports it as "1 click → 2 trades
-      // on chart". `replacesId` tells handleTradePlaced to RENAME the
-      // existing local-* entry instead of appending a new uuid entry.
+      // a SECOND marker. `replacesId` tells handleTradePlaced to RENAME
+      // the existing local-* entry instead of appending a new uuid one,
+      // AND the new expiryTime overwrites the optimistic one so the
+      // expiry dot lands on the actual close candle.
       onTradePlaced?.({
         id:         operationId,
         replacesId: clientTradeId,
         entryPrice,
         entryTime,
-        expiryTime,
+        expiryTime: serverExpiryTime,
         direction,
         amount:     investment,
         payout:     asset.payout,
@@ -438,7 +453,9 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
             id: operationId,
             entryPrice,
             entryTime,
-            expiryTime,
+            // Use the server-aligned expiry so the result card lands on
+            // the actual close candle (not the optimistic entry+60).
+            expiryTime: serverExpiryTime,
             direction,
             amount: investment,
             payout: asset.payout,
@@ -469,7 +486,10 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
             profit:      String(profit),
             status:      won ? 'WON' : 'LOST',
             entryPrice:  String(entryPrice),
-            expiresAt:   operation?.expiresAt ?? new Date(expiryTime * 1000).toISOString(),
+            // Fallback uses serverExpiryTime (slot-aligned) so the store
+            // matches what the server has even when the GET payload didn't
+            // echo expiresAt for some reason.
+            expiresAt:   operation?.expiresAt ?? new Date(serverExpiryTime * 1000).toISOString(),
             openedAt:    operation?.openedAt ?? new Date(entryTime * 1000).toISOString(),
             closedAt:    operation?.closedAt ?? new Date().toISOString(),
           })

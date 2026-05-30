@@ -11,6 +11,7 @@ import {
   getNextLiquidityOutcome,
   type LiquidityOutcome,
 } from './liquidityManipulation.js'
+import { alignExpirationToSlotClose } from './expiration.js'
 
 export async function createOperation(userId: string, input: CreateOperationInput) {
   // Per-user market permission gate. Admin toggles canTradeForex/Otc/Crypto
@@ -45,7 +46,13 @@ export async function createOperation(userId: string, input: CreateOperationInpu
 
   const operationId   = randomUUID()
   const transactionId = randomUUID()
-  const expiresAt     = new Date(Date.now() + input.expiresInSeconds * 1000)
+  // Quotex-style slot-close expiration: a "1m" op expires at the close
+  // of the NEXT M1 candle (not 60s after the click). Guarantees exit
+  // price = candle close → vela vermelha = LOST, vela verde = WON, sem
+  // a divergência "vela verde mas perdi" causada por tick mid-candle.
+  // alignExpirationToSlotClose handles M1/M5/M15 + 10s MIN guard (clique
+  // 3s antes do close pula pra próxima vela em vez de virar op de 3s).
+  const expiresAt     = alignExpirationToSlotClose(Date.now(), input.expiresInSeconds)
   const description   = `Operação aberta: ${input.assetSymbol} ${input.direction}`
 
   // ── Authoritative entryPrice for OTC ───────────────────────────────────
