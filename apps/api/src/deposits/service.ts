@@ -213,6 +213,32 @@ export async function confirmDepositById(depositId: string) {
     console.error(`[deposits] rollover update failed for deposit=${depositId}`, err)
   }
 
+  // Auto-liquidez — reset do bankrollBaseline. Cada depósito confirmado
+  // em conta REAL "zera" o contador de profit: baseline = saldo REAL
+  // pós-crédito. Isso significa que o trigger de auto-ativação de
+  // liquidez (worker.ts) volta a usar este saldo como ponto de partida,
+  // dando ao user uma nova "rodada" antes da trava de 20% disparar.
+  //
+  // Para depósitos em conta DEMO (improvável — gateway só credita REAL),
+  // a subquery retorna NULL e o UPDATE não toca em ninguém. Fail-safe
+  // total: erro aqui NUNCA bloqueia a confirmação do depósito.
+  try {
+    await prisma.$executeRaw`
+      UPDATE users u
+      SET "bankrollBaseline" = sub.balance
+      FROM (
+        SELECT a."userId" AS user_id, a.balance
+        FROM accounts a
+        JOIN deposits d ON d."accountId" = a.id
+        WHERE d.id = ${depositId} AND a.type = 'REAL'::"AccountType"
+        LIMIT 1
+      ) sub
+      WHERE u.id = sub.user_id
+    `
+  } catch (err) {
+    console.error(`[deposits] bankrollBaseline reset failed for deposit=${depositId}`, err)
+  }
+
   // Fase B1: if a BonusGrant is tied to this deposit, activate it now.
   // Errors here don't roll back the deposit — the user has already paid,
   // they shouldn't be punished for our bonus accounting; we just log.

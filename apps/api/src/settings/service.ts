@@ -19,6 +19,10 @@ export interface PlatformSettings {
   operationMinIntervalMs:  number
   copyTradeEnabled:        boolean
   safeModeEnabled:         boolean
+  // Auto-ativação de Liquidez + bloqueio de Cripto quando saldo REAL do
+  // user >= bankrollBaseline × (1 + autoLiquidityProfitPct / 100).
+  // Default 20% (definido na migration). Admin edita em /admin/configuracoes.
+  autoLiquidityProfitPct:  number
   updatedAt:               Date
 }
 
@@ -36,6 +40,7 @@ const DEFAULTS: PlatformSettings = {
   operationMinIntervalMs: 1000,
   copyTradeEnabled:       true,
   safeModeEnabled:        false,
+  autoLiquidityProfitPct: 20,
   updatedAt:              new Date(0),
 }
 
@@ -61,6 +66,9 @@ export async function refreshSettingsCache(): Promise<PlatformSettings> {
       operationMinIntervalMs: row.operationMinIntervalMs,
       copyTradeEnabled:       row.copyTradeEnabled,
       safeModeEnabled:        row.safeModeEnabled,
+      // `as any` defensivo enquanto o Prisma client pode estar stale no
+      // primeiro deploy; default 20 garante fallback útil.
+      autoLiquidityProfitPct: (row as any).autoLiquidityProfitPct ?? 20,
       updatedAt:              row.updatedAt,
     }
   } catch (err) {
@@ -87,6 +95,7 @@ export interface UpdateSettingsInput {
   operationMinIntervalMs?: number
   copyTradeEnabled?:       boolean
   safeModeEnabled?:        boolean
+  autoLiquidityProfitPct?: number
 }
 
 export async function updateSettings(input: UpdateSettingsInput): Promise<PlatformSettings> {

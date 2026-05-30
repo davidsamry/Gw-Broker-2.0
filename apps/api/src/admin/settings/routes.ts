@@ -16,6 +16,10 @@ const updateSchema = z.object({
   operationMinIntervalMs: z.number().int().min(0).max(60_000).optional(),
   copyTradeEnabled:       z.boolean().optional(),
   safeModeEnabled:        z.boolean().optional(),
+  // % de lucro sobre a banca (saldo do último depósito confirmado) que
+  // dispara auto-ativação de Liquidez + bloqueio de Cripto. 0 desativa
+  // a função; 100 pra exigir 2× o saldo inicial; cap conservador 1000%.
+  autoLiquidityProfitPct: z.number().int().min(0).max(1000).optional(),
 }).refine(
   (v) => Object.values(v).some((x) => x !== undefined),
   { message: 'Envie pelo menos um campo.' },

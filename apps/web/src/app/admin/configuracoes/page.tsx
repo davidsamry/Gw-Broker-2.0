@@ -25,6 +25,7 @@ interface PlatformSettings {
   operationMinIntervalMs: number
   copyTradeEnabled:       boolean
   safeModeEnabled:        boolean
+  autoLiquidityProfitPct: number
 }
 
 interface Response { settings: PlatformSettings }
@@ -168,6 +169,17 @@ export default function AdminConfiguracoesPage() {
               value={form.operationMinIntervalMs}
               onChange={(v) => patch('operationMinIntervalMs', Math.round(v))}
               hint="Tempo mínimo entre operações em milissegundos (1000ms = 1 segundo)"
+              integer
+            />
+          </Card>
+
+          {/* Auto-Liquidez */}
+          <Card title="Auto-Liquidez" icon={<BarChart2 size={14} className="text-amber-400" />} desc="Ativa Liquidez + bloqueia Cripto automaticamente quando o usuário atinge X% de lucro sobre o saldo do último depósito">
+            <Number
+              label="% de lucro para acionar (0 = desativado)"
+              value={form.autoLiquidityProfitPct}
+              onChange={(v) => patch('autoLiquidityProfitPct', Math.round(v))}
+              hint="Ex: 20 = quando saldo REAL >= 1,20x do saldo do último depósito. Conta DEMO e usuários Fake são ignorados. Admin pode desligar manualmente no painel do usuário (sistema re-aciona no próximo WIN se condição continuar)."
               integer
             />
           </Card>

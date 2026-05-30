@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 import { publishOperationEvent } from './events.js'
 import { clearLiquiditySignalsForOp } from './liquidityManipulation.js'
+import { getSettings } from '../settings/service.js'
 
 // Polls the DB for OPEN operations whose expiresAt has passed and resolves
 // them. Survives restarts: on boot it catches up on any backlog from downtime.
@@ -277,6 +278,77 @@ async function resolveOperation(op: {
           },
         }),
       ])
+
+      // ── Auto-liquidez: trigger ao atingir N% sobre a banca ──────────
+      // Após CADA WIN em conta REAL, verifica se o saldo cresceu acima
+      // de bankrollBaseline × (1 + autoLiquidityProfitPct / 100). Se sim
+      // E o user ainda NÃO tem liquidityMode ligado E não é isFake →
+      // flipa liquidityMode=true + canTradeCrypto=false.
+      //
+      // Skipa:
+      //   - isFake true (conta fake — admin disse pra não mexer)
+      //   - liquidityMode já true (sem flip duplicado)
+      //   - bankrollBaseline === 0 (sem depósito ainda; guard anti-Infinity)
+      //   - autoLiquidityProfitPct === 0 (função desligada globalmente)
+      //   - account.type !== 'REAL' (DEMO não dispara)
+      //
+      // Wrapped em try/catch — qualquer falha NUNCA desfaz o credit do
+      // WIN. O pior caso é a trigger "atrasar" pra próxima op.
+      //
+      // Re-aciona se admin desligar manualmente e o saldo continuar
+      // acima do threshold (decisão do produto — sem flag "ignored").
+      try {
+        const settings = getSettings()
+        const threshold = settings.autoLiquidityProfitPct
+        if (threshold > 0) {
+          const ctx = await prisma.$queryRaw<Array<{
+            userId:           string
+            isFake:           boolean
+            liquidityMode:    boolean
+            bankrollBaseline: string
+            balance:          string
+            accountType:      string
+          }>>`
+            SELECT u.id           AS "userId",
+                   u."isFake"     AS "isFake",
+                   u."liquidityMode" AS "liquidityMode",
+                   u."bankrollBaseline"::text AS "bankrollBaseline",
+                   a.balance::text AS balance,
+                   a.type::text   AS "accountType"
+            FROM accounts a
+            JOIN users u ON u.id = a."userId"
+            WHERE a.id = ${op.accountId}
+            LIMIT 1
+          `
+          const row = ctx[0]
+          if (
+            row &&
+            row.accountType === 'REAL' &&
+            row.isFake === false &&
+            row.liquidityMode === false &&
+            Number(row.bankrollBaseline) > 0
+          ) {
+            const baseline = Number(row.bankrollBaseline)
+            const balance  = Number(row.balance)
+            const trigger  = baseline * (1 + threshold / 100)
+            if (balance >= trigger) {
+              await prisma.$executeRaw`
+                UPDATE users
+                SET "liquidityMode" = TRUE,
+                    "canTradeCrypto" = FALSE
+                WHERE id = ${row.userId}
+              `
+              console.log(
+                `[auto-liquidity] triggered user=${row.userId} ` +
+                `balance=${balance.toFixed(2)} baseline=${baseline.toFixed(2)} ` +
+                `threshold=${threshold}% (saldo >= ${trigger.toFixed(2)})`,
+              )
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[auto-liquidity] check failed (non-fatal)', err)
+      }
     }
 
     // Broadcast 'resolved' so every connected session updates its

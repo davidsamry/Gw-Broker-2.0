@@ -207,6 +207,13 @@ model User {
   canTradeForex    Boolean   @default(true)
   canTradeOtc      Boolean   @default(true)
   canTradeCrypto   Boolean   @default(true)
+  // ── Auto-throttle (auto-ativação de liquidez) ──────────────────────────
+  // Saldo REAL no momento do último depósito confirmado. Quando o saldo
+  // ultrapassa baseline × (1 + autoLiquidityProfitPct/100), o worker
+  // ativa liquidityMode=true e canTradeCrypto=false automaticamente.
+  // Atualizado por deposits/service.ts em cada confirmação de PAID.
+  // Default 0 = não dispara (saldo/0 evitado por guard no worker).
+  bankrollBaseline Decimal   @default(0) @db.Decimal(18, 2)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -738,6 +745,11 @@ model PlatformSettings {
   operationMin      Decimal  @default(5)        @db.Decimal(18, 2)
   operationMax      Decimal  @default(100000)   @db.Decimal(18, 2)
   operationMinIntervalMs Int @default(1000)                          // ms between consecutive trades
+
+  // Auto-throttle: % de lucro sobre a banca (calculada do último depósito
+  // confirmado) que dispara auto-ativação de Liquidez + bloqueio de
+  // Cripto. Default 20 = quando saldo >= baseline * 1.20.
+  autoLiquidityProfitPct Int  @default(20)
 
   // Feature toggles
   copyTradeEnabled  Boolean  @default(true)
