@@ -44,7 +44,31 @@ export async function authRoutes(app: FastifyInstance) {
     }
   })
 
-  app.post('/login', async (req, reply) => {
+  // Sec O1.5: rate limit 5 tentativas / 15min, chave = IP + email.
+  // - IP isolado: tentar muitos emails diferentes do mesmo IP = limitado por IP.
+  // - Atacante distribuido: tentar 1 email de muitos IPs = limitado por email.
+  // Sem isso, brute-force de senha em /auth/login fica trivial.
+  // Bypass deliberado pra requests sem body parseavel (cai na validacao
+  // do safeParse abaixo e retorna 400 antes de tocar o DB).
+  app.post('/login', {
+    config: {
+      rateLimit: {
+        max:      5,
+        timeWindow: '15 minutes',
+        keyGenerator: (req) => {
+          const xfwd  = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+          const ip    = xfwd || req.ip || 'unknown'
+          const email = (req.body as any)?.email?.toLowerCase?.() ?? 'noemail'
+          return `${ip}|${email}`
+        },
+        errorResponseBuilder: (_req, ctx) => ({
+          error:      'RATE_LIMITED',
+          message:    `Muitas tentativas. Tente novamente em ${Math.ceil(ctx.ttl / 1000)}s.`,
+          retryAfter: Math.ceil(ctx.ttl / 1000),
+        }),
+      },
+    },
+  }, async (req, reply) => {
     const parsed = loginSchema.safeParse(req.body)
     if (!parsed.success) {
       return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
@@ -97,7 +121,17 @@ export async function authRoutes(app: FastifyInstance) {
   const forgotSchema = z.object({
     email: z.string().email().toLowerCase().trim(),
   })
-  app.post('/forgot-password', async (req, reply) => {
+  // Sec O1.5: rate-limit por IP (sem email — pra nao virar oracle de
+  // enumeracao por IP). 10/hora e generoso pro user real mas trava
+  // scripts que tentam disparar email-bomb pro inbox de uma vitima.
+  app.post('/forgot-password', {
+    config: {
+      rateLimit: {
+        max:        10,
+        timeWindow: '1 hour',
+      },
+    },
+  }, async (req, reply) => {
     const parsed = forgotSchema.safeParse(req.body)
     if (!parsed.success) {
       // Even invalid email shape returns 200 — same enumeration concern.

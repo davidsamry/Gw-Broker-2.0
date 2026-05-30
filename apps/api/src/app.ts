@@ -2,6 +2,8 @@ import Fastify from 'fastify'
 import cors from '@fastify/cors'
 import jwt from '@fastify/jwt'
 import cookie from '@fastify/cookie'
+import helmet from '@fastify/helmet'
+import rateLimit from '@fastify/rate-limit'
 import { authRoutes } from './auth/routes.js'
 import { operationRoutes } from './operations/routes.js'
 import { accountRoutes } from './accounts/routes.js'
@@ -71,6 +73,37 @@ export async function buildApp() {
   })
 
   await app.register(cookie)
+
+  // ── Sec O1.4: helmet (security headers) ───────────────────────────────────
+  // Adiciona o pacote padrao de defesa: X-Frame-Options DENY (anti-
+  // clickjacking), X-Content-Type-Options nosniff (anti-MIME-confusion),
+  // Strict-Transport-Security max-age=180d (forca HTTPS no browser), e
+  // outros (Referrer-Policy, X-DNS-Prefetch-Control, etc.). Custo
+  // proximo de zero — sao apenas headers extras na resposta.
+  //
+  // CSP fica DESLIGADO por enquanto: o frontend Next.js carrega scripts
+  // inline + estilos inline + fonts/imagens de varios CDNs (Resend,
+  // Vercel, etc.), e ligar CSP sem auditar essas fontes quebra a UI.
+  // Item separado pra Onda 3 (XSS bonus).
+  await app.register(helmet, {
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  })
+
+  // ── Sec O1.5: rate-limit global registrado mas inativo (per-rota) ─────────
+  // Aqui registramos o plugin como `global: false` — nenhuma rota e
+  // afetada por padrao. Cada rota que quer rate-limit declara via
+  // `{ config: { rateLimit: {...} } }` no proprio handler. O alvo
+  // critico inicial e POST /auth/login (5 tentativas / 15 min, chaveado
+  // por IP+email — atacante distribuido por multiplos IPs ainda fica
+  // limitado por email; muitos emails do mesmo IP fica limitado por IP).
+  await app.register(rateLimit, {
+    global: false,
+    // Storage default e in-memory por instancia. Se a API rodar em mais
+    // de uma replica no EasyPanel, atacantes podem rebalancear pra
+    // multiplicar tentativas pelo numero de replicas. Trocar pro Redis
+    // quando subirmos replicas. Hoje (1 replica) o efeito e correto.
+  })
 
   await app.register(jwt, {
     secret: resolveSecret('JWT_SECRET', 'dev-secret-change-me'),
