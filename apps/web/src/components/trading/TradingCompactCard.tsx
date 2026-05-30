@@ -9,6 +9,8 @@ import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/auth'
 import { useOtcLivePrice } from '@/lib/otcMarket'
+import { alignExpirationToSlotClose } from '@/lib/expiration'
+import { playSound } from '@/lib/sounds'
 
 const TIME_OPTIONS = [
   { label: '01:00', value: 60   },
@@ -70,8 +72,14 @@ export function TradingCompactCard({
     // throughout its lifetime (OPEN → RESOLVED/CANCELLED); the real
     // `operationId` from the server is only used for the resolution GET.
     const clientTradeId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    const entryTime     = Math.floor(Date.now() / 1000) + BRT_OFFSET
-    const expiryTime    = entryTime + timeSec
+    const nowMs         = Date.now()
+    const entryTime     = Math.floor(nowMs / 1000) + BRT_OFFSET
+    // Slot-close alignment MATCHES the server side — sem isso o marker
+    // mobile apareceria com countdown de 60s e depois "saltaria" pro
+    // valor real (ex: 30s) quando o POST voltasse. Mesma função usada
+    // no TradingPanel desktop.
+    const alignedExpiryMs = alignExpirationToSlotClose(nowMs, timeSec).getTime()
+    const expiryTime    = Math.floor(alignedExpiryMs / 1000) + BRT_OFFSET
     // entryPrice: for BINANCE use livePrice; for OTC prefer the live SSE
     // tick (so client marker == server-recorded entry), fall back to the
     // static asset.price when the stream isn't available.
@@ -89,6 +97,10 @@ export function TradingCompactCard({
       status: 'OPEN',
     })
 
+    // Audio feedback — toca SEMPRE no clique (gesture user destrava
+    // autoplay context). Falha silenciosa se autoplay bloqueado.
+    playSound('open')
+
     try {
       const res = await api.post('/operations', {
         accountId,
@@ -103,9 +115,34 @@ export function TradingCompactCard({
       })
 
       const operationId: string = res.data?.operation?.id ?? clientTradeId
+      // Authoritative server expiresAt. Usado pra (1) timer do
+      // setTimeout abaixo e (2) corrigir o expiryTime do marker no
+      // emit do replacesId (caso o clock skew local divergir do server).
+      const serverOp:      any    = res.data?.operation ?? res.data
+      const serverExpiryMs: number = serverOp?.expiresAt
+        ? new Date(serverOp.expiresAt).getTime()
+        : alignedExpiryMs
+      const delayMs = Math.max(0, serverExpiryMs - Date.now())
+      const serverExpiryTime = Math.floor(serverExpiryMs / 1000) + BRT_OFFSET
+
+      // CRÍTICO: promove o marker otimista pro uuid do server. Sem isso,
+      // o SSE 'created' chega com o uuid e o useEffect [storeOps] em
+      // page.tsx ADICIONA um segundo marker porque o local-* ainda está
+      // lá (= 2 markers visíveis pra 1 op). Esse é exatamente o bug
+      // "no formato mobile esta bugado" reportado. TradingPanel desktop
+      // já tinha esse emit; o CompactCard mobile estava sem.
+      onTradePlaced?.({
+        id:         operationId,
+        replacesId: clientTradeId,
+        entryPrice, entryTime,
+        expiryTime: serverExpiryTime,
+        direction, amount: investment, payout: asset.payout,
+        status:     'OPEN',
+      })
 
       // Poll for resolution after expiry, then signal the chart.
-      // Uses real operationId for the GET, clientTradeId for chart events.
+      // Uses real operationId for the GET, server uuid for chart events
+      // (dedup com o useEffect [storeOps] que também push pela uuid).
       setTimeout(async () => {
         try {
           const { data } = await api.get(`/operations/${operationId}`)
@@ -118,8 +155,9 @@ export function TradingCompactCard({
             useAuthStore.getState().applyBalanceDelta(accountId, investment + prof)
           }
           onTradePlaced?.({
-            id: clientTradeId,
-            entryPrice, entryTime, expiryTime,
+            id: operationId,
+            entryPrice, entryTime,
+            expiryTime: serverExpiryTime,
             direction, amount: investment, payout: asset.payout,
             status: 'RESOLVED', won, profit: prof,
           })
@@ -127,7 +165,7 @@ export function TradingCompactCard({
         } catch {
           setTimeout(() => onTradePlaced?.(null), 4000)
         }
-      }, timeSec * 1000)
+      }, delayMs)
     } catch (err: any) {
       // Server rejected — refund the optimistic debit + roll back marker.
       useAuthStore.getState().applyBalanceDelta(accountId, investment)
