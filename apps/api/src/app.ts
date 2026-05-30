@@ -21,18 +21,46 @@ import { metricsRoute } from './metrics/route.js'
 import { httpRequestDurationSeconds } from './metrics/registry.js'
 import { prisma } from './prisma.js'
 
+// ── Sec O1.1: JWT secrets — fail-fast em produção ─────────────────────────
+// Antes esses tinham fallback `dev-secret-change-me` / `dev-refresh-secret-
+// change-me` — strings PÚBLICAS no commit. Se a env var não estivesse
+// setada em prod, qualquer um forjava access/refresh tokens com essas
+// strings e logava como admin. Agora:
+//   - PROD: throw imediato no boot (impede a app de subir sem secret)
+//   - DEV : aceita default só com WARN explícito no console
+function resolveSecret(envName: string, devFallback: string): string {
+  const val = process.env[envName]
+  if (val && val.length >= 16) return val
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      `[boot] ${envName} ausente ou < 16 chars — refuse to start in production. ` +
+      `Configure a env var no EasyPanel (recomendado: 64+ chars random).`,
+    )
+  }
+  // eslint-disable-next-line no-console
+  console.warn(`[boot] ${envName} faltando — usando default INSEGURO de dev. NUNCA usar em prod.`)
+  return devFallback
+}
+
 export async function buildApp() {
   const app = Fastify({ logger: { level: process.env.NODE_ENV === 'production' ? 'info' : 'debug' } })
 
   // ── Plugins ───────────────────────────────────────────────────────────────
-  const allowedOrigins = [
+  // Sec O1.2: CORS strict equality (URL origin completo, não prefix match).
+  // Antes: origin.startsWith('http://localhost:3000') permitia
+  // 'http://localhost:3000-evil.com' a passar (browser respeitando a
+  // resposta CORS levaria credenciais pro domínio do atacante).
+  // Agora: comparação exata. Lista construída do env + 2 defaults locais.
+  const allowedOrigins = new Set<string>([
     'http://localhost:3000',
     'http://localhost:3001',
     ...(process.env.FRONTEND_URL ?? '').split(',').map(o => o.trim()).filter(Boolean),
-  ]
+  ])
   await app.register(cors, {
     origin: (origin, cb) => {
-      if (!origin || allowedOrigins.some(o => origin.startsWith(o))) return cb(null, true)
+      // origin === undefined: same-origin / curl / mobile native — permitido
+      if (!origin) return cb(null, true)
+      if (allowedOrigins.has(origin)) return cb(null, true)
       cb(new Error('Not allowed by CORS'), false)
     },
     credentials: true,
@@ -45,12 +73,12 @@ export async function buildApp() {
   await app.register(cookie)
 
   await app.register(jwt, {
-    secret: process.env.JWT_SECRET ?? 'dev-secret-change-me',
+    secret: resolveSecret('JWT_SECRET', 'dev-secret-change-me'),
     sign: { expiresIn: '15m' },
   })
 
   await app.register(jwt, {
-    secret: process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret-change-me',
+    secret: resolveSecret('JWT_REFRESH_SECRET', 'dev-refresh-secret-change-me'),
     namespace: 'refresh',
     sign: { expiresIn: '7d' },
     cookie: { cookieName: 'refresh_token', signed: false },
