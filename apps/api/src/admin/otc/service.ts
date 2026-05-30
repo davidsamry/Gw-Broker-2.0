@@ -245,8 +245,16 @@ export async function fullResetAllOtc(adminId: string): Promise<FullResetResult>
   // values from the reset state — that becomes the new floor.
   const inMemory = fullResetEngine()
 
-  // 3. Audit log so we know who triggered the nuke.
-  await writeAuditLog(adminId, 'FULL_RESET', null, beforeCounts[0], { inMemory, marketUpdate, liquidityUpdate })
+  // 3. Audit log so we know who triggered the nuke. Use the Number-coerced
+  // counts — beforeCounts[0] still carries bigints from $queryRaw, which
+  // JSON.stringify can't serialise.
+  await writeAuditLog(
+    adminId,
+    'FULL_RESET',
+    null,
+    { snap: snapshotsDeleted, candles: candlesDeleted, ticks: ticksDeleted },
+    { inMemory, marketUpdate, liquidityUpdate },
+  )
 
   return {
     inMemory,
