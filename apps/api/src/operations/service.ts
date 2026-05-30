@@ -12,8 +12,6 @@ import {
   type LiquidityOutcome,
 } from './liquidityManipulation.js'
 
-const M1_SLOT_MS = 60_000
-
 export async function createOperation(userId: string, input: CreateOperationInput) {
   // Per-user market permission gate. Admin toggles canTradeForex/Otc/Crypto
   // on /admin/usuarios — if the user's flag for THIS asset's market is
@@ -173,7 +171,15 @@ export async function createOperation(userId: string, input: CreateOperationInpu
       const opIdStr   = String((rows[0] as any).id)
       const market    = await getAssetMarket({ id: input.assetId, marketSymbol: input.marketSymbol })
       const expiresMs = expiresAt.getTime()
-      const slotEndMs = (Math.floor(expiresMs / M1_SLOT_MS) + 1) * M1_SLOT_MS
+      // slotEndMs IS the op's expiration timestamp (not the M1 close).
+      // The OTC tick loop uses this as the deadline for the nudge window
+      // (last NUDGE_WINDOW_MS before slotEndMs), so the candle is moved
+      // by the time the resolver reads the exit tick. Using the M1
+      // close instead would push the nudge to AFTER expiry for ops that
+      // don't expire on a minute boundary (the common case — 60s after
+      // a mid-minute click) — exit tick would be unnudged → "vela
+      // verde, op LOST" mismatch.
+      const slotEndMs = expiresMs
       // LOSS → vela na direção OPOSTA à aposta. WIN → mesma direção.
       const nudgeDir: 'CALL' | 'PUT' = liquidityOutcome === 'LOSS'
         ? (input.direction === 'CALL' ? 'PUT' : 'CALL')

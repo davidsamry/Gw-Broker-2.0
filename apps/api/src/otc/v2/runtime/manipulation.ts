@@ -11,6 +11,13 @@ export interface ActiveSignal {
   scheduledAt: number  // epoch ms
   timeframe:   number
   direction:   'CALL' | 'PUT'
+  // Optional explicit deadline for the nudge window. When present,
+  // overrides the M1 slot-end in the "last NUDGE_WINDOW_MS" check.
+  // Liquidity signals set this to the op's expiresAt so the nudge
+  // actually completes BEFORE the resolver reads the exit price —
+  // otherwise the nudge would activate after expiry (waste). Admin
+  // signals leave it undefined and stick to the slot-end default.
+  deadlineMs?: number
 }
 
 // In-memory cache, keyed by assetId. Each asset has 0+ active signals
@@ -52,6 +59,12 @@ export function getSignalsForAsset(assetId: string): ActiveSignal[] {
     scheduledAt: s.slotEndMs - 1,
     timeframe:   60,   // liquidity signals always target the M1 slot
     direction:   s.direction,
+    // Critical: for liquidity, slotEndMs IS the op's expiresAt (set by
+    // service.ts). Carrying it through as deadlineMs makes the nudge
+    // window land in the final NUDGE_WINDOW_MS before expiry — which is
+    // what the resolver reads. Without this the nudge would still aim
+    // at the M1 close, which can be 30-58s AFTER expiry (waste).
+    deadlineMs:  s.slotEndMs,
   }))
   // Merge + re-sort by scheduledAt ASC so consumers' early-exit logic
   // (sorted scan, break when past slot end) keeps working.
@@ -204,10 +217,18 @@ export function maybeManipulatePrice(
   }
   if (!active) return rawPrice
 
-  // Only nudge in the final window of the slot — earlier ticks tick
-  // naturally so the candle's body has visible movement before the
-  // forced close. Outside the window, normal price.
-  const msUntilEnd = slotEndMs - now
+  // Only nudge in the final window before the effective deadline.
+  //
+  // For admin signals, effectiveDeadline === slotEndMs (the M1 close).
+  // For liquidity signals, the signal carries its own deadlineMs equal
+  // to the op's expiresAt — usually EARLIER than the M1 close, so the
+  // nudge must finish before expiry (when the resolver reads the tick).
+  // Without min() the nudge would aim at the M1 close and miss expiry
+  // entirely for ops that don't expire on a minute boundary.
+  const effectiveDeadline = active.deadlineMs != null
+    ? Math.min(slotEndMs, active.deadlineMs)
+    : slotEndMs
+  const msUntilEnd = effectiveDeadline - now
   if (msUntilEnd > NUDGE_WINDOW_MS) return rawPrice
   if (msUntilEnd <= 0) return rawPrice
 
@@ -225,8 +246,11 @@ export function maybeManipulatePrice(
     return rawPrice
   }
 
-  // Smooth blend: as time approaches slot end, blend more toward target.
-  // At msUntilEnd = NUDGE_WINDOW_MS → 0% target; at msUntilEnd = 0 → 100% target.
+  // Smooth blend: as time approaches the effective deadline, blend more
+  // toward target. At msUntilEnd = NUDGE_WINDOW_MS → 0% target; at
+  // msUntilEnd = 0 → 100% target. Using effectiveDeadline keeps the
+  // blend monotonic from 0 to 1 across the full window for both admin
+  // (deadline = slotEnd) and liquidity (deadline = expiresAt) signals.
   const blend = 1 - (msUntilEnd / NUDGE_WINDOW_MS)
   return rawPrice * (1 - blend) + target * blend
 }
