@@ -11,6 +11,7 @@ import { useAuthStore } from '@/store/auth'
 import { getAssetMarket, isMarketAllowed } from '@/lib/marketPermissions'
 import { useOtcLivePrice } from '@/lib/otcMarket'
 import { useBinanceTicker } from '@/lib/binanceMarket'
+import { alignExpirationToSlotClose } from '@/lib/expiration'
 
 interface TradingPanelProps {
   asset: Asset
@@ -327,8 +328,16 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
     // roll back both lists + emit a CANCELLED event to silently remove the
     // marker.
     const expiresInSec  = TIME_OPTIONS[timeIndex]
-    const entryTime     = Math.floor(Date.now() / 1000) + BRT_OFFSET
-    const expiryTime    = entryTime + expiresInSec
+    const nowMs         = Date.now()
+    const entryTime     = Math.floor(nowMs / 1000) + BRT_OFFSET
+    // Slot-close alignment MATCHES what the server does in createOperation
+    // (same nowMs ± a few ms of network latency). Without mirroring here,
+    // the optimistic marker shows "01:00" countdown for 1-3s and then
+    // jumps to the real (often shorter) value when the POST response
+    // arrives → visible glitch. The post-POST emit still corrects it as
+    // safety net if local clock drifts past a slot boundary.
+    const alignedExpiryMs = alignExpirationToSlotClose(nowMs, expiresInSec).getTime()
+    const expiryTime    = Math.floor(alignedExpiryMs / 1000) + BRT_OFFSET
     // entryPrice: BINANCE → livePrice (from external feed); OTC → live SSE
     // tick when available, falling back to static asset.price. The server
     // also re-derives the OTC entry from its own latest tick, so this is
