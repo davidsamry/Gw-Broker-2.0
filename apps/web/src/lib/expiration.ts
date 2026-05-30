@@ -13,7 +13,8 @@
 // the backend change (or vice versa) reintroduces the same visual jump
 // this file exists to prevent.
 
-export const DEFAULT_MIN_TIME_MS = 10_000
+// MUST match apps/api/src/operations/expiration.ts (lockstep).
+export const DEFAULT_MIN_TIME_MS = 29_000
 
 export const SUPPORTED_TIMEFRAMES_SEC = [60, 300, 900] as const
 export type SupportedTimeframeSec = typeof SUPPORTED_TIMEFRAMES_SEC[number]

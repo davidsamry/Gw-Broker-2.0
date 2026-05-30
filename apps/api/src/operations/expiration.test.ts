@@ -3,14 +3,12 @@ import { alignExpirationToSlotClose, DEFAULT_MIN_TIME_MS } from './expiration.js
 
 // Build a fixed epoch base for deterministic tests. Picking a Unix
 // timestamp that lands exactly on a minute boundary avoids any timezone
-// drift in the math.
+// drift in the math. Tests below assume DEFAULT_MIN_TIME_MS = 29_000.
 const BASE_MS = new Date('2026-01-01T12:00:00.000Z').getTime()
 
 describe('alignExpirationToSlotClose — M1 (60s)', () => {
-  it('clique no segundo 0 do minuto → expira no próximo close (60s depois)', () => {
+  it('clique no segundo 0 do minuto → pula (msUntil=0 < 29s) → expira em 60s', () => {
     const result = alignExpirationToSlotClose(BASE_MS, 60)
-    // BASE_MS já é boundary, então msUntil = 0 < 10000 → pula
-    // Expected: BASE_MS + 60s (op dura 60s)
     expect(result.getTime() - BASE_MS).toBe(60_000)
   })
 
@@ -24,14 +22,19 @@ describe('alignExpirationToSlotClose — M1 (60s)', () => {
     expect(result.getTime() - (BASE_MS + 30_000)).toBe(30_000)
   })
 
-  it('clique no segundo 50 → ainda dá tempo (10s exatos), expira em 10s', () => {
-    const result = alignExpirationToSlotClose(BASE_MS + 50_000, 60)
-    expect(result.getTime() - (BASE_MS + 50_000)).toBe(10_000)
+  it('clique no segundo 31 → faltam 29s (exatamente o mínimo), expira em 29s', () => {
+    const result = alignExpirationToSlotClose(BASE_MS + 31_000, 60)
+    expect(result.getTime() - (BASE_MS + 31_000)).toBe(29_000)
   })
 
-  it('clique no segundo 51 → faltam 9s (< 10s mínimo), pula pro seguinte (69s)', () => {
-    const result = alignExpirationToSlotClose(BASE_MS + 51_000, 60)
-    expect(result.getTime() - (BASE_MS + 51_000)).toBe(69_000)
+  it('clique no segundo 32 → faltam 28s (< 29s mínimo), pula pro seguinte (88s)', () => {
+    const result = alignExpirationToSlotClose(BASE_MS + 32_000, 60)
+    expect(result.getTime() - (BASE_MS + 32_000)).toBe(88_000)
+  })
+
+  it('clique no segundo 45 → faltam 15s, pula pro seguinte (75s)', () => {
+    const result = alignExpirationToSlotClose(BASE_MS + 45_000, 60)
+    expect(result.getTime() - (BASE_MS + 45_000)).toBe(75_000)
   })
 
   it('clique no segundo 59 → faltam 1s, pula pro seguinte (61s)', () => {
@@ -41,7 +44,7 @@ describe('alignExpirationToSlotClose — M1 (60s)', () => {
 })
 
 describe('alignExpirationToSlotClose — M5 (300s)', () => {
-  it('clique no segundo 0 → expira em 300s', () => {
+  it('clique no segundo 0 → pula (msUntil=0 < 29s) → expira em 300s', () => {
     expect(alignExpirationToSlotClose(BASE_MS, 300).getTime() - BASE_MS).toBe(300_000)
   })
 
@@ -50,14 +53,14 @@ describe('alignExpirationToSlotClose — M5 (300s)', () => {
     expect(result.getTime() - (BASE_MS + 120_000)).toBe(180_000)
   })
 
-  it('clique 8s antes do close M5 → pula pro próximo (308s)', () => {
-    const result = alignExpirationToSlotClose(BASE_MS + (300_000 - 8_000), 300)
-    expect(result.getTime() - (BASE_MS + 292_000)).toBe(308_000)
+  it('clique 28s antes do close M5 → pula pro próximo (328s)', () => {
+    const result = alignExpirationToSlotClose(BASE_MS + (300_000 - 28_000), 300)
+    expect(result.getTime() - (BASE_MS + 272_000)).toBe(328_000)
   })
 })
 
 describe('alignExpirationToSlotClose — M15 (900s)', () => {
-  it('clique no início → expira em 900s', () => {
+  it('clique no segundo 0 → pula (msUntil=0 < 29s) → expira em 900s', () => {
     expect(alignExpirationToSlotClose(BASE_MS, 900).getTime() - BASE_MS).toBe(900_000)
   })
 
