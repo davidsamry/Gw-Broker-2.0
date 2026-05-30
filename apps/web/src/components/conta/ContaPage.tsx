@@ -946,14 +946,28 @@ function RetiradaTab({ onNavigateToMyAccount }: { onNavigateToMyAccount: () => v
             </div>
           </div>
 
-          {/* Security badges — wrap on mobile */}
-          <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 md:gap-4 mt-4 md:mt-5 pt-4 border-t border-[#2a2e3b]">
-            {['Verified by VISA', 'SECURE PAYMENT', 'MasterCard SecureCode', '3D Secure', 'SSL ENCRYPTION'].map((b) => (
-              <div key={b} className="flex flex-col items-center gap-0.5 opacity-40">
-                <div className="w-8 h-8 rounded bg-[#2a2e3b]" />
-                <span className="text-[8px] text-[#8b8f9a] text-center leading-tight max-w-[48px]">{b}</span>
+          {/* Payment method badges — PIX (BR) e USDT (cripto), os dois
+              meios de saque suportados pela plataforma. Substitui os
+              badges genéricos de cartão (Verified by VISA, SECURE PAYMENT,
+              etc) que não faziam sentido aqui — a plataforma não opera
+              cartão de crédito. SVGs inline pra evitar requisição extra
+              e garantir as cores oficiais. */}
+          <div className="flex flex-wrap items-center justify-center md:justify-start gap-5 mt-4 md:mt-5 pt-4 border-t border-[#2a2e3b]">
+            {/* PIX — turquesa oficial #32BCAD do Banco Central. */}
+            <div className="flex flex-col items-center gap-1">
+              <div className="w-12 h-12 rounded-xl bg-[#32BCAD] flex items-center justify-center">
+                <span className="text-white text-base font-bold tracking-tight">pix</span>
               </div>
-            ))}
+              <span className="text-[9px] font-semibold text-[#32BCAD] tracking-wide">PIX</span>
+            </div>
+
+            {/* USDT — verde oficial #26A17B da Tether, símbolo ₮ branco. */}
+            <div className="flex flex-col items-center gap-1">
+              <div className="w-12 h-12 rounded-full bg-[#26A17B] flex items-center justify-center">
+                <span className="text-white text-xl font-bold leading-none">₮</span>
+              </div>
+              <span className="text-[9px] font-semibold text-[#26A17B] tracking-wide">USDT</span>
+            </div>
           </div>
         </div>
 
