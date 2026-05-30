@@ -173,7 +173,7 @@ export default function AdminConfiguracoesPage() {
             />
           </Card>
 
-          {/* Auto-Liquidez */}
+          {/* Auto-Liquidez — agora pareado com Copy Trade abaixo (grid 2-col) */}
           <Card title="Auto-Liquidez" icon={<BarChart2 size={14} className="text-amber-400" />} desc="Ativa Liquidez + bloqueia Cripto automaticamente quando o usuário atinge X% de lucro sobre o saldo do último depósito">
             <Number
               label="% de lucro para acionar (0 = desativado)"
@@ -184,17 +184,16 @@ export default function AdminConfiguracoesPage() {
             />
           </Card>
 
-          {/* Copy Trade — full row */}
-          <div className="md:col-span-2">
-            <Card title="Copy Trade" icon={<Copy size={14} className="text-purple-400" />} desc="Habilite ou desabilite o recurso de copy trade">
-              <Toggle
-                label="Habilitar Copy Trade"
-                hint="Permite que usuários copiem operações de traders"
-                value={form.copyTradeEnabled}
-                onChange={(v) => patch('copyTradeEnabled', v)}
-              />
-            </Card>
-          </div>
+          {/* Copy Trade — antes ocupava full row (md:col-span-2); agora 1 col
+              ao lado de Auto-Liquidez. Layout fica equilibrado em telas md+. */}
+          <Card title="Copy Trade" icon={<Copy size={14} className="text-purple-400" />} desc="Habilite ou desabilite o recurso de copy trade">
+            <Toggle
+              label="Habilitar Copy Trade"
+              hint="Permite que usuários copiem operações de traders"
+              value={form.copyTradeEnabled}
+              onChange={(v) => patch('copyTradeEnabled', v)}
+            />
+          </Card>
 
           {/* Modo Seguro (Anti-DevTools) — full row, status banner + toggle */}
           <div className="md:col-span-2">
