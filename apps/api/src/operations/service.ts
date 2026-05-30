@@ -5,7 +5,7 @@ import type { CreateOperationInput } from './schema.js'
 import { resolveOperationIfExpired } from './worker.js'
 import { getSettings } from '../settings/service.js'
 import { publishOperationEvent } from './events.js'
-import { assertMarketAllowed, getAssetMarket } from './marketPermissions.js'
+import { assertMarketAllowed } from './marketPermissions.js'
 import {
   registerLiquiditySignal,
   getNextLiquidityOutcome,
@@ -167,16 +167,25 @@ export async function createOperation(userId: string, input: CreateOperationInpu
   // with the forced outcome (vela vermelha quando user CALL e cycle=LOSS,
   // vela verde quando user CALL e cycle=WIN).
   //
-  // For Binance/crypto we never touch the candle (real market).
+  // Para qualquer ativo OTC (marketSymbol === null), nós controlamos o
+  // engine de preço e podemos manipular a vela coerente com o veredito.
+  // Cobre: commodities, forex, ações, indices, E crypto OTC (BTC/USD,
+  // ETH/USD, etc — todos os pares OTC sob nosso engine).
   //
-  // In-memory only by design: the signal is meaningful only inside the
-  // M1 slot it targets (<60s), so even on restart the worst case is
+  // Para Binance (marketSymbol !== null), a vela é o preço REAL do
+  // mercado mundial — não dá pra manipular. O veredito ainda é forçado
+  // (pelo liquidityOutcome no DB), mas a vela tica natural; user pode
+  // ver "vela verde mas perdi" nesses ativos. É uma limitação aceita —
+  // não dá pra forçar o BTC/USDT real a fechar diferente.
+  //
+  // In-memory only by design: o signal é meaningful só dentro do M1
+  // slot que ele alveja (<60s), então mesmo em restart o pior caso é
   // "vela ticou natural pelos últimos segundos, mas o resultado da op
   // ainda é forçado pelo DB". The op outcome is safe.
   if (liquidityOutcome) {
     try {
       const opIdStr   = String((rows[0] as any).id)
-      const market    = await getAssetMarket({ id: input.assetId, marketSymbol: input.marketSymbol })
+      const isOtc     = !input.marketSymbol
       const expiresMs = expiresAt.getTime()
       // slotEndMs IS the op's expiration timestamp (not the M1 close).
       // The OTC tick loop uses this as the deadline for the nudge window
@@ -192,7 +201,7 @@ export async function createOperation(userId: string, input: CreateOperationInpu
         ? (input.direction === 'CALL' ? 'PUT' : 'CALL')
         : input.direction
 
-      if (market !== 'crypto') {
+      if (isOtc) {
         registerLiquiditySignal({
           opId:        opIdStr,
           assetId:     input.assetId,
@@ -202,7 +211,7 @@ export async function createOperation(userId: string, input: CreateOperationInpu
         })
         console.log(`[liquidity] cycle=${liquidityOutcome} OTC nudge op=${opIdStr.slice(0,8)} dir=${nudgeDir}`)
       } else {
-        console.log(`[liquidity] cycle=${liquidityOutcome} silent op=${opIdStr.slice(0,8)} (binance)`)
+        console.log(`[liquidity] cycle=${liquidityOutcome} silent op=${opIdStr.slice(0,8)} (binance, vela real)`)
       }
     } catch (err) {
       console.error('[liquidity] post-insert signal failed (non-fatal)', err)
