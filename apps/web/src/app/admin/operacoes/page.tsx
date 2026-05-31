@@ -8,7 +8,7 @@ import {
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useDebounce } from '@/lib/useDebounce'
-import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer'
+import { UserDetailsViewDrawer } from '@/components/admin/UserDetailsViewDrawer'
 
 interface OpRow {
   id:           string
@@ -304,13 +304,12 @@ export default function AdminOperationsPage() {
 
       {viewing && <ViewModal op={viewing} onClose={() => setViewing(null)} />}
 
-      {/* User detail drawer — abre quando admin clica em Nome/Email na tabela.
-          Reusa o mesmo componente da pagina /admin/usuarios pra manter UI/UX
-          consistente. onChanged disparado quando admin edita algo no drawer
-          (block, ajuste de saldo, etc.) → reload da lista pra refletir delta
-          de saldo possivel. */}
+      {/* User details view drawer — abre quando admin clica em Nome/Email
+          na tabela. Read-only com KPIs (Saldo Operacional, Total Ganho/
+          Perdido/Depositado) + historico de operacoes. Distinto do
+          UserDetailDrawer (formulario de edicao usado em /admin/usuarios). */}
       {selectedUserId && (
-        <UserDetailDrawer
+        <UserDetailsViewDrawer
           userId={selectedUserId}
           onClose={() => setSelectedUserId(null)}
           onChanged={() => load()}
