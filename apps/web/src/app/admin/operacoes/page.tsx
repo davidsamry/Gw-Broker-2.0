@@ -8,6 +8,7 @@ import {
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useDebounce } from '@/lib/useDebounce'
+import { UserDetailDrawer } from '@/components/admin/UserDetailDrawer'
 
 interface OpRow {
   id:           string
@@ -58,6 +59,10 @@ export default function AdminOperationsPage() {
   const [accountType, setAccountType] = useState<AccountTypeFilter>('REAL')
   const [page, setPage]               = useState(1)
   const [viewing, setViewing]         = useState<OpRow | null>(null)
+  // Drawer de detalhes do usuario (mesmo componente usado em /admin/usuarios).
+  // Setado quando o admin clica em Nome ou Email na linha — abre o drawer
+  // populado pelo userId da operacao.
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
   const [deletingId,   setDeletingId]   = useState<string | null>(null)
 
@@ -220,8 +225,20 @@ export default function AdminOperationsPage() {
                     null
                   return (
                     <tr key={op.id} className="border-b border-[#1f232e]/50 hover:bg-white/[0.02] transition-colors">
-                      <td className="px-3 py-3 font-semibold text-white">{op.userName || '—'}</td>
-                      <td className="px-3 py-3 text-[#8b8f9a] truncate max-w-[220px]">{op.userEmail}</td>
+                      <td
+                        className="px-3 py-3 font-semibold text-white cursor-pointer hover:text-emerald-400 transition-colors"
+                        onClick={() => setSelectedUserId(op.userId)}
+                        title="Abrir detalhes do usuário"
+                      >
+                        {op.userName || '—'}
+                      </td>
+                      <td
+                        className="px-3 py-3 text-[#8b8f9a] truncate max-w-[220px] cursor-pointer hover:text-emerald-400 transition-colors"
+                        onClick={() => setSelectedUserId(op.userId)}
+                        title="Abrir detalhes do usuário"
+                      >
+                        {op.userEmail}
+                      </td>
                       <td className="px-3 py-3 text-[#8b8f9a]">{formatDateTime(op.openedAt)}</td>
                       <td className="px-3 py-3 text-white">{formatTimeframe(op.timeframeSec)}</td>
                       <td className="px-3 py-3 text-right text-white">R$ {fmtBRL(op.amount)}</td>
@@ -286,6 +303,19 @@ export default function AdminOperationsPage() {
       </div>
 
       {viewing && <ViewModal op={viewing} onClose={() => setViewing(null)} />}
+
+      {/* User detail drawer — abre quando admin clica em Nome/Email na tabela.
+          Reusa o mesmo componente da pagina /admin/usuarios pra manter UI/UX
+          consistente. onChanged disparado quando admin edita algo no drawer
+          (block, ajuste de saldo, etc.) → reload da lista pra refletir delta
+          de saldo possivel. */}
+      {selectedUserId && (
+        <UserDetailDrawer
+          userId={selectedUserId}
+          onClose={() => setSelectedUserId(null)}
+          onChanged={() => load()}
+        />
+      )}
     </div>
   )
 }
