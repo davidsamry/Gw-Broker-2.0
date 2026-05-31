@@ -9,6 +9,9 @@ const listQuerySchema = z.object({
   search:      z.string().trim().min(1).optional(),
   status:      z.enum(['ALL', 'OPEN', 'WON', 'LOST', 'CANCELLED']).optional(),
   accountType: z.enum(['ALL', 'REAL', 'DEMO']).optional(),
+  // Filtra so' ops de UM usuario — usado pelo drawer "Detalhes do Usuario"
+  // na /admin/operacoes pra puxar historico paginado.
+  userId:      z.string().trim().min(1).optional(),
 })
 
 export async function operationsAdminRoutes(app: FastifyInstance) {

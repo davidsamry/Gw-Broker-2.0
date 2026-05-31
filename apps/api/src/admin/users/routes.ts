@@ -4,6 +4,7 @@ import {
   adjustUserBalance, deleteUser, getUserDetail, listUsers,
   updateUserByAdmin, updateUserBonus, resetUserPassword,
 } from './service.js'
+import { deleteAllUserOperations } from '../operations/service.js'
 import { recordAdminAction } from '../auditLog.js'
 
 const listQuerySchema = z.object({
@@ -210,6 +211,28 @@ export async function userAdminRoutes(app: FastifyInstance) {
       if (err.message === 'USER_NOT_FOUND')      return reply.status(404).send({ error: 'USER_NOT_FOUND' })
       if (err.message === 'CANNOT_DELETE_SELF')  return reply.status(400).send({ error: 'CANNOT_DELETE_SELF' })
       if (err.message === 'CANNOT_DELETE_ADMIN') return reply.status(400).send({ error: 'CANNOT_DELETE_ADMIN' })
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Bulk-delete: TODAS as operacoes de UM usuario. Usado pelo botao
+  // "Excluir Todos os Trades" no drawer Detalhes do Usuario. Reverte
+  // saldo + ADJUSTMENT por account em transacao atomica.
+  app.delete('/:id/operations', async (req, reply) => {
+    const { id }  = req.params as { id: string }
+    const adminId = ((req as any).user.sub) as string
+    try {
+      const result = await deleteAllUserOperations(adminId, id)
+      void recordAdminAction(req, {
+        resourceType: 'USER',
+        resourceId:   id,
+        action:       'DELETE_ALL_OPERATIONS',
+        before:       null,
+        after:        result,
+      })
+      return reply.send({ ok: true, ...result })
+    } catch (err: any) {
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }

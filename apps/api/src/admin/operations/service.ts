@@ -36,6 +36,8 @@ export interface ListOperationsParams {
   search?:      string
   status?:      'ALL' | 'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
   accountType?: 'ALL' | 'REAL' | 'DEMO'
+  /** Filtra so' as ops de UM usuario especifico (drawer "Detalhes do Usuario") */
+  userId?:      string
 }
 
 export interface ListOperationsResponse {
@@ -67,6 +69,9 @@ export async function listAdminOperations(params: ListOperationsParams): Promise
   }
   if (params.accountType && params.accountType !== 'ALL') {
     where.push(Prisma.sql`a.type = ${params.accountType}::"AccountType"`)
+  }
+  if (params.userId) {
+    where.push(Prisma.sql`u.id = ${params.userId}`)
   }
   const whereSql = where.length
     ? Prisma.sql`WHERE ${Prisma.join(where, ' AND ')}`
@@ -251,4 +256,99 @@ export async function deleteAdminOperation(adminId: string, operationId: string)
   }
 
   return { balanceDelta: delta.toString(), status: op.status }
+}
+
+// ── Bulk delete: TODAS as operacoes de UM usuario ─────────────────────────
+// Usado pelo botao "Excluir Todos os Trades" no drawer de detalhes
+// (/admin/operacoes → clique no nome). Aplica a mesma logica de reverse
+// balance que deleteAdminOperation, mas em batch:
+//
+//   1. Le todas as ops do user (todos os status, todas as accounts)
+//   2. Agrupa por accountId pra computar o delta total por account
+//      (um user pode ter REAL + DEMO; cada uma tem seu proprio saldo)
+//   3. Em UMA transacao:
+//      - Para cada account com delta != 0: UPDATE balance + INSERT ADJUSTMENT
+//      - DELETE em massa de todas as ops
+//
+// Por que transacao explicita em vez de CTE: precisamos branchear o computo
+// do delta por status no JS antes de executar. Tudo num $transaction(async tx)
+// pra garantir atomicidade (ou rola tudo, ou nada).
+//
+// Retorna { deletedCount, totalBalanceDelta } pra audit log + UI mostrar
+// "X ops excluidas, saldo ajustado em R$ Y".
+
+export async function deleteAllUserOperations(
+  adminId: string,
+  userId:  string,
+): Promise<{ deletedCount: number; totalBalanceDelta: string }> {
+  // 1) Le todas as ops do user (qualquer status, qualquer account)
+  const ops = await prisma.$queryRaw<Array<{
+    id:        string
+    accountId: string
+    status:    string
+    amount:    any
+    profit:    any
+  }>>`
+    SELECT o.id, o."accountId", o.status::text AS status, o.amount, o.profit
+    FROM operations o
+    INNER JOIN accounts a ON a.id = o."accountId"
+    WHERE a."userId" = ${userId}
+  `
+  if (ops.length === 0) return { deletedCount: 0, totalBalanceDelta: '0' }
+
+  // 2) Calcula o delta total por account
+  const deltaByAccount = new Map<string, Prisma.Decimal>()
+  const opsCountByAccount = new Map<string, number>()
+  for (const op of ops) {
+    const amount = new Prisma.Decimal(decimalToString(op.amount))
+    const profit = new Prisma.Decimal(decimalToString(op.profit ?? '0'))
+    let delta = new Prisma.Decimal(0)
+    switch (op.status) {
+      case 'OPEN':
+      case 'LOST':
+        delta = amount                          // devolve o stake
+        break
+      case 'WON':
+        delta = amount.plus(profit).negated()   // estorna stake + lucro pago
+        break
+      case 'CANCELLED':
+        delta = new Prisma.Decimal(0)           // cancel ja devolveu, no-op
+        break
+    }
+    deltaByAccount.set(
+      op.accountId,
+      (deltaByAccount.get(op.accountId) ?? new Prisma.Decimal(0)).plus(delta),
+    )
+    opsCountByAccount.set(op.accountId, (opsCountByAccount.get(op.accountId) ?? 0) + 1)
+  }
+
+  // 3) Transacao atomica
+  let totalDelta = new Prisma.Decimal(0)
+  await prisma.$transaction(async (tx) => {
+    for (const [accountId, delta] of deltaByAccount) {
+      if (delta.equals(0)) continue
+      const count = opsCountByAccount.get(accountId) ?? 0
+      const adjTxId = randomUUID()
+      const note    = `Exclusao em massa de ${count} operacoes por admin ${adminId.slice(0, 8)} — reversao de saldo`
+      await tx.$executeRaw`
+        UPDATE accounts SET balance = balance + ${delta} WHERE id = ${accountId}
+      `
+      await tx.$executeRaw`
+        INSERT INTO transactions (id, "accountId", type, amount, description, "createdAt")
+        VALUES (${adjTxId}, ${accountId}, 'ADJUSTMENT'::"TransactionType",
+                ${delta}, ${note}, NOW())
+      `
+      totalDelta = totalDelta.plus(delta)
+    }
+    // Delete em massa — apos o ajuste de saldo, ledger fica consistente.
+    await tx.$executeRaw`
+      DELETE FROM operations
+      WHERE "accountId" IN (SELECT id FROM accounts WHERE "userId" = ${userId})
+    `
+  })
+
+  return {
+    deletedCount:      ops.length,
+    totalBalanceDelta: totalDelta.toString(),
+  }
 }

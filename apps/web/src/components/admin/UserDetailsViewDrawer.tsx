@@ -7,21 +7,25 @@
 //   - 4 KPIs no topo (Saldo Operacional, Total Ganho, Total Perdido,
 //     Total Depositado)
 //   - Botoes "Logar como Usuario" + "Excluir Todos os Trades"
-//   - Tabela de Historico de Operacoes (ate as 50 mais recentes)
+//   - Tabela de Historico de Operacoes paginada (25/pagina)
 //
-// Reusa GET /admin/users/:id (mesmo endpoint usado pelo edit drawer) pra
-// nao multiplicar round-trips. Calcula KPIs no frontend a partir das
-// accounts/operations/transactions retornadas.
+// Faz 2 requests em paralelo:
+//   - GET /admin/users/:id   → dados do user + KPIs (accounts + transactions)
+//   - GET /admin/operations?userId=:id&page=X → historico paginado
+//
+// A separacao permite paginacao real (em vez de ficar limitado a 50 ops
+// que o /admin/users/:id retorna). Page muda → so a 2a request roda.
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   X, ArrowUp, ArrowDown, ExternalLink, Trash2, Loader2,
   TrendingDown, TrendingUp, DollarSign,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
-interface UserDetailsResponse {
+interface UserSummary {
   user: {
     id:    string
     name:  string
@@ -32,24 +36,35 @@ interface UserDetailsResponse {
     type:    'REAL' | 'DEMO'
     balance: string
   }>
+  // Inclui ops + transactions usados pros KPIs (sem precisar paginar).
   operations: Array<{
-    id:           string
-    assetSymbol:  string
-    direction:    'CALL' | 'PUT'
-    amount:       string
-    entryPrice:   string
-    exitPrice:    string | null
-    profit:       string | null
-    status:       'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
-    openedAt:     string
+    status: 'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
+    amount: string
+    profit: string | null
   }>
   transactions: Array<{
-    id:          string
-    type:        string         // DEPOSIT, WITHDRAWAL, BUY, PROFIT, etc.
-    amount:      string
-    description: string | null
-    createdAt:   string
+    type:   string         // DEPOSIT, WITHDRAWAL, BUY, PROFIT, etc.
+    amount: string
   }>
+}
+
+interface OperationRow {
+  id:           string
+  assetSymbol:  string
+  direction:    'CALL' | 'PUT'
+  amount:       string
+  entryPrice:   string
+  exitPrice:    string | null
+  profit:       string | null
+  status:       'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
+  openedAt:     string
+}
+
+interface OpsListResponse {
+  operations: OperationRow[]
+  total:      number
+  page:       number
+  pageSize:   number
 }
 
 interface Props {
@@ -59,10 +74,22 @@ interface Props {
   onChanged?: () => void
 }
 
+const PAGE_SIZE = 25
+
 export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
-  const [data, setData]       = useState<UserDetailsResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState('')
+  // Summary (KPIs + user info) — buscado uma vez por userId
+  const [summary, setSummary] = useState<UserSummary | null>(null)
+  const [summaryLoading, setSummaryLoading] = useState(true)
+  const [summaryError, setSummaryError]   = useState('')
+
+  // Operations paginadas — refetch quando page muda
+  const [ops, setOps]         = useState<OpsListResponse | null>(null)
+  const [opsLoading, setOpsLoading] = useState(true)
+  const [opsError, setOpsError]     = useState('')
+  const [page, setPage]       = useState(1)
+
+  // Estado do botao "Excluir Todos"
+  const [deletingAll, setDeletingAll] = useState(false)
 
   // ESC fecha (pattern do UserDetailDrawer)
   useEffect(() => {
@@ -71,50 +98,113 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // ── Carrega summary (1 vez por userId) ─────────────────────────────────
   useEffect(() => {
     let alive = true
-    setLoading(true); setError('')
-    api.get<UserDetailsResponse>(`/admin/users/${userId}`)
-      .then(res => { if (alive) setData(res.data) })
-      .catch(() => { if (alive) setError('Erro ao carregar detalhes.') })
-      .finally(() => { if (alive) setLoading(false) })
+    setSummaryLoading(true); setSummaryError('')
+    api.get<UserSummary>(`/admin/users/${userId}`)
+      .then(res => { if (alive) setSummary(res.data) })
+      .catch(() => { if (alive) setSummaryError('Erro ao carregar dados do usuário.') })
+      .finally(() => { if (alive) setSummaryLoading(false) })
     return () => { alive = false }
   }, [userId])
 
+  // ── Carrega operations paginadas ───────────────────────────────────────
+  const loadOps = useCallback(async () => {
+    setOpsLoading(true); setOpsError('')
+    try {
+      const res = await api.get<OpsListResponse>('/admin/operations', {
+        params: { userId, page, pageSize: PAGE_SIZE },
+      })
+      setOps(res.data)
+    } catch {
+      setOpsError('Erro ao carregar histórico.')
+    } finally {
+      setOpsLoading(false)
+    }
+  }, [userId, page])
+  useEffect(() => { loadOps() }, [loadOps])
+
+  // ── Handler: excluir todos os trades ───────────────────────────────────
+  async function handleDeleteAll() {
+    if (!summary) return
+    const count = (summary.operations ?? []).length
+    if (count === 0) {
+      alert('Este usuário não tem operações pra excluir.')
+      return
+    }
+    // Dupla confirmacao porque e' destrutivo e reverte saldo
+    const first = confirm(
+      `EXCLUIR TODAS AS OPERAÇÕES de ${summary.user.email}?\n\n` +
+      `Isso vai:\n` +
+      `  • Apagar TODO o histórico de operações deste usuário\n` +
+      `  • Reverter o saldo das contas (devolver stakes, estornar lucros pagos)\n` +
+      `  • Registrar entradas de ADJUSTMENT no extrato\n\n` +
+      `Não pode ser desfeito.`
+    )
+    if (!first) return
+    const second = prompt(
+      `Pra confirmar, digite EXCLUIR (maiúsculo):`,
+      ''
+    )
+    if (second !== 'EXCLUIR') {
+      alert('Cancelado — confirmação não correspondeu.')
+      return
+    }
+    setDeletingAll(true)
+    try {
+      const res = await api.delete<{
+        ok: boolean; deletedCount: number; totalBalanceDelta: string
+      }>(`/admin/users/${userId}/operations`)
+      alert(
+        `${res.data.deletedCount} operações excluídas.\n` +
+        `Saldo ajustado em R$ ${res.data.totalBalanceDelta}.`
+      )
+      // Refetch tudo
+      await loadOps()
+      // Re-buscar summary pra atualizar KPIs (saldo e totais)
+      const sres = await api.get<UserSummary>(`/admin/users/${userId}`)
+      setSummary(sres.data)
+      onChanged?.()
+    } catch (err: any) {
+      console.error(err)
+      alert('Erro ao excluir trades. Verifique os logs da API.')
+    } finally {
+      setDeletingAll(false)
+    }
+  }
+
   // ── KPIs calculados ───────────────────────────────────────────────────
-  // realAccount: pode nao existir se o user nunca abriu conta REAL — fallback 0.
-  // Numbers via parseFloat porque o backend serializa Decimal como string.
-  const realAccount    = data?.accounts.find(a => a.type === 'REAL')
+  const realAccount    = summary?.accounts.find(a => a.type === 'REAL')
   const saldoOpera     = parseFloat(realAccount?.balance ?? '0')
-  const totalGanho     = (data?.operations ?? [])
+  const totalGanho     = (summary?.operations ?? [])
     .filter(o => o.status === 'WON')
     .reduce((sum, o) => sum + parseFloat(o.profit ?? '0'), 0)
-  const totalPerdido   = (data?.operations ?? [])
+  const totalPerdido   = (summary?.operations ?? [])
     .filter(o => o.status === 'LOST')
     .reduce((sum, o) => sum + parseFloat(o.amount), 0)
-  const totalDepositado = (data?.transactions ?? [])
+  const totalDepositado = (summary?.transactions ?? [])
     .filter(t => t.type === 'DEPOSIT')
     .reduce((sum, t) => sum + parseFloat(t.amount), 0)
 
+  const totalPages = ops ? Math.max(1, Math.ceil(ops.total / PAGE_SIZE)) : 1
+
   return (
-    // Drawer slide-in da DIREITA — mesmo pattern do UserDetailDrawer pra
-    // consistencia visual. items-stretch faz o painel ocupar 100% altura;
-    // justify-end gruda na direita; click no overlay fora dele fecha.
     <div
       className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-stretch justify-end"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[920px] h-full bg-[#0e1116] border-l border-[#1f232e] flex flex-col"
+        className="w-full max-w-[1000px] h-full bg-[#0e1116] border-l border-[#1f232e] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#1f232e]">
           <div className="min-w-0">
             <h2 className="text-base font-bold text-white truncate">
-              Detalhes do Usuário: {(data?.user.name ?? '—').toUpperCase()}
+              Detalhes do Usuário: {(summary?.user.name ?? '—').toUpperCase()}
             </h2>
-            <div className="text-xs text-[#8b8f9a] mt-0.5 truncate">{data?.user.email}</div>
+            <div className="text-xs text-[#8b8f9a] mt-0.5 truncate">{summary?.user.email}</div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
@@ -133,17 +223,17 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
 
         {/* Body scrollable */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
-          {loading && (
+          {summaryLoading && (
             <div className="flex items-center justify-center py-20 text-sm text-[#8b8f9a]">
               <Loader2 className="animate-spin mr-2" size={16} /> Carregando…
             </div>
           )}
-          {error && !loading && (
+          {summaryError && !summaryLoading && (
             <div className="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-400">
-              {error}
+              {summaryError}
             </div>
           )}
-          {data && !loading && !error && (
+          {summary && !summaryLoading && !summaryError && (
             <>
               {/* KPIs */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
@@ -173,25 +263,28 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
                 />
               </div>
 
-              {/* Histórico de Operações */}
+              {/* Header da tabela */}
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-bold text-white">Histórico de Operações</h3>
                 <button
-                  onClick={() => alert('Excluir todos os trades — em breve.')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-xs font-semibold text-red-400 hover:bg-red-500/20 transition-colors"
-                  title="Excluir TODAS as operações deste usuário (em breve)"
+                  onClick={handleDeleteAll}
+                  disabled={deletingAll}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-xs font-semibold text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Excluir TODAS as operações deste usuário (reverte saldo)"
                 >
-                  <Trash2 size={12} />
-                  Excluir Todos os Trades
+                  {deletingAll ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                  {deletingAll ? 'Excluindo…' : 'Excluir Todos os Trades'}
                 </button>
               </div>
 
+              {/* Tabela paginada */}
               <div className="bg-[#13161f] border border-[#1f232e] rounded-xl overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-[#1f232e] text-[10px] text-[#8b8f9a] font-bold uppercase tracking-wide">
                         <th className="text-left  px-3 py-3">Data</th>
+                        <th className="text-left  px-3 py-3">Horário</th>
                         <th className="text-left  px-3 py-3">Ativo</th>
                         <th className="text-left  px-3 py-3">Direção</th>
                         <th className="text-right px-3 py-3">Valor</th>
@@ -202,10 +295,16 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
                       </tr>
                     </thead>
                     <tbody>
-                      {data.operations.length === 0 ? (
-                        <tr><td colSpan={8} className="py-10 text-center text-[#8b8f9a]">Nenhuma operação encontrada.</td></tr>
+                      {opsLoading && !ops ? (
+                        <tr><td colSpan={9} className="py-10 text-center text-[#8b8f9a]">
+                          <Loader2 className="inline animate-spin mr-2" size={14} /> Carregando…
+                        </td></tr>
+                      ) : opsError ? (
+                        <tr><td colSpan={9} className="py-10 text-center text-red-400">{opsError}</td></tr>
+                      ) : ops?.operations.length === 0 ? (
+                        <tr><td colSpan={9} className="py-10 text-center text-[#8b8f9a]">Nenhuma operação encontrada.</td></tr>
                       ) : (
-                        data.operations.map(op => {
+                        ops?.operations.map(op => {
                           const isUp   = op.direction === 'CALL'
                           const stake  = parseFloat(op.amount)
                           const profit = parseFloat(op.profit ?? '0')
@@ -216,6 +315,7 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
                           return (
                             <tr key={op.id} className="border-b border-[#1f232e]/40 hover:bg-white/[0.02]">
                               <td className="px-3 py-2.5 text-[#8b8f9a]">{formatDate(op.openedAt)}</td>
+                              <td className="px-3 py-2.5 text-[#8b8f9a] font-mono">{formatTime(op.openedAt)}</td>
                               <td className="px-3 py-2.5 text-white font-mono">{op.assetSymbol}</td>
                               <td className="px-3 py-2.5">
                                 <span className={cn(
@@ -264,13 +364,23 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
                     </tbody>
                   </table>
                 </div>
-              </div>
 
-              {data.operations.length === 50 && (
-                <div className="mt-3 text-[11px] text-[#8b8f9a] text-center">
-                  Mostrando as 50 operações mais recentes. Pra ver todas, use a página de Operações com filtro de email.
-                </div>
-              )}
+                {/* Paginacao */}
+                {ops && ops.total > PAGE_SIZE && (
+                  <div className="flex items-center justify-between px-4 py-3 text-xs text-[#8b8f9a] border-t border-[#1f232e]">
+                    <span>
+                      Mostrando {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, ops.total)} de {ops.total}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <Pager disabled={page === 1} onClick={() => setPage(1)}><ChevronsLeft size={14} /></Pager>
+                      <Pager disabled={page === 1} onClick={() => setPage(p => p - 1)}><ChevronLeft size={14} /></Pager>
+                      <span className="px-2 font-semibold text-white">{page} / {totalPages}</span>
+                      <Pager disabled={page === totalPages} onClick={() => setPage(p => p + 1)}><ChevronRight size={14} /></Pager>
+                      <Pager disabled={page === totalPages} onClick={() => setPage(totalPages)}><ChevronsRight size={14} /></Pager>
+                    </div>
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -309,6 +419,17 @@ function KpiCard({ label, value, tone, icon }: {
   )
 }
 
+function Pager({ children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      {...rest}
+      className="w-7 h-7 flex items-center justify-center rounded border border-[#1f232e] text-[#8b8f9a] hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors"
+    >
+      {children}
+    </button>
+  )
+}
+
 function fmtBRL(n: number): string {
   return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -319,4 +440,12 @@ function formatDate(iso: string): string {
   const mm = String(d.getMonth() + 1).padStart(2, '0')
   const yyyy = d.getFullYear()
   return `${dd}/${mm}/${yyyy}`
+}
+
+function formatTime(iso: string): string {
+  const d  = new Date(iso)
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  return `${hh}:${mi}:${ss}`
 }
