@@ -18,6 +18,11 @@ interface AccountDropdownProps {
   onSelectReal: () => void
   demoBalance: number
   realBalance: number
+  /** Bonus separado do saldo principal (sacavel apenas apos completar
+   *  o rollover). Quando > 0, renderizado sob o saldo como "+R$ X bonus"
+   *  em amarelo. Opcional pra retrocompat com callers antigos. */
+  demoBonusBalance?: number
+  realBonusBalance?: number
   userEmail: string
   userId: string
   onClose: () => void
@@ -53,6 +58,8 @@ export function AccountDropdown({
   onSelectReal,
   demoBalance,
   realBalance,
+  demoBonusBalance = 0,
+  realBonusBalance = 0,
   userEmail,
   userId,
   onClose,
@@ -164,6 +171,11 @@ export function AccountDropdown({
               <div className="text-sm font-bold text-white mt-0.5">
                 R${realBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </div>
+              {realBonusBalance > 0 && (
+                <div className="text-[11px] font-semibold text-yellow-400 mt-0.5">
+                  + R${realBonusBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} bônus
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -211,6 +223,11 @@ export function AccountDropdown({
                   <RefreshCw size={12} className={resetting ? 'animate-spin' : ''} />
                 </button>
               </div>
+              {demoBonusBalance > 0 && (
+                <div className="text-[11px] font-semibold text-yellow-400 mt-0.5">
+                  + R${demoBonusBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} bônus
+                </div>
+              )}
             </div>
           </div>
         </div>

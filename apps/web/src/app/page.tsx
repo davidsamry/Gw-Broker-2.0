@@ -360,6 +360,10 @@ export default function TradingPage() {
   const accounts    = authStore.user?.accounts ?? []
   const demoBalance = parseFloat(accounts.find(a => a.type === 'DEMO')?.balance ?? '0')
   const realBalance = parseFloat(accounts.find(a => a.type === 'REAL')?.balance ?? '0')
+  // Bonus separado do saldo principal (mostrado como "+R$ X bonus" no dropdown).
+  // bonusBalance pode nao existir em payloads antigos do cache — fallback 0.
+  const demoBonusBalance = parseFloat(accounts.find(a => a.type === 'DEMO')?.bonusBalance ?? '0')
+  const realBonusBalance = parseFloat(accounts.find(a => a.type === 'REAL')?.bonusBalance ?? '0')
   const balance     = isDemo ? demoBalance : realBalance
 
   // Mobile-header level icon + chip — same logic as desktop Header.tsx.
@@ -495,6 +499,8 @@ export default function TradingPage() {
             onSelectReal={handleSelectReal}
             demoBalance={demoBalance}
             realBalance={realBalance}
+            demoBonusBalance={demoBonusBalance}
+            realBonusBalance={realBonusBalance}
             balance={balance}
             userEmail={authStore.user?.email ?? ''}
             userId={authStore.user?.id ?? ''}
@@ -554,6 +560,8 @@ export default function TradingPage() {
                     onSelectReal={() => { handleSelectReal(); setMobileAccountOpen(false) }}
                     demoBalance={demoBalance}
                     realBalance={realBalance}
+                    demoBonusBalance={demoBonusBalance}
+                    realBonusBalance={realBonusBalance}
                     userEmail={authStore.user?.email ?? ''}
                     userId={authStore.user?.id ?? ''}
                     onClose={() => setMobileAccountOpen(false)}

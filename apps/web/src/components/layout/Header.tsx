@@ -29,6 +29,11 @@ interface HeaderProps {
   onSelectReal: () => void
   demoBalance: number
   realBalance: number
+  /** Bonus separado do saldo principal — passado adiante pro AccountDropdown
+   *  mostrar "+R$ X bônus" sob cada saldo. Opcional pra retrocompat com
+   *  qualquer caller antigo que ainda nao passe (cai pra 0). */
+  demoBonusBalance?: number
+  realBonusBalance?: number
   balance: number
   userEmail?: string
   userId?: string
@@ -54,6 +59,8 @@ export function Header({
   onSelectReal,
   demoBalance,
   realBalance,
+  demoBonusBalance = 0,
+  realBonusBalance = 0,
   balance,
   userEmail = '',
   userId = '',
@@ -175,6 +182,8 @@ export function Header({
                 onSelectReal={() => { onSelectReal(); setAccountOpen(false) }}
                 demoBalance={demoBalance}
                 realBalance={realBalance}
+                demoBonusBalance={demoBonusBalance}
+                realBonusBalance={realBonusBalance}
                 userEmail={userEmail}
                 userId={userId}
                 onClose={() => setAccountOpen(false)}
