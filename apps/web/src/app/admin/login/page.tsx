@@ -45,6 +45,14 @@ export default function AdminLoginPage() {
         setError('E-mail ou senha incorretos.')
       } else if (errCode === 'ACCOUNT_BLOCKED') {
         setError('Conta bloqueada. Entre em contato com o suporte.')
+      } else if (errCode === 'RATE_LIMITED') {
+        const retry = err.response?.data?.retryAfter
+        const mins  = retry ? Math.ceil(retry / 60) : null
+        setError(
+          mins
+            ? `Muitas tentativas de login. Tente novamente em ${mins} min.`
+            : 'Muitas tentativas. Tente novamente em alguns minutos.',
+        )
       } else {
         setError('Erro ao entrar. Tente novamente.')
       }

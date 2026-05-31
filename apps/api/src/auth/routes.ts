@@ -48,13 +48,16 @@ export async function authRoutes(app: FastifyInstance) {
   // - IP isolado: tentar muitos emails diferentes do mesmo IP = limitado por IP.
   // - Atacante distribuido: tentar 1 email de muitos IPs = limitado por email.
   // Sem isso, brute-force de senha em /auth/login fica trivial.
-  // Bypass deliberado pra requests sem body parseavel (cai na validacao
-  // do safeParse abaixo e retorna 400 antes de tocar o DB).
+  // skipOnError: true → se a request da' 5xx (API caiu, DB indisponivel),
+  // NAO conta como tentativa. Sem isso, qualquer outage de banco "queima"
+  // as 5 tentativas do user — vimos isso acontecer durante a rotacao de
+  // password do Postgres na Onda 2.
   app.post('/login', {
     config: {
       rateLimit: {
-        max:      5,
+        max:        5,
         timeWindow: '15 minutes',
+        skipOnError: true,
         keyGenerator: (req) => {
           const xfwd  = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
           const ip    = xfwd || req.ip || 'unknown'
