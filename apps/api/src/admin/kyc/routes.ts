@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { approveKyc, listKycSubmissions, rejectKyc, revertKycToRejected } from './service.js'
+import { recordAdminAction } from '../auditLog.js'
 
 const listQuerySchema = z.object({
   page:     z.coerce.number().int().min(1).optional(),
@@ -33,6 +34,13 @@ export async function kycAdminRoutes(app: FastifyInstance) {
     const adminId = ((req as any).user.sub) as string
     try {
       await approveKyc(adminId, id)
+      void recordAdminAction(req, {
+        resourceType: 'KYC',
+        resourceId:   id,
+        action:       'APPROVE',
+        before:       { status: 'SUBMITTED' },
+        after:        { status: 'APPROVED' },
+      })
       return reply.send({ ok: true, status: 'APPROVED' })
     } catch (err: any) {
       if (err.message === 'NOT_PENDING') return reply.status(409).send({ error: 'NOT_PENDING' })
@@ -50,6 +58,13 @@ export async function kycAdminRoutes(app: FastifyInstance) {
     const adminId = ((req as any).user.sub) as string
     try {
       await rejectKyc(adminId, id, parsed.data.reason)
+      void recordAdminAction(req, {
+        resourceType: 'KYC',
+        resourceId:   id,
+        action:       'REJECT',
+        before:       { status: 'SUBMITTED' },
+        after:        { status: 'REJECTED', reason: parsed.data.reason },
+      })
       return reply.send({ ok: true, status: 'REJECTED' })
     } catch (err: any) {
       if (err.message === 'NOT_PENDING') return reply.status(409).send({ error: 'NOT_PENDING' })
@@ -70,6 +85,13 @@ export async function kycAdminRoutes(app: FastifyInstance) {
     const adminId = ((req as any).user.sub) as string
     try {
       await revertKycToRejected(adminId, id, parsed.data.reason)
+      void recordAdminAction(req, {
+        resourceType: 'KYC',
+        resourceId:   id,
+        action:       'REVERT_TO_REJECTED',
+        before:       { status: 'APPROVED' },
+        after:        { status: 'REJECTED', reason: parsed.data.reason },
+      })
       return reply.send({ ok: true, status: 'REJECTED' })
     } catch (err: any) {
       if (err.message === 'NOT_APPROVED') return reply.status(409).send({ error: 'NOT_APPROVED' })

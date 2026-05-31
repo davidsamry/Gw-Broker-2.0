@@ -4,6 +4,7 @@ import {
   adjustUserBalance, deleteUser, getUserDetail, listUsers,
   updateUserByAdmin, updateUserBonus, resetUserPassword,
 } from './service.js'
+import { recordAdminAction } from '../auditLog.js'
 
 const listQuerySchema = z.object({
   page:     z.coerce.number().int().min(1).optional(),
@@ -112,6 +113,16 @@ export async function userAdminRoutes(app: FastifyInstance) {
     const adminId   = ((req as any).user.sub) as string
     try {
       const data = await updateUserByAdmin(adminId, id, parsed.data)
+      // Audit: registra os campos QUE FORAM MUDADOS (parsed.data ja
+      // contem so' os campos enviados pelo PATCH). before fica null —
+      // pro diff completo, ver a tabela users diretamente.
+      void recordAdminAction(req, {
+        resourceType: 'USER',
+        resourceId:   id,
+        action:       'UPDATE',
+        before:       null,
+        after:        parsed.data,
+      })
       return reply.send(data)
     } catch (err: any) {
       if (err.message === 'USER_NOT_FOUND')         return reply.status(404).send({ error: 'USER_NOT_FOUND' })
@@ -131,6 +142,16 @@ export async function userAdminRoutes(app: FastifyInstance) {
     const adminId = ((req as any).user.sub) as string
     try {
       const data = await adjustUserBalance(adminId, id, parsed.data)
+      // Audit: AJUSTE MANUAL e' a acao mais sensivel — adicionar dinheiro
+      // direto. before tem os campos do ajuste, after tem o newBalance
+      // pra ficar facil ver "antes" via tabela transactions (ADJUSTMENT).
+      void recordAdminAction(req, {
+        resourceType: 'USER',
+        resourceId:   id,
+        action:       'ADJUST_BALANCE',
+        before:       parsed.data,
+        after:        data,
+      })
       return reply.send(data)
     } catch (err: any) {
       if (err.message === 'ACCOUNT_NOT_FOUND')    return reply.status(404).send({ error: 'ACCOUNT_NOT_FOUND' })
@@ -149,6 +170,13 @@ export async function userAdminRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string }
     try {
       const data = await updateUserBonus(id, parsed.data)
+      void recordAdminAction(req, {
+        resourceType: 'USER',
+        resourceId:   id,
+        action:       'UPDATE_BONUS',
+        before:       null,
+        after:        parsed.data,
+      })
       return reply.send(data)
     } catch (err: any) {
       if (err.message === 'ACCOUNT_NOT_FOUND') return reply.status(404).send({ error: 'ACCOUNT_NOT_FOUND' })
@@ -167,6 +195,16 @@ export async function userAdminRoutes(app: FastifyInstance) {
     const adminId = ((req as any).user.sub) as string
     try {
       const data = await deleteUser(adminId, id)
+      // Audit DELETE — guarda o email e id do usuario deletado.
+      // O service ja escrevia em otc_admin_logs como fallback (legacy);
+      // o registro novo entra em admin_audit_log e fica no painel.
+      void recordAdminAction(req, {
+        resourceType: 'USER',
+        resourceId:   id,
+        action:       'DELETE',
+        before:       { id: data.deletedId, email: data.deletedEmail },
+        after:        null,
+      })
       return reply.send(data)
     } catch (err: any) {
       if (err.message === 'USER_NOT_FOUND')      return reply.status(404).send({ error: 'USER_NOT_FOUND' })
@@ -187,6 +225,15 @@ export async function userAdminRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string }
     try {
       const data = await resetUserPassword(id, parsed.data.newPassword)
+      // NUNCA gravar a senha (mesmo a nova) no audit log. So o fato de
+      // que houve um reset + quem o fez (capturado pelo adminId).
+      void recordAdminAction(req, {
+        resourceType: 'USER',
+        resourceId:   id,
+        action:       'RESET_PASSWORD',
+        before:       null,
+        after:        { passwordReset: true },
+      })
       return reply.send(data)
     } catch (err: any) {
       if (err.message === 'USER_NOT_FOUND')      return reply.status(404).send({ error: 'USER_NOT_FOUND' })

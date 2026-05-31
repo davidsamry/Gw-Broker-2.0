@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { listAdminDeposits, markDepositPaid, toggleDepositFake } from './service.js'
+import { recordAdminAction } from '../auditLog.js'
 
 const listQuerySchema = z.object({
   page:     z.coerce.number().int().min(1).optional(),
@@ -33,6 +34,15 @@ export async function depositsAdminRoutes(app: FastifyInstance) {
     const adminId = ((req as any).user.sub) as string
     try {
       await markDepositPaid(adminId, id)
+      // Mark-paid manual = creditar saldo do user sem PIX confirmado.
+      // Acao MUITO sensivel — auditar sempre.
+      void recordAdminAction(req, {
+        resourceType: 'DEPOSIT',
+        resourceId:   id,
+        action:       'MARK_PAID',
+        before:       { status: 'PENDING' },
+        after:        { status: 'PAID' },
+      })
       return reply.send({ ok: true, status: 'PAID' })
     } catch (err: any) {
       if (err.message === 'DEPOSIT_NOT_PAYABLE') return reply.status(409).send({ error: 'DEPOSIT_NOT_PAYABLE' })
@@ -49,6 +59,13 @@ export async function depositsAdminRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string }
     try {
       await toggleDepositFake(id, parsed.data.isFake)
+      void recordAdminAction(req, {
+        resourceType: 'DEPOSIT',
+        resourceId:   id,
+        action:       'TOGGLE_FAKE',
+        before:       { isFake: !parsed.data.isFake },
+        after:        { isFake: parsed.data.isFake },
+      })
       return reply.send({ ok: true })
     } catch (err: any) {
       if (err.message === 'DEPOSIT_NOT_FOUND') return reply.status(404).send({ error: 'DEPOSIT_NOT_FOUND' })

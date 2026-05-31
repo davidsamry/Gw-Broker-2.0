@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { approveWithdrawal, listAdminWithdrawals, rejectWithdrawal } from './service.js'
+import { recordAdminAction } from '../auditLog.js'
 
 const listQuerySchema = z.object({
   page:     z.coerce.number().int().min(1).optional(),
@@ -33,6 +34,13 @@ export async function withdrawalsAdminRoutes(app: FastifyInstance) {
     const adminId = ((req as any).user.sub) as string
     try {
       await approveWithdrawal(adminId, id)
+      void recordAdminAction(req, {
+        resourceType: 'WITHDRAWAL',
+        resourceId:   id,
+        action:       'APPROVE',
+        before:       { status: 'PENDING' },
+        after:        { status: 'COMPLETED' },
+      })
       return reply.send({ ok: true, status: 'COMPLETED' })
     } catch (err: any) {
       if (err.message === 'WITHDRAWAL_NOT_PENDING') return reply.status(409).send({ error: 'WITHDRAWAL_NOT_PENDING' })
@@ -50,6 +58,13 @@ export async function withdrawalsAdminRoutes(app: FastifyInstance) {
     const adminId = ((req as any).user.sub) as string
     try {
       await rejectWithdrawal(adminId, id, parsed.data.reason)
+      void recordAdminAction(req, {
+        resourceType: 'WITHDRAWAL',
+        resourceId:   id,
+        action:       'REJECT',
+        before:       { status: 'PENDING' },
+        after:        { status: 'CANCELLED', reason: parsed.data.reason },
+      })
       return reply.send({ ok: true, status: 'CANCELLED' })
     } catch (err: any) {
       if (err.message === 'WITHDRAWAL_NOT_PENDING') return reply.status(409).send({ error: 'WITHDRAWAL_NOT_PENDING' })
