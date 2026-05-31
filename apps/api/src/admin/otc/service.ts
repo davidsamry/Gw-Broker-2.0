@@ -247,13 +247,17 @@ export async function fullResetAllOtc(adminId: string): Promise<FullResetResult>
 
   // 3. Audit log so we know who triggered the nuke. Use the Number-coerced
   // counts — beforeCounts[0] still carries bigints from $queryRaw, which
-  // JSON.stringify can't serialise.
+  // JSON.stringify can't serialise. Also coerce the $executeRaw returns
+  // (which Prisma 6+ may give back as bigint in some build configs)
+  // before passing to writeAuditLog. Defense in depth — writeAuditLog
+  // itself has a bigint-safe replacer now, but explicit Number() here
+  // makes the audit row easier to read in the admin panel.
   await writeAuditLog(
     adminId,
     'FULL_RESET',
     null,
     { snap: snapshotsDeleted, candles: candlesDeleted, ticks: ticksDeleted },
-    { inMemory, marketUpdate, liquidityUpdate },
+    { inMemory, marketUpdate: Number(marketUpdate), liquidityUpdate: Number(liquidityUpdate) },
   )
 
   return {
@@ -427,6 +431,27 @@ function configSnapshot(a: OtcAdminAssetRow | null): Record<string, unknown> | n
   }
 }
 
+/**
+ * JSON.stringify replacer que sobrevive a valores `bigint`. Prisma raw
+ * queries (COUNT(*), $executeRaw) podem retornar bigint dependendo do
+ * driver/config, e JSON.stringify default explode com
+ * `TypeError: Do not know how to serialize a BigInt`.
+ *
+ * - bigint dentro do safe-integer range → Number (legível no painel)
+ * - bigint fora do safe range            → string (preserva precisão)
+ *
+ * Aplicado dentro de writeAuditLog pra cobrir QUALQUER chamada futura
+ * sem precisar lembrar de coercir em cada call site.
+ */
+export function bigintSafeReplacer(_key: string, value: unknown): unknown {
+  if (typeof value === 'bigint') {
+    return value <= Number.MAX_SAFE_INTEGER && value >= Number.MIN_SAFE_INTEGER
+      ? Number(value)
+      : value.toString()
+  }
+  return value
+}
+
 async function writeAuditLog(
   adminId: string,
   action:  string,
@@ -435,8 +460,8 @@ async function writeAuditLog(
   after:   unknown,
 ): Promise<void> {
   try {
-    const beforeJson = JSON.stringify(before ?? null)
-    const afterJson  = JSON.stringify(after  ?? null)
+    const beforeJson = JSON.stringify(before ?? null, bigintSafeReplacer)
+    const afterJson  = JSON.stringify(after  ?? null, bigintSafeReplacer)
     await prisma.$executeRaw`
       INSERT INTO otc_admin_logs ("adminId", action, "assetId", "beforeState", "afterState", "createdAt")
       VALUES (${adminId}, ${action}, ${assetId}, ${beforeJson}::jsonb, ${afterJson}::jsonb, NOW())
