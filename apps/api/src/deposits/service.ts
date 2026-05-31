@@ -48,6 +48,33 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
   const accountId  = accountRows[0].id
   const payerName  = accountRows[0].name
 
+  // ── Auto-cancel PIX/bonus PENDING orfaos ────────────────────────────
+  // Quando user gera NOVO PIX, assume-se que abandonou o anterior. Cancela
+  // deposits PENDING + bonus_grants PENDING dele:
+  //   1. Sem isso, BonusGrant PENDING orfao bloqueia validateCodeForUser
+  //      ("USER_HAS_OPEN_GRANT") e o user nao consegue usar bonus de novo.
+  //   2. Mantem estado consistente (max 1 PIX ativo por user).
+  //
+  // Race condition (raro): se user pagar o PIX antigo entre este cancel
+  // e o webhook chegar, confirmDepositById detecta status CANCELLED e
+  // reativa pra PAID + credita saldo. O bonus_grant cancelado NAO e'
+  // reativado (evita conflito com novo grant pendente que esta sendo
+  // criado agora) — user perde o bonus do PIX antigo nesse cenario, mas
+  // o saldo do deposito e' creditado normalmente. Caso degenerate.
+  await prisma.$transaction([
+    prisma.$executeRaw`
+      UPDATE bonus_grants
+      SET status = 'CANCELLED'::"BonusGrantStatus", "cancelledAt" = NOW()
+      WHERE "userId" = ${userId} AND status = 'PENDING'::"BonusGrantStatus"
+    `,
+    prisma.$executeRaw`
+      UPDATE deposits
+      SET status = 'CANCELLED'::"DepositStatus", "updatedAt" = NOW(),
+          notes = COALESCE(notes, '') || ' [auto-cancelado: novo PIX gerado]'
+      WHERE "accountId" = ${accountId} AND status = 'PENDING'::"DepositStatus"
+    `,
+  ])
+
   const depositId  = randomUUID()
   const amountDec  = new Prisma.Decimal(input.amount)
 
@@ -159,6 +186,34 @@ export async function getMyDepositStatus(userId: string, depositId: string) {
 // simple — just credit the deposit amount, write the DEPOSIT tx, flip
 // status. Bonus credit happens in its own step after.
 export async function confirmDepositById(depositId: string) {
+  // ── Mitigacao de race com auto-cancel do createPixDeposit ────────────
+  // Cenario: user gerou PIX1 → user gerou PIX2 (auto-cancelou PIX1 local)
+  // → user pagou PIX1 no banco antes do nosso cancel propagar.
+  //
+  // Sem essa mitigacao, a CTE abaixo nao acharia PIX1 (status CANCELLED,
+  // nao PENDING) e o pagamento real seria ignorado — user paga e nao
+  // recebe credito. Aqui detectamos o caso, "reabilitamos" pra PENDING,
+  // e a CTE prossegue normal.
+  //
+  // OBS: bonus_grant ligado ao PIX1 nao e' reativado — pode ter conflito
+  // com um grant novo (do PIX2). User perde o bonus do PIX antigo mas
+  // recebe o saldo do deposito. Caso degenerate, log + warn.
+  const currentRows = await prisma.$queryRaw<Array<{ status: string }>>`
+    SELECT status::text AS status FROM deposits WHERE id = ${depositId}
+  `
+  if (currentRows[0]?.status === 'CANCELLED') {
+    await prisma.$executeRaw`
+      UPDATE deposits
+      SET status = 'PENDING'::"DepositStatus", "updatedAt" = NOW(),
+          notes = COALESCE(notes, '') || ' [REATIVADO: BSPay confirmou apos auto-cancel]'
+      WHERE id = ${depositId} AND status = 'CANCELLED'::"DepositStatus"
+    `
+    console.warn(
+      `[deposits] reativado por confirmacao BSPay deposit=${depositId} — ` +
+      `race condition: user pagou PIX antigo apos gerar novo`,
+    )
+  }
+
   const txDeposit = randomUUID()
   const note      = 'Depósito confirmado pelo gateway (BSPay)'
 
