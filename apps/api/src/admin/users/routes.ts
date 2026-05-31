@@ -3,6 +3,7 @@ import { z } from 'zod'
 import {
   adjustUserBalance, deleteUser, getUserDetail, listUsers,
   updateUserByAdmin, updateUserBonus, resetUserPassword,
+  impersonateUser,
 } from './service.js'
 import { deleteAllUserOperations } from '../operations/service.js'
 import { recordAdminAction } from '../auditLog.js'
@@ -211,6 +212,32 @@ export async function userAdminRoutes(app: FastifyInstance) {
       if (err.message === 'USER_NOT_FOUND')      return reply.status(404).send({ error: 'USER_NOT_FOUND' })
       if (err.message === 'CANNOT_DELETE_SELF')  return reply.status(400).send({ error: 'CANNOT_DELETE_SELF' })
       if (err.message === 'CANNOT_DELETE_ADMIN') return reply.status(400).send({ error: 'CANNOT_DELETE_ADMIN' })
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Impersonation — gera token JWT que faz admin logar COMO o usuario.
+  // Token expira em 30min. Guarda-rails no service: nao impersona ADMIN,
+  // nao impersona blocked, nao impersona a si proprio.
+  app.post('/:id/impersonate', async (req, reply) => {
+    const { id }  = req.params as { id: string }
+    const adminId = ((req as any).user.sub) as string
+    try {
+      const result = await impersonateUser(app, adminId, id)
+      void recordAdminAction(req, {
+        resourceType: 'USER',
+        resourceId:   id,
+        action:       'IMPERSONATE',
+        before:       null,
+        after:        { targetEmail: result.user.email, expiresIn: result.expiresIn },
+      })
+      return reply.send(result)
+    } catch (err: any) {
+      if (err.message === 'CANNOT_IMPERSONATE_SELF')  return reply.status(400).send({ error: 'CANNOT_IMPERSONATE_SELF' })
+      if (err.message === 'CANNOT_IMPERSONATE_ADMIN') return reply.status(403).send({ error: 'CANNOT_IMPERSONATE_ADMIN' })
+      if (err.message === 'USER_BLOCKED')             return reply.status(403).send({ error: 'USER_BLOCKED' })
+      if (err.message === 'USER_NOT_FOUND')           return reply.status(404).send({ error: 'USER_NOT_FOUND' })
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }

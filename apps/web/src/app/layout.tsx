@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { SafeMode } from '@/components/system/SafeMode'
+import { ImpersonationBanner } from '@/components/system/ImpersonationBanner'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Anti-DevTools deterrent — no-op until admin toggles
             safeModeEnabled in /admin/configuracoes. Self-skips on /admin/*. */}
         <SafeMode />
+        <ImpersonationBanner />
         {children}
       </body>
     </html>

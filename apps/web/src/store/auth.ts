@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { api } from '@/lib/api'
+import { api, getEffectiveToken, setEffectiveToken, clearEffectiveToken } from '@/lib/api'
 import { useOperationsStore } from './operations'
 import { useWithdrawalsStore } from './withdrawals'
 import { useTransactionsStore } from './transactions'
@@ -185,6 +185,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const payload: { email: string; password: string; code?: string } = { email, password }
     if (code) payload.code = code
     const { data } = await api.post('/auth/login', payload)
+    // Login NORMAL — sempre salva em localStorage (persiste entre abas/reload).
+    // Mesmo se a aba estiver em "modo impersonation", login explicito de
+    // user/admin tem precedencia: limpa o flag e usa localStorage.
+    sessionStorage.removeItem('impersonation_token')
+    sessionStorage.removeItem('impersonating')
     localStorage.setItem('token', data.token)
     saveUserCache(data.user)
     set({ user: data.user, token: data.token })
@@ -208,6 +213,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    // Se estiver em modo impersonation: NAO chama /auth/logout (que
+    // invalida o refresh cookie do admin) e NAO limpa o localStorage do
+    // admin. Apenas remove o token de impersonation desta aba. Admin
+    // pode fechar a aba e sua sessao na aba original continua valida.
+    if (typeof window !== 'undefined' && sessionStorage.getItem('impersonation_token')) {
+      sessionStorage.removeItem('impersonation_token')
+      sessionStorage.removeItem('impersonating')
+      // Limpa o store em memoria — a aba ja nao tem sessao impersonation.
+      set({ user: null, token: null, kycSubmission: null, isDemo: true })
+      // window.location pra forcar reload completo (limpa qualquer state
+      // residual e leva pra tela de login)
+      window.location.href = '/login'
+      return
+    }
     await api.post('/auth/logout').catch(() => {})
     localStorage.removeItem('token')
     localStorage.removeItem(IS_DEMO_KEY)  // next account can be a different user
@@ -223,7 +242,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   init: async () => {
-    const token = localStorage.getItem('token')
+    // Prioridade: token de impersonation (sessionStorage, por aba) > token
+    // do admin/user normal (localStorage). Quando admin "Loga como Usuario"
+    // numa nova aba, essa aba ve so o sessionStorage e renderiza como user.
+    const token = getEffectiveToken()
     if (!token) { set({ loading: false }); return }
 
     // ── Stale-while-revalidate ───────────────────────────────────────────────
@@ -270,7 +292,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // (which the axios interceptor already redirects to /login on 401)
       // shouldn't trash the cached user.
       if (!cachedUser) {
-        localStorage.removeItem('token')
+        clearEffectiveToken()
         saveUserCache(null)
         set({ user: null, loading: false })
         useOperationsStore.getState().reset()

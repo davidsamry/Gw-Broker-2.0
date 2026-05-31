@@ -379,6 +379,61 @@ export async function resetUserPassword(targetUserId: string, newPassword: strin
   return { ok: true }
 }
 
+// ── Impersonation ────────────────────────────────────────────────────────
+// Admin gera um JWT que faz ele logar COMO o user na nova aba. Token tem:
+//   - sub: targetUserId       (igual login normal — middlewares funcionam)
+//   - impersonatedBy: adminId (claim extra pra audit log + futuras checks)
+//   - expiresIn: 30 min       (curto — sessao impersonation NAO renova)
+//
+// Guarda-rails:
+//   - Target user NAO pode ser ADMIN (evita lateral movement entre admins)
+//   - Target user NAO pode estar bloqueado (sem sentido logar como blocked)
+//   - Admin NAO pode impersonar a si proprio (no-op desnecessario)
+//
+// O token e' assinado pelo MESMO secret JWT da app — middleware authenticate
+// existente nao precisa mudar. A claim impersonatedBy fica disponivel em
+// req.user.impersonatedBy pra audit futuras actions feitas durante a sessao.
+
+export interface ImpersonateResult {
+  token:     string
+  user:      { id: string; name: string; email: string }
+  expiresIn: number  // segundos
+}
+
+export async function impersonateUser(
+  app:          { jwt: { sign: (payload: any, opts?: any) => Promise<string> | string } },
+  adminId:      string,
+  targetUserId: string,
+): Promise<ImpersonateResult> {
+  if (adminId === targetUserId) throw new Error('CANNOT_IMPERSONATE_SELF')
+
+  const target = await prisma.user.findUnique({
+    where:  { id: targetUserId },
+    select: { id: true, name: true, email: true, role: true, blocked: true },
+  })
+  if (!target) throw new Error('USER_NOT_FOUND')
+  if (target.role === 'ADMIN') throw new Error('CANNOT_IMPERSONATE_ADMIN')
+  if (target.blocked)          throw new Error('USER_BLOCKED')
+
+  const expiresIn = 30 * 60   // 30 min
+  const tokenRaw = await app.jwt.sign(
+    {
+      sub:             target.id,
+      impersonatedBy:  adminId,
+      kind:            'impersonation',
+    },
+    { expiresIn: `${expiresIn}s` },
+  )
+  // jwt.sign retorna string|Promise<string> dependendo da config — normalizamos
+  const token = typeof tokenRaw === 'string' ? tokenRaw : await tokenRaw
+
+  return {
+    token,
+    user:      { id: target.id, name: target.name, email: target.email },
+    expiresIn,
+  }
+}
+
 // ── Hard delete ───────────────────────────────────────────────────────────
 // Destroys a user + everything they own. Used by /admin/usuarios drawer for
 // cleaning out test accounts. Cascade behaviour relies on the FK ON DELETE

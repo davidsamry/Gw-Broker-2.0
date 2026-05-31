@@ -90,6 +90,8 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
 
   // Estado do botao "Excluir Todos"
   const [deletingAll, setDeletingAll] = useState(false)
+  // Estado do botao "Logar como Usuario"
+  const [impersonating, setImpersonating] = useState(false)
 
   // ESC fecha (pattern do UserDetailDrawer)
   useEffect(() => {
@@ -124,6 +126,43 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
     }
   }, [userId, page])
   useEffect(() => { loadOps() }, [loadOps])
+
+  // ── Handler: logar como usuario (impersonation) ────────────────────────
+  // Flow:
+  //   1. POST /admin/users/:id/impersonate → recebe { token, user }
+  //   2. Abre nova aba em /admin/impersonate#t=TOKEN&u=email
+  //      (hash, NAO query — token nao vaza em logs de proxy)
+  //   3. A pagina /admin/impersonate salva o token em sessionStorage
+  //      (por aba, preserva sessao do admin na aba original) e redireciona
+  //      pra '/'. O Banner global vermelho aparece em TODA tela alertando.
+  async function handleImpersonate() {
+    if (impersonating || !summary) return
+    setImpersonating(true)
+    try {
+      const res = await api.post<{
+        token: string
+        user:  { id: string; name: string; email: string }
+        expiresIn: number
+      }>(`/admin/users/${userId}/impersonate`)
+      const { token, user } = res.data
+      // window.open com hash — fragmento NAO e enviado pro servidor
+      const url = `/admin/impersonate#t=${encodeURIComponent(token)}&u=${encodeURIComponent(user.email)}`
+      const win = window.open(url, '_blank', 'noopener,noreferrer')
+      if (!win) {
+        alert('Bloqueador de popup impediu a abertura da nova aba. Permita popups e tente de novo.')
+        return
+      }
+    } catch (err: any) {
+      const code = err?.response?.data?.error
+      if      (code === 'CANNOT_IMPERSONATE_ADMIN') alert('Não é possível impersonar outro ADMIN. Rebaixe ele pra USER primeiro.')
+      else if (code === 'CANNOT_IMPERSONATE_SELF')  alert('Você não pode impersonar a si próprio.')
+      else if (code === 'USER_BLOCKED')             alert('Usuário está bloqueado — não dá pra impersonar.')
+      else if (code === 'USER_NOT_FOUND')           alert('Usuário não encontrado.')
+      else                                          alert('Erro ao gerar impersonação. Veja os logs da API.')
+    } finally {
+      setImpersonating(false)
+    }
+  }
 
   // ── Handler: excluir todos os trades ───────────────────────────────────
   async function handleDeleteAll() {
@@ -208,12 +247,13 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => alert('Logar como usuário — em breve.')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1f232e] bg-[#13161f] text-xs font-semibold text-white hover:bg-white/5 transition-colors"
-              title="Abrir uma sessão como este usuário (em breve)"
+              onClick={handleImpersonate}
+              disabled={impersonating}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Abrir uma nova aba logado como este usuário (token expira em 30min)"
             >
-              <ExternalLink size={13} />
-              Logar como Usuário
+              {impersonating ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
+              {impersonating ? 'Gerando…' : 'Logar como Usuário'}
             </button>
             <button onClick={onClose} className="text-[#8b8f9a] hover:text-white p-1">
               <X size={16} />
