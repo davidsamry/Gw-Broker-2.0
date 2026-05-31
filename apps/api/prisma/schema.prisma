@@ -708,6 +708,11 @@ model BonusGrant {
 }
 
 // Audit trail of admin actions on OTC engine.
+//
+// Legacy. Mantido em paralelo ao AdminAuditLog enquanto o admin/otc/
+// service ainda escreve aqui — consolidacao pra unica tabela fica pra
+// quando todas as outras admin actions ja' estiverem usando o novo
+// recordAdminAction (B1.5+).
 model OtcAdminLog {
   id           BigInt   @id @default(autoincrement())
   adminId      String
@@ -720,6 +725,51 @@ model OtcAdminLog {
   @@index([assetId, createdAt(sort: Desc)])
   @@index([adminId, createdAt(sort: Desc)])
   @@map("otc_admin_logs")
+}
+
+// Audit trail GENÉRICO de todas as admin actions (B1).
+//
+// Cobre TODO o painel admin — withdrawals approve/reject, users block/
+// adjust, deposits mark-paid, kyc approve, settings update, etc. Antes
+// dessa tabela so' o OTC tinha rastro (otc_admin_logs); o resto era
+// "quem fez o quê" baseado em fé.
+//
+// Campos:
+//   resourceType — categoria ampla: WITHDRAWAL, USER, DEPOSIT, KYC,
+//                  ASSET, SETTINGS, EMAIL_TEMPLATE, BONUS_CODE,
+//                  RANKING_PRIZE, OPERATION
+//   resourceId   — id do recurso afetado (cuid/uuid/etc). Pode ser
+//                  null pra acoes globais (ex: UPDATE_SETTINGS).
+//   action       — verbo: APPROVE, REJECT, BLOCK, UNBLOCK, UPDATE,
+//                  DELETE, ADJUST_BALANCE, TOGGLE_FAKE, CANCEL, etc.
+//   before/after — snapshot serializado dos campos relevantes (uses
+//                  bigintSafeReplacer pra sobreviver a counts bigint).
+//   adminId      — User.id do admin que fez a acao
+//   ip           — capturado de x-forwarded-for ou req.ip
+//   userAgent    — header User-Agent (debug + deteccao de scripts)
+//
+// Indexes:
+//   por createdAt (timeline reverso — admin abre painel e ve' o mais
+//   recente primeiro)
+//   por (resourceType, resourceId, createdAt) — historico de UM
+//   recurso especifico (ex: "todas as acoes feitas neste usuario")
+//   por (adminId, createdAt) — auditoria de UM admin especifico
+model AdminAuditLog {
+  id           BigInt   @id @default(autoincrement())
+  resourceType String
+  resourceId   String?
+  action       String
+  before       Json?
+  after        Json?
+  adminId      String
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([resourceType, resourceId, createdAt(sort: Desc)])
+  @@index([adminId, createdAt(sort: Desc)])
+  @@map("admin_audit_log")
 }
 
 // ── Platform settings ──────────────────────────────────────────────────
