@@ -168,12 +168,20 @@ export function AccountDropdown({
             </span>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold text-white">Conta real</div>
+              {/* Saldo TOTAL = balance + bonus. Mostra o numero somado em
+                  destaque pra user nao precisar fazer conta de cabeca. */}
               <div className="text-sm font-bold text-white mt-0.5">
-                R${realBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                R${(realBalance + realBonusBalance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </div>
+              {/* Split fino — so' aparece se ha bonus. Comunica quanto e'
+                  saldo "livre" vs bonus (com rollover pendente pra sacar). */}
               {realBonusBalance > 0 && (
-                <div className="text-[11px] font-semibold text-yellow-400 mt-0.5">
-                  + R${realBonusBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} bônus
+                <div className="text-[10px] text-[#8b8f9a] mt-0.5">
+                  R${realBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} saldo
+                  {' · '}
+                  <span className="text-yellow-400 font-medium">
+                    R${realBonusBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} bônus
+                  </span>
                 </div>
               )}
             </div>
@@ -212,7 +220,7 @@ export function AccountDropdown({
               </div>
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-sm font-bold text-white">
-                  R${demoBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  R${(demoBalance + demoBonusBalance).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </span>
                 <button
                   onClick={handleResetDemo}
@@ -224,8 +232,12 @@ export function AccountDropdown({
                 </button>
               </div>
               {demoBonusBalance > 0 && (
-                <div className="text-[11px] font-semibold text-yellow-400 mt-0.5">
-                  + R${demoBonusBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} bônus
+                <div className="text-[10px] text-[#8b8f9a] mt-0.5">
+                  R${demoBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} saldo
+                  {' · '}
+                  <span className="text-yellow-400 font-medium">
+                    R${demoBonusBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} bônus
+                  </span>
                 </div>
               )}
             </div>

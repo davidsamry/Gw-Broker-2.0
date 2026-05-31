@@ -364,7 +364,11 @@ export default function TradingPage() {
   // bonusBalance pode nao existir em payloads antigos do cache — fallback 0.
   const demoBonusBalance = parseFloat(accounts.find(a => a.type === 'DEMO')?.bonusBalance ?? '0')
   const realBonusBalance = parseFloat(accounts.find(a => a.type === 'REAL')?.bonusBalance ?? '0')
-  const balance     = isDemo ? demoBalance : realBalance
+  // `balance` passado pro Header chip exibe o saldo TOTAL (principal + bonus).
+  // O TradingPanel continua usando demoBalance/realBalance separados quando
+  // precisa do "saldo livre" pra calcular stake disponivel (bonus tem rollover
+  // pendente — UI fica clara, mas operacao em si nao mistura por ora).
+  const balance     = isDemo ? demoBalance + demoBonusBalance : realBalance + realBonusBalance
 
   // Mobile-header level icon + chip — same logic as desktop Header.tsx.
   // The `mounted` gate avoids a hydration mismatch: SSR has no auth, so
