@@ -47,17 +47,23 @@ export async function validateCodeForUser(
   if (bonus.expiresAt && bonus.expiresAt < new Date()) return { ok: false, error: 'EXPIRED' }
   if (Number(bonus.minDeposit) > depositAmount)        return { ok: false, error: 'BELOW_MIN' }
 
-  // Single open grant per user.
+  // Only ACTIVE grants block. PENDING grants from abandoned PIX QRs are
+  // auto-cancelled when the user submits a new deposit (see
+  // createPendingGrantForDeposit) — they don't need to pre-block here.
   const openGrant = await prisma.bonusGrant.findFirst({
-    where: { userId, status: { in: ['PENDING', 'ACTIVE'] } },
+    where: { userId, status: 'ACTIVE' },
     select: { id: true },
   })
   if (openGrant) return { ok: false, error: 'USER_HAS_OPEN_GRANT' }
 
-  // Per-user usage cap (counts completed + cancelled too — the limit is
-  // about lifetime redemptions of this specific code).
+  // Per-user usage cap. CANCELLED grants don't count — the bonus was
+  // never actually credited (abandoned PIX, admin revoke, etc).
   const priorUses = await prisma.bonusGrant.count({
-    where: { userId, bonusId: bonus.id },
+    where: {
+      userId,
+      bonusId: bonus.id,
+      status:  { not: 'CANCELLED' },
+    },
   })
   if (priorUses >= bonus.maxUsesPerUser) {
     return { ok: false, error: 'USER_MAX_USES_REACHED' }
@@ -96,16 +102,28 @@ export async function createPendingGrantForDeposit(args: {
   bonusAmount:   number
   rollover:      number
 }) {
-  return prisma.bonusGrant.create({
-    data: {
-      userId:           args.userId,
-      bonusId:          args.bonusId,
-      depositId:        args.depositId,
-      bonusAmount:      new Prisma.Decimal(args.bonusAmount),
-      rolloverRequired: new Prisma.Decimal(args.bonusAmount * args.rollover),
-      rolloverProgress: new Prisma.Decimal(0),
-      status:           'PENDING',
-    },
+  // Cancel any prior PENDING grant FIRST, then insert the new one — both
+  // in the same transaction so the partial unique index
+  // `bonus_grants_userId_one_open_grant` doesn't reject us. Without this,
+  // a user who generated a PIX with a bonus and never paid would stay
+  // locked out of all bonuses forever (the stale PENDING grant blocks
+  // every new attempt).
+  return prisma.$transaction(async (tx) => {
+    await tx.bonusGrant.updateMany({
+      where: { userId: args.userId, status: 'PENDING' },
+      data:  { status: 'CANCELLED', cancelledAt: new Date() },
+    })
+    return tx.bonusGrant.create({
+      data: {
+        userId:           args.userId,
+        bonusId:          args.bonusId,
+        depositId:        args.depositId,
+        bonusAmount:      new Prisma.Decimal(args.bonusAmount),
+        rolloverRequired: new Prisma.Decimal(args.bonusAmount * args.rollover),
+        rolloverProgress: new Prisma.Decimal(0),
+        status:           'PENDING',
+      },
+    })
   })
 }
 
@@ -178,9 +196,10 @@ export interface AvailableBonus {
 }
 
 export async function listAvailableBonusesForUser(userId: string): Promise<AvailableBonus[]> {
-  // If user has an open grant, no codes are available — return early.
+  // If user has an ACTIVE grant, no codes are available. PENDING grants
+  // (unpaid PIX) don't block — they get auto-cancelled on next deposit.
   const open = await prisma.bonusGrant.findFirst({
-    where:  { userId, status: { in: ['PENDING', 'ACTIVE'] } },
+    where:  { userId, status: 'ACTIVE' },
     select: { id: true },
   })
   if (open) return []
@@ -197,7 +216,9 @@ export async function listAvailableBonusesForUser(userId: string): Promise<Avail
            b.rollover
     FROM bonuses b
     LEFT JOIN bonus_grants g
-      ON g."bonusId" = b.id AND g."userId" = ${userId}
+      ON g."bonusId" = b.id
+     AND g."userId"  = ${userId}
+     AND g.status   != 'CANCELLED'::"BonusGrantStatus"
     WHERE b.active = TRUE
       AND (b."expiresAt" IS NULL OR b."expiresAt" > NOW())
     GROUP BY b.id
