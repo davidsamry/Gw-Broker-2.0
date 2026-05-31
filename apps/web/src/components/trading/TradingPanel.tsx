@@ -223,9 +223,15 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
   // Closed-trades come from the shared operations store (hydrated by /auth/me
   // on app mount). When a trade resolves, placeTrade upserts the new op into
   // the same store — this list updates automatically via useMemo.
+  //
+  // FILTRO POR CONTA: o painel mostra so' as ops da conta ATUALMENTE
+  // selecionada (REAL ou DEMO). Sem isso, trocar de DEMO pra REAL ainda
+  // mostra trades de DEMO no historico — confunde o user que pensa que
+  // ganhou/perdeu dinheiro real.
   const storeOperations = useOperationsStore((s) => s.operations)
   const closedTrades: ClosedTrade[] = useMemo(
     () => storeOperations
+      .filter((o) => o.accountId === accountId)
       .filter((o) => o.status === 'WON' || o.status === 'LOST' || o.status === 'CANCELLED')
       .slice(0, 30)
       .map((o) => {
@@ -243,7 +249,7 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
           closedAt:    o.closedAt ?? o.expiresAt,
         }
       }),
-    [storeOperations],
+    [storeOperations, accountId],
   )
 
   // Remote OPEN trades — ops that landed in the store via /operations/stream
@@ -251,9 +257,12 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
   // aren't yet in the local `openTrades` (which only tracks trades placed
   // on THIS tab). Deduped by id so a trade placed locally — whose id was
   // promoted from clientTradeId → serverOpId after POST — only renders once.
+  //
+  // FILTRO POR CONTA: mesma logica do closedTrades — so' ops da conta ativa.
   const remoteOpenTrades: OpenTrade[] = useMemo(() => {
     const localIds = new Set(openTrades.map((t) => t.id))
     return storeOperations
+      .filter((o) => o.accountId === accountId)
       .filter((o) => o.status === 'OPEN' && !localIds.has(o.id))
       .map((o) => {
         const asset = ASSETS.find((x) => x.id === o.assetId)
@@ -283,7 +292,7 @@ export function TradingPanel({ asset, shortLabels = true, mobile = false, compac
           expiryTime: Math.floor(new Date(o.expiresAt).getTime() / 1000) + BRT_OFFSET,
         }
       })
-  }, [storeOperations, openTrades])
+  }, [storeOperations, openTrades, accountId])
 
   // Final list rendered as PENDENTES.
   const allOpenTrades: OpenTrade[] = useMemo(
