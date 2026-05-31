@@ -47,12 +47,12 @@ export async function validateCodeForUser(
   if (bonus.expiresAt && bonus.expiresAt < new Date()) return { ok: false, error: 'EXPIRED' }
   if (Number(bonus.minDeposit) > depositAmount)        return { ok: false, error: 'BELOW_MIN' }
 
-  // Single open grant per user.
-  const openGrant = await prisma.bonusGrant.findFirst({
-    where: { userId, status: { in: ['PENDING', 'ACTIVE'] } },
-    select: { id: true },
-  })
-  if (openGrant) return { ok: false, error: 'USER_HAS_OPEN_GRANT' }
+  // 2026-05-31: Removida a regra "1 grant aberto por user". Agora o user
+  // pode ter multiplos bonus PENDING/ACTIVE simultaneos — cada deposito
+  // confirmado credita seu proprio bonus. O rollover continua agregado
+  // na conta (Account.rolloverRequired soma TODOS os bonus + a regra
+  // do depositRollover). maxUsesPerUser abaixo ainda limita o numero
+  // de redempts do MESMO codigo.
 
   // Per-user usage cap (counts completed + cancelled too — the limit is
   // about lifetime redemptions of this specific code).
@@ -178,12 +178,9 @@ export interface AvailableBonus {
 }
 
 export async function listAvailableBonusesForUser(userId: string): Promise<AvailableBonus[]> {
-  // If user has an open grant, no codes are available — return early.
-  const open = await prisma.bonusGrant.findFirst({
-    where:  { userId, status: { in: ['PENDING', 'ACTIVE'] } },
-    select: { id: true },
-  })
-  if (open) return []
+  // 2026-05-31: Removida tb a "early return" se houvesse grant aberto.
+  // O dropdown lista os codigos disponiveis independente de grants
+  // anteriores — user pode acumular multiplos bonus simultaneos.
 
   // Aggregate usage per code so we can filter out user-exhausted codes
   // in the same round-trip.

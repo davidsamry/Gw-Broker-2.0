@@ -48,25 +48,35 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
   const accountId  = accountRows[0].id
   const payerName  = accountRows[0].name
 
-  // ── Auto-cancel PIX/bonus PENDING orfaos ────────────────────────────
-  // Quando user gera NOVO PIX, assume-se que abandonou o anterior. Cancela
-  // deposits PENDING + bonus_grants PENDING dele:
-  //   1. Sem isso, BonusGrant PENDING orfao bloqueia validateCodeForUser
-  //      ("USER_HAS_OPEN_GRANT") e o user nao consegue usar bonus de novo.
-  //   2. Mantem estado consistente (max 1 PIX ativo por user).
+  // ── Auto-cancel PIX/bonus PENDING orfaos do MESMO PIX abandonado ────
+  // Quando user gera NOVO PIX, assume-se que abandonou o anterior. Limpa:
+  //   - deposits PENDING desta conta REAL (sao "PIX QR ativos" — so' faz
+  //     sentido ter 1 por vez)
+  //   - bonus_grants PENDING ligados a esses deposits (cascade — sem o
+  //     deposit pago, o grant nunca seria ativado)
+  //
+  // NAO cancela grants ACTIVE (ja' creditados) nem grants PENDING ligados
+  // a OUTROS deposits — o user pode ter multiplos bonus simultaneos agora
+  // (regra "1 grant aberto" foi removida em 2026-05-31).
   //
   // Race condition (raro): se user pagar o PIX antigo entre este cancel
   // e o webhook chegar, confirmDepositById detecta status CANCELLED e
-  // reativa pra PAID + credita saldo. O bonus_grant cancelado NAO e'
-  // reativado (evita conflito com novo grant pendente que esta sendo
-  // criado agora) — user perde o bonus do PIX antigo nesse cenario, mas
-  // o saldo do deposito e' creditado normalmente. Caso degenerate.
+  // reativa pra PAID + credita saldo. O bonus_grant cancelado em cascade
+  // NAO e' reativado — user perde o bonus do PIX antigo mas recebe o
+  // saldo do deposito. Caso degenerate.
   await prisma.$transaction([
+    // Primeiro: cancela grants PENDING ligados aos deposits PENDING desta conta
     prisma.$executeRaw`
       UPDATE bonus_grants
       SET status = 'CANCELLED'::"BonusGrantStatus", "cancelledAt" = NOW()
-      WHERE "userId" = ${userId} AND status = 'PENDING'::"BonusGrantStatus"
+      WHERE status = 'PENDING'::"BonusGrantStatus"
+        AND "depositId" IN (
+          SELECT id FROM deposits
+          WHERE "accountId" = ${accountId}
+            AND status = 'PENDING'::"DepositStatus"
+        )
     `,
+    // Depois: cancela os deposits PENDING em si
     prisma.$executeRaw`
       UPDATE deposits
       SET status = 'CANCELLED'::"DepositStatus", "updatedAt" = NOW(),
