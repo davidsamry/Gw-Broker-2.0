@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { getSettings, updateSettings } from '../../settings/service.js'
+import { recordAdminAction } from '../auditLog.js'
 
 // All routes here sit behind requireAdmin (attached at /admin root).
 
@@ -48,7 +49,15 @@ export async function settingsAdminRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
     }
     try {
+      const before = getSettings()
       const settings = await updateSettings(parsed.data)
+      void recordAdminAction(req, {
+        resourceType: 'SETTINGS',
+        resourceId:   null,                  // singleton — sem ID
+        action:       'UPDATE',
+        before,
+        after:        settings,
+      })
       return reply.send({ settings })
     } catch (err) {
       app.log.error(err)

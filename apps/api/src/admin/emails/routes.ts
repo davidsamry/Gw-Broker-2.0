@@ -8,6 +8,7 @@ import {
   updateAdminEmailTemplate,
 } from './service.js'
 import { prisma } from '../../prisma.js'
+import { recordAdminAction } from '../auditLog.js'
 
 // All routes here sit behind the requireAdmin preHandler attached at
 // /admin/* root, so no per-route gate needed.
@@ -54,6 +55,13 @@ export async function emailAdminRoutes(app: FastifyInstance) {
     try {
       const template = await updateAdminEmailTemplate(adminId, key, parsed.data)
       if (!template) return reply.status(404).send({ error: 'TEMPLATE_NOT_FOUND' })
+      void recordAdminAction(req, {
+        resourceType: 'EMAIL_TEMPLATE',
+        resourceId:   key,
+        action:       'UPDATE',
+        before:       null,
+        after:        parsed.data,
+      })
       return reply.send({ template })
     } catch (err) {
       app.log.error(err)
@@ -76,6 +84,13 @@ export async function emailAdminRoutes(app: FastifyInstance) {
 
       const result = await sendTestEmail(key, admin.email)
       if (!result.ok) return reply.status(500).send({ error: result.reason ?? 'SEND_FAILED' })
+      void recordAdminAction(req, {
+        resourceType: 'EMAIL_TEMPLATE',
+        resourceId:   key,
+        action:       'SEND_TEST',
+        before:       null,
+        after:        { sentTo: admin.email },
+      })
       return reply.send({ ok: true, sentTo: admin.email, messageId: result.messageId })
     } catch (err) {
       app.log.error(err)

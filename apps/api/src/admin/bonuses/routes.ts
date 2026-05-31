@@ -3,6 +3,7 @@ import { z } from 'zod'
 import {
   createBonus, deleteBonus, listAdminBonuses, updateBonus,
 } from './service.js'
+import { recordAdminAction } from '../auditLog.js'
 
 // All routes here sit behind requireAdmin (added at /admin/* root).
 
@@ -53,6 +54,13 @@ export async function bonusesAdminRoutes(app: FastifyInstance) {
         ...parsed.data,
         expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null,
       })
+      void recordAdminAction(req, {
+        resourceType: 'BONUS_CODE',
+        resourceId:   (bonus as any)?.id ?? null,
+        action:       'CREATE',
+        before:       null,
+        after:        parsed.data,
+      })
       return reply.status(201).send({ bonus })
     } catch (err: any) {
       // Unique-violation on code.
@@ -77,6 +85,13 @@ export async function bonusesAdminRoutes(app: FastifyInstance) {
           ? (parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null)
           : undefined,
       })
+      void recordAdminAction(req, {
+        resourceType: 'BONUS_CODE',
+        resourceId:   id,
+        action:       'UPDATE',
+        before:       null,
+        after:        parsed.data,
+      })
       return reply.send({ bonus })
     } catch (err: any) {
       if (err?.code === 'P2025') return reply.status(404).send({ error: 'NOT_FOUND' })
@@ -90,6 +105,13 @@ export async function bonusesAdminRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string }
     try {
       await deleteBonus(id)
+      void recordAdminAction(req, {
+        resourceType: 'BONUS_CODE',
+        resourceId:   id,
+        action:       'DELETE',
+        before:       null,
+        after:        null,
+      })
       return reply.send({ ok: true })
     } catch (err: any) {
       if (err?.code === 'P2025') return reply.status(404).send({ error: 'NOT_FOUND' })

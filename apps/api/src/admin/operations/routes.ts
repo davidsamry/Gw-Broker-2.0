@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { cancelAdminOperation, deleteAdminOperation, listAdminOperations } from './service.js'
+import { recordAdminAction } from '../auditLog.js'
 
 const listQuerySchema = z.object({
   page:        z.coerce.number().int().min(1).optional(),
@@ -30,6 +31,13 @@ export async function operationsAdminRoutes(app: FastifyInstance) {
     const adminId = ((req as any).user.sub) as string
     try {
       await cancelAdminOperation(adminId, id)
+      void recordAdminAction(req, {
+        resourceType: 'OPERATION',
+        resourceId:   id,
+        action:       'CANCEL',
+        before:       { status: 'OPEN' },
+        after:        { status: 'CANCELLED' },
+      })
       return reply.send({ ok: true })
     } catch (err: any) {
       if (err.message === 'OPERATION_NOT_CANCELLABLE') {
@@ -47,6 +55,13 @@ export async function operationsAdminRoutes(app: FastifyInstance) {
     const adminId = ((req as any).user.sub) as string
     try {
       const result = await deleteAdminOperation(adminId, id)
+      void recordAdminAction(req, {
+        resourceType: 'OPERATION',
+        resourceId:   id,
+        action:       'DELETE',
+        before:       null,
+        after:        result,
+      })
       return reply.send({ ok: true, ...result })
     } catch (err: any) {
       if (err.message === 'OPERATION_NOT_FOUND') {

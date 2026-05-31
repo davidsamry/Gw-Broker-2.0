@@ -3,6 +3,7 @@ import { z } from 'zod'
 import {
   createRankingEntry, deleteRankingEntry, listAdminRanking, updateRankingEntry,
 } from './service.js'
+import { recordAdminAction } from '../auditLog.js'
 
 const createSchema = z.object({
   name:        z.string().trim().min(2).max(60),
@@ -39,6 +40,13 @@ export async function rankingAdminRoutes(app: FastifyInstance) {
     }
     try {
       const entry = await createRankingEntry(parsed.data)
+      void recordAdminAction(req, {
+        resourceType: 'RANKING_PRIZE',
+        resourceId:   (entry as any)?.id ?? null,
+        action:       'CREATE',
+        before:       null,
+        after:        parsed.data,
+      })
       return reply.send({ entry })
     } catch (err) {
       app.log.error(err)
@@ -55,6 +63,13 @@ export async function rankingAdminRoutes(app: FastifyInstance) {
     try {
       const entry = await updateRankingEntry(id, parsed.data)
       if (!entry) return reply.status(404).send({ error: 'ENTRY_NOT_FOUND' })
+      void recordAdminAction(req, {
+        resourceType: 'RANKING_PRIZE',
+        resourceId:   id,
+        action:       'UPDATE',
+        before:       null,
+        after:        parsed.data,
+      })
       return reply.send({ entry })
     } catch (err) {
       app.log.error(err)
@@ -67,6 +82,13 @@ export async function rankingAdminRoutes(app: FastifyInstance) {
     try {
       const ok = await deleteRankingEntry(id)
       if (!ok) return reply.status(404).send({ error: 'ENTRY_NOT_FOUND' })
+      void recordAdminAction(req, {
+        resourceType: 'RANKING_PRIZE',
+        resourceId:   id,
+        action:       'DELETE',
+        before:       null,
+        after:        null,
+      })
       return reply.send({ ok: true })
     } catch (err) {
       app.log.error(err)

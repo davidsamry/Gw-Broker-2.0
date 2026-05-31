@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { bulkSetPayout, listAdminAssets, updateAsset } from './service.js'
+import { recordAdminAction } from '../auditLog.js'
 
 const listQuerySchema = z.object({
   category: z.enum(['ALL', 'OPEN_MARKET', 'OTC', 'CRYPTO']).optional(),
@@ -52,6 +53,13 @@ export async function assetsAdminRoutes(app: FastifyInstance) {
     try {
       const asset = await updateAsset(id, parsed.data)
       if (!asset) return reply.status(404).send({ error: 'ASSET_NOT_FOUND' })
+      void recordAdminAction(req, {
+        resourceType: 'ASSET',
+        resourceId:   id,
+        action:       'UPDATE',
+        before:       null,
+        after:        parsed.data,
+      })
       return reply.send({ asset })
     } catch (err) {
       req.log.error(err)
@@ -66,6 +74,13 @@ export async function assetsAdminRoutes(app: FastifyInstance) {
     }
     try {
       const updated = await bulkSetPayout(parsed.data.payout, parsed.data.category)
+      void recordAdminAction(req, {
+        resourceType: 'ASSET',
+        resourceId:   null,   // acao em massa, nao em UM asset
+        action:       'BULK_PAYOUT',
+        before:       null,
+        after:        { ...parsed.data, updatedCount: updated },
+      })
       return reply.send({ ok: true, updated })
     } catch (err) {
       req.log.error(err)
