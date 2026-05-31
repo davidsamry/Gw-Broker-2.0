@@ -7,7 +7,7 @@ import {
   ArrowDownToLine, ArrowUpFromLine, MessageSquare,
   Copy, Gift, TrendingUp, Clock, FileSpreadsheet,
   Trophy, FileText, Mail, Radio,
-  Settings, X, Plug, Webhook,
+  Settings, X, Plug, Webhook, History,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -42,6 +42,7 @@ const MENU: MenuItem[] = [
   { href: '/admin/api',            label: 'API',             icon: <Plug size={15} /> },
   { href: '/admin/webhooks',       label: 'Webhooks',        icon: <Webhook size={15} /> },
   { href: '/admin/meta-pixel',     label: 'Meta Pixel',      icon: <Activity size={15} /> },
+  { href: '/admin/audit-log',      label: 'Audit Log',       icon: <History size={15} /> },
 ]
 
 interface AdminSidebarProps {

@@ -15,6 +15,7 @@ import { rankingAdminRoutes } from './ranking/routes.js'
 import { settingsAdminRoutes } from './settings/routes.js'
 import { webhooksAdminRoutes } from './webhooks/routes.js'
 import { metaAdminRoutes } from './meta/routes.js'
+import { auditAdminRoutes } from './audit/routes.js'
 
 // All routes in this module sit behind requireAdmin, so the JWT must be valid
 // AND the user.role must be ADMIN (live-checked against the DB per request).
@@ -48,4 +49,5 @@ export async function adminRoutes(app: FastifyInstance) {
   await app.register(settingsAdminRoutes,    { prefix: '/settings'    })
   await app.register(webhooksAdminRoutes,    { prefix: '/webhooks'    })
   await app.register(metaAdminRoutes,        { prefix: '/meta-pixel'  })
+  await app.register(auditAdminRoutes,       { prefix: '/audit-log'   })
 }
