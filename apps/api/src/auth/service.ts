@@ -138,6 +138,14 @@ function sanitizeUser(user: any) {
       type:     a.type,
       balance:  a.balance.toString(),
       currency: a.currency,
+      // Bonus + rollover incluidos pra:
+      //  - dropdown da conta mostrar "+R$ X bonus"
+      //  - modal de Retirada calcular "faltam R$ Y de rollover"
+      //  - MinhaContaTab exibir saldo de bonus separado
+      // Sem esses 3, o frontend caia em fallback 0 silencioso.
+      bonusBalance:     a.bonusBalance?.toString()     ?? '0',
+      rolloverRequired: a.rolloverRequired?.toString() ?? '0',
+      rolloverProgress: a.rolloverProgress?.toString() ?? '0',
     })),
   }
 }
