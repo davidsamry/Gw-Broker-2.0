@@ -129,21 +129,35 @@ export async function activateForPaidDeposit(depositId: string): Promise<number>
   })
   if (!deposit) return 0
 
-  const bonusAmount = Number(grant.bonusAmount)
+  const bonusAmount      = Number(grant.bonusAmount)
+  const bonusRollover    = Number(grant.rolloverRequired)  // = bonusAmount * bonus.rollover (pre-calc no createPendingGrantForDeposit)
 
-  // Transaction: bump account.balance, write a BONUS transaction row,
-  // flip grant to ACTIVE. All-or-nothing.
+  // Transaction atomica:
+  //   1. Credita o bonus em bonusBalance (NAO no balance principal — saldo
+  //      sacavel ate' completar rollover continua sendo so' o balance).
+  //   2. Soma o rollover do bonus (bonusAmount * bonus.rollover) no
+  //      Account.rolloverRequired. Saque so' libera quando rolloverProgress
+  //      >= esse total acumulado.
+  //   3. Marca o grant como ACTIVE.
+  //   4. Audit transaction tipo BONUS pro extrato.
+  //
+  // Bug-fix 2026-05-31: antes creditava bonus no balance e NAO somava
+  // rolloverRequired. Resultado: user sacava o bonus sem fazer rollover
+  // real do codigo — efetivamente "free money".
   await prisma.$transaction([
     prisma.account.update({
       where: { id: deposit.accountId },
-      data:  { balance: { increment: bonusAmount } },
+      data:  {
+        bonusBalance:     { increment: bonusAmount },
+        rolloverRequired: { increment: bonusRollover },
+      },
     }),
     prisma.transaction.create({
       data: {
         accountId:   deposit.accountId,
         type:        'BONUS',
         amount:      new Prisma.Decimal(bonusAmount),
-        description: `Bônus aplicado (grant=${grant.id})`,
+        description: `Bônus aplicado (grant=${grant.id}, rollover +R$ ${bonusRollover.toFixed(2)})`,
       },
     }),
     prisma.bonusGrant.update({
