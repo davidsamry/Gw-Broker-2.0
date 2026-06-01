@@ -150,9 +150,20 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
       },
       select: { status: true, amount: true, profit: true, closedAt: true },
     }),
-    // Lucrative users: SUM deposits vs SUM profits per user. Returns users
-    // whose net (profit - deposited) is positive. Fake users excluded so
-    // staged accounts don't appear in the "users beating us" list.
+    // Lucrative users: ranking pelo "quanto o user tem a mais" do que
+    // depositou.
+    //
+    // 2026-06-01: revisao do calculo (admin reclamou que estava inflado).
+    //   Lucro Liquido = (balance + bonusBalance) - SUM(DEPOSIT)
+    // Antes era SUM(TRADE_WIN) - SUM(DEPOSIT), o que IGNORAVA as perdas e
+    // mostrava users com R$ 6k de "lucro" quando tinham na real R$ 50 na
+    // conta. O calculo novo bate exatamente com o saldo atual do user —
+    // se ele tem R$ 6k visivel, e' porque ele LUCROU R$ 6k de fato.
+    //
+    // "Lucro Total" mantido como SUM(TRADE_WIN) pro admin ver o giro
+    // bruto de wins (util pra ver quem opera muito vs. lucra muito).
+    //
+    // Fake users excluidos pra staged accounts nao aparecerem.
     prisma.$queryRaw<Array<{
       id:         string
       name:       string
@@ -165,7 +176,7 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
         u.id, u.name, u.email,
         COALESCE(SUM(CASE WHEN t.type = 'DEPOSIT'::"TransactionType"   THEN t.amount END), 0) AS deposited,
         COALESCE(SUM(CASE WHEN t.type = 'TRADE_WIN'::"TransactionType" THEN t.amount END), 0) AS profit,
-        COALESCE(SUM(CASE WHEN t.type = 'TRADE_WIN'::"TransactionType" THEN t.amount END), 0) -
+        COALESCE(MAX(a.balance + a."bonusBalance"), 0) -
         COALESCE(SUM(CASE WHEN t.type = 'DEPOSIT'::"TransactionType"   THEN t.amount END), 0) AS net_profit
       FROM users u
       LEFT JOIN accounts a     ON a."userId" = u.id AND a.type = 'REAL'::"AccountType"
@@ -173,7 +184,7 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
       WHERE u.role = 'USER'::"UserRole" AND u."isFake" = false
       GROUP BY u.id, u.name, u.email
       HAVING
-        COALESCE(SUM(CASE WHEN t.type = 'TRADE_WIN'::"TransactionType" THEN t.amount END), 0) -
+        COALESCE(MAX(a.balance + a."bonusBalance"), 0) -
         COALESCE(SUM(CASE WHEN t.type = 'DEPOSIT'::"TransactionType"   THEN t.amount END), 0) > 0
       ORDER BY net_profit DESC
       LIMIT 50
