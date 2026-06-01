@@ -129,11 +129,11 @@ export function LucrativeUsersTable({ rows, total }: Props) {
                       +R$ {formatBRL(row.netProfit)}
                     </span>
                   </div>
-                  {/* Liquidez (funcional) + OTC/Crypto (visual stubs). */}
+                  {/* 3 toggles funcionais (PATCH /admin/users/:id). */}
                   <div className="flex items-center justify-end gap-4 text-[10px] whitespace-nowrap">
-                    <LiquidityToggle userId={row.id} initial={row.liquidityMode} />
-                    <MarketToggle label="OTC"    on={true}  />
-                    <MarketToggle label="Crypto" on={false} />
+                    <ToggleAction label="Liquidez" userId={row.id} initial={row.liquidityMode}  field="liquidityMode"  hint="Ativa motor de liquidez forcada (7L+3W)" />
+                    <ToggleAction label="OTC"      userId={row.id} initial={row.canTradeOtc}    field="canTradeOtc"    hint="Permite operar nos OTC (Gold, EUR/USD OTC, etc)" />
+                    <ToggleAction label="Crypto"   userId={row.id} initial={row.canTradeCrypto} field="canTradeCrypto" hint="Permite operar em crypto (BTC/USDT, ETH/USDT, etc)" />
                   </div>
                 </div>
               </div>
