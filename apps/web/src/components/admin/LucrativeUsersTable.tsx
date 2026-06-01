@@ -74,11 +74,10 @@ export function LucrativeUsersTable({ rows, total }: Props) {
       ) : (
         <>
           {/* Header (desktop) */}
-          <div className="hidden md:grid grid-cols-[40px_1fr_120px_120px_120px_280px] gap-3 pb-2 border-b border-[#1f232e] text-[10px] font-medium text-[#8b8f9a]">
+          <div className="hidden md:grid grid-cols-[40px_1fr_120px_120px_280px] gap-3 pb-2 border-b border-[#1f232e] text-[10px] font-medium text-[#8b8f9a]">
             <span>#</span>
-            <span>Usuário</span>
+            <span>Email</span>
             <span className="text-right">Depositado</span>
-            <span className="text-right">Lucro Total</span>
             <span className="text-right">Lucro Líquido</span>
             <span className="text-right">Mercados</span>
           </div>
@@ -89,15 +88,13 @@ export function LucrativeUsersTable({ rows, total }: Props) {
             return (
               <div
                 key={row.id}
-                className="grid grid-cols-1 md:grid-cols-[40px_1fr_120px_120px_120px_280px] gap-3 py-3 border-b border-[#1f232e]/60 items-center hover:bg-white/[0.02] transition-colors"
+                className="grid grid-cols-1 md:grid-cols-[40px_1fr_120px_120px_280px] gap-3 py-3 border-b border-[#1f232e]/60 items-center hover:bg-white/[0.02] transition-colors"
               >
                 <RankBadge rank={rank} />
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-white truncate">{row.name || '—'}</div>
-                  <div className="text-[10px] text-[#8b8f9a] truncate md:hidden">{row.email}</div>
+                  <div className="text-sm font-semibold text-white truncate">{row.email || '—'}</div>
                 </div>
                 <div className="text-xs md:text-sm text-white text-right">R$ {formatBRL(row.deposited)}</div>
-                <div className="text-xs md:text-sm text-emerald-400 text-right font-semibold">R$ {formatBRL(row.profit)}</div>
                 <div className="flex justify-end">
                   <span className="px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-[11px] font-bold text-emerald-400 whitespace-nowrap">
                     +R$ {formatBRL(row.netProfit)}
