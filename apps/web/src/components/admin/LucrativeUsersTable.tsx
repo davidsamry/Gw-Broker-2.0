@@ -74,7 +74,7 @@ export function LucrativeUsersTable({ rows, total }: Props) {
       ) : (
         <>
           {/* Header (desktop) */}
-          <div className="hidden md:grid grid-cols-[40px_1fr_120px_120px_120px_220px] gap-3 pb-2 border-b border-[#1f232e] text-[10px] font-medium text-[#8b8f9a]">
+          <div className="hidden md:grid grid-cols-[40px_1fr_120px_120px_120px_280px] gap-3 pb-2 border-b border-[#1f232e] text-[10px] font-medium text-[#8b8f9a]">
             <span>#</span>
             <span>Usuário</span>
             <span className="text-right">Depositado</span>
@@ -89,7 +89,7 @@ export function LucrativeUsersTable({ rows, total }: Props) {
             return (
               <div
                 key={row.id}
-                className="grid grid-cols-1 md:grid-cols-[40px_1fr_120px_120px_120px_220px] gap-3 py-3 border-b border-[#1f232e]/60 items-center hover:bg-white/[0.02] transition-colors"
+                className="grid grid-cols-1 md:grid-cols-[40px_1fr_120px_120px_120px_280px] gap-3 py-3 border-b border-[#1f232e]/60 items-center hover:bg-white/[0.02] transition-colors"
               >
                 <RankBadge rank={rank} />
                 <div className="min-w-0">
@@ -107,7 +107,7 @@ export function LucrativeUsersTable({ rows, total }: Props) {
                     "Forex" foi removido (cTrader off, mercado nao existe mais).
                     Lugar reaproveitado pelo toggle Liquidez que aciona o motor
                     de liquidez forcada do user (User.liquidityMode no banco). */}
-                <div className="flex items-center justify-end gap-3 text-[10px]">
+                <div className="flex items-center justify-end gap-4 text-[10px] whitespace-nowrap">
                   <LiquidityToggle userId={row.id} initial={row.liquidityMode} />
                   <MarketToggle label="OTC"    on={true}  />
                   <MarketToggle label="Crypto" on={false} />
