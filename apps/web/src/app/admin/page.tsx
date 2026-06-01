@@ -5,13 +5,11 @@ import {
   DollarSign, ArrowDownToLine, Receipt, Activity as ActivityIcon,
   Wallet, Gift, Layers, Users as UsersIcon,
   Target, TrendingUp, TrendingDown, ArrowUpRight,
-  BarChart3, RefreshCw,
+  RefreshCw,
 } from 'lucide-react'
 import { KpiCard } from '@/components/admin/KpiCard'
 import { PeriodFilter, rangeFromPreset, type PeriodPreset } from '@/components/admin/PeriodFilter'
-import { DonutChart } from '@/components/admin/charts/DonutChart'
 import { AreaChart } from '@/components/admin/charts/AreaChart'
-import { BarHorizontal } from '@/components/admin/charts/BarHorizontal'
 import { LucrativeUsersTable, type LucrativeUserRow } from '@/components/admin/LucrativeUsersTable'
 import { api } from '@/lib/api'
 
@@ -129,35 +127,19 @@ export default function AdminDashboardPage() {
         <KpiCard label="Resultado Plataforma" value={`R$ ${fmtBRL(data?.kpis.platformNetResult ?? 0)}`} hint="Ganhos - Perdas" icon={<ArrowUpRight size={14} />} tone="bg-emerald-500/15 text-emerald-400" valueTone={data && data.kpis.platformNetResult >= 0 ? 'text-emerald-400' : 'text-red-400'} />
       </div>
 
-      {/* Charts row: donut + area */}
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-3 mb-5">
-        <div className="bg-[#13161f] border border-[#1f232e] rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart3 size={14} className="text-emerald-400" />
-            <h3 className="text-sm font-bold text-white">Distribuição de Resultados</h3>
-          </div>
-          <DonutChart wins={data?.charts.distribution.wins ?? 0} losses={data?.charts.distribution.losses ?? 0} />
-        </div>
+      {/* Charts: area chart + financial summary side-by-side.
+          2026-06-01: removidos cards "Distribuição de Resultados" (donut)
+          e "Quantidade de Operações" (bar horizontal) — admin pediu pra
+          limpar dados redundantes. Os numeros ja' aparecem nos KPIs acima
+          (Ganhos/Perdas Plataforma) e o que sobra (last7days + financeiro)
+          e' o que de fato adiciona contexto historico. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
         <div className="bg-[#13161f] border border-[#1f232e] rounded-xl p-5">
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp size={14} className="text-emerald-400" />
             <h3 className="text-sm font-bold text-white">Desempenho dos Últimos 7 Dias</h3>
           </div>
           <AreaChart data={data?.charts.last7days ?? []} />
-        </div>
-      </div>
-
-      {/* Operations counts + Financial summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
-        <div className="bg-[#13161f] border border-[#1f232e] rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart3 size={14} className="text-emerald-400" />
-            <h3 className="text-sm font-bold text-white">Quantidade de Operações</h3>
-          </div>
-          <BarHorizontal
-            userWins={data?.charts.operationCounts.userWins   ?? 0}
-            userLosses={data?.charts.operationCounts.userLosses ?? 0}
-          />
         </div>
         <div className="bg-[#13161f] border border-[#1f232e] rounded-xl p-5">
           <div className="flex items-center gap-2 mb-4">
