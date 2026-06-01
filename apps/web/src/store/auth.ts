@@ -121,8 +121,10 @@ interface AuthState {
 
 // Bump the cache key whenever the User shape changes so existing clients
 // don't read a stale cached object missing new fields. Current schema
-// version: v4 (added kycSubmission via /auth/me + KycStatus typing).
-const USER_CACHE_KEY = 'vx_user_cache_v5'    // bumped: Account gained rollover/bonus fields
+// version: v6 (added bonusBalance/rolloverRequired/rolloverProgress no
+// /auth/me — commit 8c766ad. Clientes em v5 nao tinham esses campos
+// no cache mesmo apos a API enviar, ate o TTL de 5min expirar).
+const USER_CACHE_KEY = 'vx_user_cache_v6'
 const USER_CACHE_TTL = 5 * 60 * 1000 // 5 min — short enough that stale balance corrects quickly
 
 interface UserCache { user: User; savedAt: number }
