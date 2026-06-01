@@ -223,6 +223,7 @@ model User {
   ticketMessages      TicketMessage[]
   passwordResetTokens PasswordResetToken[]
   botRefreshTokens    BotRefreshToken[]
+  adminTrustedDevices AdminTrustedDevice[]
   // Meta Conversions API attribution data captured at register time.
   // 1-to-1 (one row per user) — see UserTracking model below.
   tracking            UserTracking?
@@ -656,6 +657,34 @@ model OtcEngineSnapshot {
 
   @@index([updatedAt(sort: Desc)])
   @@map("otc_engine_snapshot")
+}
+
+// "Trust this device" pro step-up 2FA do admin. Apos validar o code,
+// um token random (32 bytes hex) e' salvo aqui em HASH (sha256) e
+// guardado num cookie httpOnly samesite=strict no client. Nas proximas
+// visitas a /admin/login, o frontend tenta /auth/admin-step-up-trusted
+// — se o cookie bate com um row valido aqui, pula o pedido do code.
+//
+// Token nunca volta a aparecer no app — apenas o hash e' persistido,
+// igual ao bcrypt fluxo do password. revokedAt permite revogar
+// individual sem precisar mexer no token (limpar todos = DELETE
+// WHERE userId).
+model AdminTrustedDevice {
+  id          String    @id @default(cuid())
+  userId      String
+  tokenHash   String    @unique
+  userAgent   String?
+  ip          String?
+  lastUsedAt  DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt   DateTime  @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  revokedAt   DateTime? @db.Timestamptz(3)
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("admin_trusted_devices")
 }
 
 // ─── Bonus models (Fase B1) ───────────────────────────────────────────────

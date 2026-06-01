@@ -27,6 +27,10 @@ export default function AdminStepUpPage() {
   const [code, setCode]           = useState('')
   const [error, setError]         = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [rememberDevice, setRememberDevice] = useState(true)
+  // trustChecking: true durante a tentativa automatica de step-up via
+  // trust-device cookie. Mostra loader em vez do form pra evitar flash.
+  const [trustChecking, setTrustChecking] = useState(true)
 
   // Guards: se nao logado → /login. Se logado mas nao admin → /.
   useEffect(() => {
@@ -35,13 +39,37 @@ export default function AdminStepUpPage() {
     if (user.role !== 'ADMIN') { router.replace('/'); return }
   }, [user, loading, router])
 
+  // Tenta step-up automatico via trust-device cookie. Se o user ja' marcou
+  // "lembrar este dispositivo" antes, o cookie httpOnly vai junto via
+  // withCredentials e o backend emite um token novo com adminAuth=true.
+  // Em sucesso: redireciona direto pro painel. Em falha: mostra o form
+  // de code normalmente.
+  useEffect(() => {
+    if (loading || !user || user.role !== 'ADMIN') return
+    let cancelled = false
+    api.post('/auth/admin-step-up-trusted', {})
+      .then((res) => {
+        if (cancelled) return
+        const newTok = res.data?.token
+        if (newTok) {
+          localStorage.setItem('token', newTok)
+          useAuthStore.setState({ token: newTok })
+          router.replace('/admin')
+        } else {
+          setTrustChecking(false)
+        }
+      })
+      .catch(() => { if (!cancelled) setTrustChecking(false) })
+    return () => { cancelled = true }
+  }, [user, loading, router])
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (code.length !== 6) return
     setError('')
     setSubmitting(true)
     try {
-      const { data } = await api.post('/auth/admin-step-up', { code })
+      const { data } = await api.post('/auth/admin-step-up', { code, rememberDevice })
       // Substitui o token no localStorage (e zustand state). Sessao de
       // refresh-cookie nao muda — so' o access token recebe a claim.
       if (data?.token) {
@@ -71,8 +99,9 @@ export default function AdminStepUpPage() {
     }
   }
 
-  // Loading state — auth init em andamento, evita flicker do redirect
-  if (loading || !user) {
+  // Loading state — auth init em andamento OU tentando trust automatico.
+  // Evita flash do form de codigo pra users com cookie valido.
+  if (loading || !user || trustChecking) {
     return (
       <div className="min-h-screen bg-[#0b0d12] flex items-center justify-center">
         <Loader2 size={28} className="text-emerald-500 animate-spin" />
@@ -126,6 +155,17 @@ export default function AdminStepUpPage() {
                 className="w-full bg-transparent border border-[#1f232e] rounded-lg px-3 py-3 text-white text-sm outline-none focus:border-emerald-500/60 transition-colors tracking-[0.4em] text-center font-mono text-lg"
               />
             </div>
+
+            {/* Trust device — pula 2FA nas proximas vezes nesse browser. */}
+            <label className="flex items-center gap-2 text-xs text-[#8b8f9a] cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={rememberDevice}
+                onChange={(e) => setRememberDevice(e.target.checked)}
+                className="accent-emerald-500 w-3.5 h-3.5"
+              />
+              Confiar neste dispositivo por 30 dias
+            </label>
 
             {error && <p className="text-red-400 text-xs text-center">{error}</p>}
 

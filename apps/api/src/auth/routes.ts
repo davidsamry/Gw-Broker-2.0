@@ -2,6 +2,13 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { loginSchema, registerSchema, updateProfileSchema, twoFactorCodeSchema, kycSubmitSchema, changePasswordSchema } from './schema.js'
 import { changeUserPassword, getKycSubmission, getUserById, loginUser, registerUser, submitKyc, updateUserProfile, verifyAdminStepUp } from './service.js'
+import {
+  TRUST_COOKIE_NAME,
+  TRUST_COOKIE_MAX_AGE_SEC,
+  createTrustedDevice,
+  verifyTrustedDevice,
+  revokeTrustedDevice,
+} from './adminTrust.js'
 import { requestPasswordReset, resetPasswordWithToken } from './passwordReset.js'
 import { getSettings } from '../settings/service.js'
 import { listOperations } from '../operations/service.js'
@@ -130,8 +137,27 @@ export async function authRoutes(app: FastifyInstance) {
 
     try {
       await verifyAdminStepUp(userId, parsed.data.code)
+
+      // Opcionalmente cria um trusted device — proximas visitas a /admin/*
+      // nesse browser nao vao mais pedir o codigo. Cookie httpOnly +
+      // samesite=strict + 30d TTL.
+      const rememberDevice = (req.body as any)?.rememberDevice === true
+      if (rememberDevice) {
+        const xfwd = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+        const ip   = xfwd || req.ip || null
+        const ua   = (req.headers['user-agent'] as string | undefined) ?? null
+        const trustToken = await createTrustedDevice({ userId, userAgent: ua, ip })
+        reply.setCookie(TRUST_COOKIE_NAME, trustToken, {
+          httpOnly: true,
+          secure:   process.env.NODE_ENV === 'production',
+          sameSite: 'strict',
+          path:     '/',
+          maxAge:   TRUST_COOKIE_MAX_AGE_SEC,
+        })
+      }
+
       const token = await issueTokens(app, reply, userId, { adminAuth: true })
-      return reply.send({ token })
+      return reply.send({ token, trustedDevice: rememberDevice })
     } catch (err: any) {
       if (err.message === 'NOT_ADMIN')              return reply.status(403).send({ error: 'NOT_ADMIN' })
       if (err.message === 'TWO_FACTOR_NOT_ENABLED') return reply.status(400).send({ error: 'TWO_FACTOR_NOT_ENABLED' })
@@ -139,6 +165,51 @@ export async function authRoutes(app: FastifyInstance) {
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }
+  })
+
+  // Tenta step-up automatico usando o trust-device cookie. Se valido,
+  // emite token com adminAuth=true sem precisar do code 2FA. Usado pelo
+  // frontend ANTES de mostrar o form de codigo na /admin/login — se
+  // sucesso, redireciona direto pro painel.
+  app.post('/admin-step-up-trusted', {
+    preHandler: (app as any).authenticate,
+  }, async (req, reply) => {
+    const userId = (req as any).user?.sub as string | undefined
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' })
+
+    const cookieToken = (req.cookies as any)?.[TRUST_COOKIE_NAME]
+    if (!cookieToken) return reply.status(401).send({ error: 'NO_TRUST_COOKIE' })
+
+    const ok = await verifyTrustedDevice({ userId, tokenRaw: cookieToken })
+    if (!ok) {
+      // Cookie invalido/expirado — limpa pro browser parar de tentar.
+      reply.clearCookie(TRUST_COOKIE_NAME, { path: '/' })
+      return reply.status(401).send({ error: 'INVALID_TRUST' })
+    }
+
+    // Defesa-em-profundidade: confere que o user e' realmente ADMIN.
+    const user = await prisma.user.findUnique({
+      where:  { id: userId },
+      select: { role: true },
+    })
+    if (!user || user.role !== 'ADMIN') {
+      return reply.status(403).send({ error: 'NOT_ADMIN' })
+    }
+
+    const token = await issueTokens(app, reply, userId, { adminAuth: true })
+    return reply.send({ token })
+  })
+
+  // "Esquecer este dispositivo" — revoga o trust e limpa o cookie.
+  // O JWT atual com adminAuth=true continua valido ate' expirar (15min);
+  // proximo step-up vai exigir o code 2FA.
+  app.post('/admin-trust-revoke', {
+    preHandler: (app as any).authenticate,
+  }, async (req, reply) => {
+    const cookieToken = (req.cookies as any)?.[TRUST_COOKIE_NAME]
+    if (cookieToken) await revokeTrustedDevice(cookieToken)
+    reply.clearCookie(TRUST_COOKIE_NAME, { path: '/' })
+    return reply.send({ ok: true })
   })
 
   app.post('/refresh', async (req, reply) => {
