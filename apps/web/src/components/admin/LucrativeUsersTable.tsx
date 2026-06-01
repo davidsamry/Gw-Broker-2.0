@@ -3,14 +3,16 @@
 import { useMemo, useState } from 'react'
 import { AlertTriangle, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { api } from '@/lib/api'
 
 export interface LucrativeUserRow {
-  id:        string
-  name:      string
-  email:     string
-  deposited: number
-  profit:    number
-  netProfit: number
+  id:            string
+  name:          string
+  email:         string
+  deposited:     number
+  profit:        number
+  netProfit:     number
+  liquidityMode: boolean
 }
 
 interface Props {
@@ -101,9 +103,12 @@ export function LucrativeUsersTable({ rows, total }: Props) {
                     +R$ {formatBRL(row.netProfit)}
                   </span>
                 </div>
-                {/* Markets toggles — visual stub until admin write endpoints exist */}
+                {/* Liquidez (funcional) + OTC/Crypto (visual stubs). 2026-06-01:
+                    "Forex" foi removido (cTrader off, mercado nao existe mais).
+                    Lugar reaproveitado pelo toggle Liquidez que aciona o motor
+                    de liquidez forcada do user (User.liquidityMode no banco). */}
                 <div className="flex items-center justify-end gap-3 text-[10px]">
-                  <MarketToggle label="Forex"  on={false} />
+                  <LiquidityToggle userId={row.id} initial={row.liquidityMode} />
                   <MarketToggle label="OTC"    on={true}  />
                   <MarketToggle label="Crypto" on={false} />
                 </div>
@@ -138,6 +143,50 @@ function RankBadge({ rank }: { rank: number }) {
     <span className={cn('w-6 h-6 rounded-full border flex items-center justify-center text-[11px] font-bold', tone)}>
       {rank}
     </span>
+  )
+}
+
+// Toggle inline pro modo Liquidez do user. Chama PATCH /admin/users/:id
+// com { liquidityMode } e mantem o estado otimisticamente. Se a request
+// falha, reverte. Loading state desabilita o click pra evitar double-fire.
+function LiquidityToggle({ userId, initial }: { userId: string; initial: boolean }) {
+  const [on, setOn]       = useState(initial)
+  const [busy, setBusy]   = useState(false)
+
+  async function toggle() {
+    if (busy) return
+    const next = !on
+    setBusy(true)
+    setOn(next)  // otimista
+    try {
+      await api.patch(`/admin/users/${userId}`, { liquidityMode: next })
+    } catch {
+      setOn(!next)  // reverte
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      onClick={toggle}
+      disabled={busy}
+      className="flex items-center gap-1.5 disabled:opacity-50"
+      title={on ? 'Liquidez ATIVA — proximas ops desse user passam pelo motor' : 'Ativar liquidez forcada'}
+    >
+      <span className={cn('text-[10px]', on ? 'text-emerald-400 font-semibold' : 'text-[#8b8f9a]')}>
+        Liquidez
+      </span>
+      <span className={cn(
+        'relative w-7 h-3.5 rounded-full transition-colors',
+        on ? 'bg-emerald-500' : 'bg-[#1f232e]'
+      )}>
+        <span className={cn(
+          'absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform',
+          on ? 'translate-x-3.5' : 'translate-x-0.5'
+        )} />
+      </span>
+    </button>
   )
 }
 
