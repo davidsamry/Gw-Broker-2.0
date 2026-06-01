@@ -71,6 +71,12 @@ export interface OtcAssetState {
   // own drift. Used by the streak-break rule above.
   forceReverseUntilMs?: number
   forceReverseDir?:     'UP' | 'DOWN'   // the direction we're reversing AWAY FROM
+  // 2026-06-01: hard-force flag — set quando o streak atinge MAX. A
+  // proxima vela M1 finalizada e' manipulada (manipulation.ts force o
+  // close) na direcao oposta, em vez de so' confiar no drift estatistico.
+  // Necessario pra garantir que shocks aleatorios grandes nao consigam
+  // produzir uma 6a vela na mesma direcao.
+  forceNextCandleDir?:  'UP' | 'DOWN'   // direcao FORCADA pra proxima vela
   // Per-M1-slot wick-injection guard. Stores the openTime (ms) of the
   // M1 candle we last evaluated; prevents double-injecting a wick into
   // the same slot. The runtime guarantees ≥90% of M1 candles have at

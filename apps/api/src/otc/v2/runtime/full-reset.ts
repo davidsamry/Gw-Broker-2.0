@@ -47,6 +47,7 @@ export function fullResetEngine(): FullResetSummary {
     s.m1WickCheckedSlot    = undefined
     s.forceReverseUntilMs  = undefined
     s.forceReverseDir      = undefined
+    s.forceNextCandleDir   = undefined
     s.pullbackTicksRemaining = 0
     s.lastTickAt           = undefined
     s.lastCandleAt         = undefined

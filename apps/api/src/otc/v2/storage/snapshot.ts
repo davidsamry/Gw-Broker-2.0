@@ -30,6 +30,12 @@ export interface EngineSnapshot {
   trendBias:        number
   lastTickTime:     Date | null
   lastCandleTime:   Date | null
+  // 2026-06-01: M1 streak state persistido pra sobreviver restart.
+  m1DirectionStreak:    number
+  m1LastDirection:      'UP' | 'DOWN' | null
+  forceReverseUntilAt:  Date | null
+  forceReverseDir:      'UP' | 'DOWN' | null
+  forceNextCandleDir:   'UP' | 'DOWN' | null
   updatedAt:        Date
 }
 
@@ -46,6 +52,11 @@ export async function loadSnapshots(assetIds: string[]): Promise<Map<string, Eng
       spread: number; buyPressure: number; sellPressure: number;
       volume: number; depth: number; speed: number; trendBias: number;
       lastTickTime: Date | null; lastCandleTime: Date | null;
+      m1DirectionStreak: number;
+      m1LastDirection: string | null;
+      forceReverseUntilAt: Date | null;
+      forceReverseDir: string | null;
+      forceNextCandleDir: string | null;
       updatedAt: Date;
     }>>`
       SELECT
@@ -54,11 +65,17 @@ export async function loadSnapshots(assetIds: string[]): Promise<Map<string, Eng
         regime, "regimeStartedAt", "regimeDurationMs",
         spread, "buyPressure", "sellPressure",
         volume, depth, speed, "trendBias",
-        "lastTickTime", "lastCandleTime", "updatedAt"
+        "lastTickTime", "lastCandleTime",
+        "m1DirectionStreak", "m1LastDirection",
+        "forceReverseUntilAt", "forceReverseDir", "forceNextCandleDir",
+        "updatedAt"
       FROM otc_engine_snapshot
       WHERE "assetId" = ANY(${assetIds}::text[])
     `
     for (const r of rows) {
+      const m1Last  = r.m1LastDirection      === 'UP' || r.m1LastDirection      === 'DOWN' ? r.m1LastDirection      : null
+      const frDir   = r.forceReverseDir      === 'UP' || r.forceReverseDir      === 'DOWN' ? r.forceReverseDir      : null
+      const fncDir  = r.forceNextCandleDir   === 'UP' || r.forceNextCandleDir   === 'DOWN' ? r.forceNextCandleDir   : null
       out.set(r.assetId, {
         assetId:          r.assetId,
         snapshotVersion:  r.snapshotVersion,
@@ -76,6 +93,11 @@ export async function loadSnapshots(assetIds: string[]): Promise<Map<string, Eng
         trendBias:        r.trendBias,
         lastTickTime:     r.lastTickTime,
         lastCandleTime:   r.lastCandleTime,
+        m1DirectionStreak:    r.m1DirectionStreak ?? 0,
+        m1LastDirection:      m1Last,
+        forceReverseUntilAt:  r.forceReverseUntilAt,
+        forceReverseDir:      frDir,
+        forceNextCandleDir:   fncDir,
         updatedAt:        r.updatedAt,
       })
     }
@@ -112,6 +134,11 @@ export async function flushSnapshot(): Promise<void> {
       ${s.volume}, ${s.depth}, ${s.speed}, ${s.trendBias},
       ${s.lastTickAt ? new Date(s.lastTickAt) : null},
       ${s.lastCandleAt ? new Date(s.lastCandleAt) : null},
+      ${s.m1DirectionStreak ?? 0},
+      ${s.m1LastDirection ?? null},
+      ${s.forceReverseUntilMs ? new Date(s.forceReverseUntilMs) : null},
+      ${s.forceReverseDir ?? null},
+      ${s.forceNextCandleDir ?? null},
       NOW()
     )`)
     await prisma.$executeRaw`
@@ -121,7 +148,10 @@ export async function flushSnapshot(): Promise<void> {
         regime, "regimeStartedAt", "regimeDurationMs",
         spread, "buyPressure", "sellPressure",
         volume, depth, speed, "trendBias",
-        "lastTickTime", "lastCandleTime", "updatedAt"
+        "lastTickTime", "lastCandleTime",
+        "m1DirectionStreak", "m1LastDirection",
+        "forceReverseUntilAt", "forceReverseDir", "forceNextCandleDir",
+        "updatedAt"
       ) VALUES ${Prisma.join(values, ', ')}
       ON CONFLICT ("assetId") DO UPDATE SET
         "snapshotVersion"  = EXCLUDED."snapshotVersion",
@@ -139,6 +169,11 @@ export async function flushSnapshot(): Promise<void> {
         "trendBias"        = EXCLUDED."trendBias",
         "lastTickTime"     = EXCLUDED."lastTickTime",
         "lastCandleTime"   = EXCLUDED."lastCandleTime",
+        "m1DirectionStreak"   = EXCLUDED."m1DirectionStreak",
+        "m1LastDirection"     = EXCLUDED."m1LastDirection",
+        "forceReverseUntilAt" = EXCLUDED."forceReverseUntilAt",
+        "forceReverseDir"     = EXCLUDED."forceReverseDir",
+        "forceNextCandleDir"  = EXCLUDED."forceNextCandleDir",
         "updatedAt"        = NOW()
     `
   } catch (err) {

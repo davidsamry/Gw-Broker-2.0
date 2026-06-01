@@ -202,6 +202,51 @@ export function startAssetLoop(assetId: string): void {
       })
 
       if (finalized) {
+        // ── HARD-FORCE de direcao na vela M1 finalizada ──────────────────
+        // 2026-06-01: quando o streak de 5 velas iguais bate o cap, o
+        // runtime arma forceNextCandleDir. O drift contrario (force-reverse)
+        // tenta puxar a vela pra direcao oposta durante os 60s, mas pode
+        // falhar se houver shock dominante. Como ultimo recurso, manipulamos
+        // o close DIRETAMENTE aqui — garantia deterministica de que a 6a
+        // vela NUNCA fecha igual aos 5 anteriores. So' aplica em M1
+        // (timeframe=60s); velas menores (5s/15s/30s) ticam natural.
+        if (
+          cb.timeframe === M1_TIMEFRAME_SEC &&
+          s.forceNextCandleDir
+        ) {
+          const wantUp   = s.forceNextCandleDir === 'UP'
+          const wantDown = s.forceNextCandleDir === 'DOWN'
+          const actualUp = finalized.close > finalized.open
+          const actualDn = finalized.close < finalized.open
+          const wrongDir =
+            (wantUp   && !actualUp)   ||  // pediu UP mas fechou DOWN ou doji
+            (wantDown && !actualDn)       // pediu DOWN mas fechou UP ou doji
+
+          if (wrongDir) {
+            // Force o close pra ficar visivelmente do lado certo do open.
+            // Magnitude: 0.05% do open — pequeno o suficiente pra nao
+            // parecer um spike artificial, grande o suficiente pra
+            // produzir um corpo de vela claro.
+            const NUDGE_PCT = 0.0005
+            const newClose = wantUp
+              ? finalized.open * (1 + NUDGE_PCT)
+              : finalized.open * (1 - NUDGE_PCT)
+            // Preserva consistencia OHLC: high >= max(open, close), low <= min(open, close).
+            const newHigh = Math.max(finalized.high, newClose, finalized.open)
+            const newLow  = Math.min(finalized.low,  newClose, finalized.open)
+            finalized.close = newClose
+            finalized.high  = newHigh
+            finalized.low   = newLow
+            // Sync com o preco runtime — proxima vela abre proximo do close
+            // manipulado, evitando "gap" visual entre velas.
+            s.price         = newClose
+            s.smoothedPrice = newClose
+            console.log(`[m1-rule] hard-force ${s.forceNextCandleDir} on ${assetId} (was ${actualUp ? 'UP' : actualDn ? 'DOWN' : 'DOJI'})`)
+          }
+          // Consome a flag — a proxima vela e' livre.
+          s.forceNextCandleDir = undefined
+        }
+
         pendingCandles.push(finalized)
         otcCandlesFinalizedTotal.inc({ assetId, timeframe: String(cb.timeframe) })
         // Track the most-recent finalized candle's openTime for the snapshot.
@@ -233,17 +278,27 @@ export function startAssetLoop(assetId: string): void {
           } else if (dir === s.m1LastDirection) {
             s.m1DirectionStreak = (s.m1DirectionStreak ?? 1) + 1
             if (s.m1DirectionStreak >= MAX_M1_SAME_DIRECTION) {
+              // 2026-06-01: NAO zerar o counter aqui (era o bug que
+              // permitia 6+ velas seguidas iguais). Antes: counter
+              // zerava ao armar force-reverse e, se a vela 6 ainda
+              // fechasse na mesma direcao (drift insuficiente, shock
+              // grande), o counter recomecava do 1 — usuario via 10+
+              // velas iguais ate' o proximo trigger. Agora: counter
+              // continua aumentando, force-reverse e' re-armado a cada
+              // vela ate' UMA vela na direcao oposta finalmente fechar.
               s.forceReverseUntilMs = Date.now() + FORCE_REVERSE_DURATION_MS
               s.forceReverseDir     = dir
-              // Reset so the reversal doesn't re-trigger every subsequent
-              // candle — let the streak rebuild naturally if the trend
-              // resumes after the forced window expires.
-              s.m1DirectionStreak = 0
-              s.m1LastDirection   = undefined
+              // Hard-force flag — manipulation.ts vai forcar o close
+              // da proxima vela M1 na direcao oposta (nao confia so' no
+              // drift estatistico, que pode ser dominado por shocks).
+              s.forceNextCandleDir = dir === 'UP' ? 'DOWN' : 'UP'
             }
           } else {
             s.m1DirectionStreak = 1
             s.m1LastDirection   = dir
+            // Force-reverse e' "consumido" — a vela oposta finalmente
+            // fechou. Limpa pra evitar override duplo no proximo ciclo.
+            s.forceNextCandleDir = undefined
           }
         }
       }

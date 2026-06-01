@@ -59,11 +59,15 @@ const COUNTER_TREND_SPIKE_PROB = 0.7
 const LIQUIDITY_BIAS_WEIGHT    = 1.0
 
 // Force-reversal drift (per tick) applied when the runtime detects
-// 5+ consecutive same-direction M1 candles. Set to 1.33× the STRONG
-// regime drift (0.000015) so it reliably overrides ANY regime — even
-// if the engine is in TREND_UP_STRONG and decides to keep pulling up,
-// the counter-bias dominates. 0.00002/tick = ~1.2%/min counter-drift.
-const FORCE_REVERSE_DRIFT_PER_TICK = 0.00002
+// 5+ consecutive same-direction M1 candles.
+//
+// 2026-06-01: bumped 0.00002 → 0.00006 (3×). O valor anterior (1.2%/min)
+// era 6× o drift natural do TREND_UP_STRONG (0.6%/min) — dominava em
+// regimes calmos mas podia ser sobrecarregado por SHOCK individual num
+// regime HIGH_VOL (shock pode ser ±0.1% a 0.5% num unico tick). Com
+// 0.00006 (3.6%/min de pull) o force domina ate' HIGH_VOL sem virar
+// um spike artificial visivel.
+const FORCE_REVERSE_DRIFT_PER_TICK = 0.00006
 
 // Session-based volatility multiplier — rough approximation of real
 // market activity windows. Helps the chart "feel" different at

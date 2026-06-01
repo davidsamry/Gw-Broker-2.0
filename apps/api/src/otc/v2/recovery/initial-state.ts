@@ -68,6 +68,14 @@ export function buildInitialState(
           trendBias:        snapshot.trendBias,
           lastTickAt:       snapshot.lastTickTime?.getTime(),
           lastCandleAt:     snapshot.lastCandleTime?.getTime(),
+          // 2026-06-01: persist M1 streak state pra continuar a regra
+          // de "max 5 velas iguais" atravessando restart. Sem isso, o
+          // counter zerava e o sistema podia perder a contagem.
+          m1DirectionStreak:   snapshot.m1DirectionStreak ?? 0,
+          m1LastDirection:     snapshot.m1LastDirection ?? undefined,
+          forceReverseUntilMs: snapshot.forceReverseUntilAt?.getTime(),
+          forceReverseDir:     snapshot.forceReverseDir ?? undefined,
+          forceNextCandleDir:  snapshot.forceNextCandleDir ?? undefined,
         },
         source:                'snapshot',
         lastTickAt:            snapshot.lastTickTime ?? latestTick?.recordedAt ?? null,

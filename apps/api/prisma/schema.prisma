@@ -642,6 +642,14 @@ model OtcEngineSnapshot {
   trendBias        Float    @default(0)
   lastTickTime     DateTime? @db.Timestamptz(3)
   lastCandleTime   DateTime? @db.Timestamptz(3)
+  // M1 streak tracking — persiste o cap "max 5 velas iguais" entre
+  // restarts. Sem isso o counter zerava no boot e a regra podia falhar
+  // se o engine reiniciasse no meio de um streak.
+  m1DirectionStreak  Int       @default(0)
+  m1LastDirection    String?   // 'UP' | 'DOWN'
+  forceReverseUntilAt DateTime? @db.Timestamptz(3)   // quando o force-reverse expira
+  forceReverseDir    String?   // 'UP' | 'DOWN' — direcao que estamos puxando AWAY FROM
+  forceNextCandleDir String?   // 'UP' | 'DOWN' — hard-force da proxima vela M1
   updatedAt        DateTime  @default(now()) @db.Timestamptz(3)
 
   asset            OtcAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
