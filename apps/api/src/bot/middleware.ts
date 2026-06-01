@@ -11,11 +11,13 @@ import type { FastifyRequest, FastifyReply } from 'fastify'
 import { prisma } from '../prisma.js'
 
 export interface BotAuthUser {
-  id:        string
-  email:     string
-  name:      string
-  blocked:   boolean
-  kycStatus: string
+  id:             string
+  email:          string
+  name:           string
+  blocked:        boolean
+  kycStatus:      string
+  canTradeOtc:    boolean
+  canTradeCrypto: boolean
 }
 
 declare module 'fastify' {
@@ -40,7 +42,10 @@ export async function botAuthenticate(req: FastifyRequest, reply: FastifyReply) 
 
   const user = await prisma.user.findUnique({
     where:  { id: payload.sub },
-    select: { id: true, email: true, name: true, blocked: true, kycStatus: true },
+    select: {
+      id: true, email: true, name: true, blocked: true, kycStatus: true,
+      canTradeOtc: true, canTradeCrypto: true,
+    },
   })
   if (!user) {
     return reply.status(401).send({ error: 'UNAUTHORIZED' })

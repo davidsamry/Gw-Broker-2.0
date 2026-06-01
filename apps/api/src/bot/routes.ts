@@ -232,13 +232,21 @@ export async function botRoutes(app: FastifyInstance) {
   })
 
   // GET /assets — Binance catalog + OTC catalog, in that order. Both
-  // sources apply admin enable/disable so a bot only sees what's tradable.
-  app.get('/assets', { preHandler: [botAuthenticate] }, async (_req, reply) => {
+  // sources aplicam admin enable/disable + as permissoes do user
+  // (canTradeOtc / canTradeCrypto). 2026-06-01: filtro per-user adicionado
+  // — bot com canTradeCrypto=false NAO ve' os Binance assets na resposta
+  // (era stub: backend rejeitava no /trade, mas o bot ainda tentava).
+  app.get('/assets', { preHandler: [botAuthenticate] }, async (req, reply) => {
+    const u = req.botUser as BotAuthUser
     const [binance, otc] = await Promise.all([
       listBinanceAssets(),
       loadOtcAssetsAsAssetShape(),
     ])
-    return reply.send({ assets: [...binance.map(mapAsset), ...otc.map(mapAsset)] })
+    const assets = [
+      ...(u.canTradeCrypto ? binance.map(mapAsset) : []),  // Binance = crypto BTC/ETH/etc
+      ...(u.canTradeOtc    ? otc.map(mapAsset)    : []),
+    ]
+    return reply.send({ assets })
   })
 
   // POST /trade — open an operation against the REAL account
