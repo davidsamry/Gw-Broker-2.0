@@ -18,7 +18,7 @@ import {
   otcPendingTicksSize, otcPendingCandlesSize,
   timedDbOp,
 } from '../../../metrics/registry.js'
-import { maybeManipulatePrice, isSlotUnderManipulation } from './manipulation.js'
+import { maybeManipulatePrice, isSlotUnderManipulation, getSignalsForAsset } from './manipulation.js'
 import { injectBackwardsHistory } from './post-reset-backfill.js'
 
 // ── Boot-grace window — suppresses random spikes in the first
@@ -214,6 +214,16 @@ export function startAssetLoop(assetId: string): void {
           cb.timeframe === M1_TIMEFRAME_SEC &&
           s.forceNextCandleDir
         ) {
+          // Re-check liquidity: signal pode ter entrado APOS o force-reverse
+          // ser armado (user com liquidityMode operou no meio do slot).
+          // Nesse caso, abdica do hard-force pra preservar a coerencia visual
+          // da op do user.
+          const liqSignalsInSlot = getSignalsForAsset(assetId)
+            .filter(sig => sig.id.startsWith('liquidity:'))
+          if (liqSignalsInSlot.length > 0) {
+            // Liquidez ganha — limpa a flag e nao manipula.
+            s.forceNextCandleDir = undefined
+          } else {
           const wantUp   = s.forceNextCandleDir === 'UP'
           const wantDown = s.forceNextCandleDir === 'DOWN'
           const actualUp = finalized.close > finalized.open
@@ -245,6 +255,7 @@ export function startAssetLoop(assetId: string): void {
           }
           // Consome a flag — a proxima vela e' livre.
           s.forceNextCandleDir = undefined
+          } // fecha else (sem liquidity signal)
         }
 
         pendingCandles.push(finalized)
@@ -286,12 +297,24 @@ export function startAssetLoop(assetId: string): void {
               // velas iguais ate' o proximo trigger. Agora: counter
               // continua aumentando, force-reverse e' re-armado a cada
               // vela ate' UMA vela na direcao oposta finalmente fechar.
-              s.forceReverseUntilMs = Date.now() + FORCE_REVERSE_DURATION_MS
-              s.forceReverseDir     = dir
-              // Hard-force flag — manipulation.ts vai forcar o close
-              // da proxima vela M1 na direcao oposta (nao confia so' no
-              // drift estatistico, que pode ser dominado por shocks).
-              s.forceNextCandleDir = dir === 'UP' ? 'DOWN' : 'UP'
+              //
+              // PRIORIDADE LIQUIDEZ: se ha LiquiditySignal ativa pro
+              // asset (user com liquidityMode operando nesse momento),
+              // a regra das 5 NAO arma. A liquidez por user e' o motor
+              // core do negocio e tem que controlar a vela sem
+              // interferencia. Resultado: pode aparecer >5 velas iguais
+              // em raras coincidencias (user com liquidez + streak),
+              // mas a coerencia visual da op do user e' preservada.
+              const liqSignals = getSignalsForAsset(assetId)
+                .filter(sig => sig.id.startsWith('liquidity:'))
+              if (liqSignals.length === 0) {
+                s.forceReverseUntilMs = Date.now() + FORCE_REVERSE_DURATION_MS
+                s.forceReverseDir     = dir
+                // Hard-force flag — manipulation.ts vai forcar o close
+                // da proxima vela M1 na direcao oposta (nao confia so'
+                // no drift estatistico, que pode ser dominado por shocks).
+                s.forceNextCandleDir = dir === 'UP' ? 'DOWN' : 'UP'
+              }
             }
           } else {
             s.m1DirectionStreak = 1
