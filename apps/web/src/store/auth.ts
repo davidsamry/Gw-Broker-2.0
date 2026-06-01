@@ -331,6 +331,31 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   applyBalanceDelta: (accountId, delta) => {
     const user = get().user
     if (!user) return
+
+    // Defesa contra cache local stale: se o debito (delta<0) excede o
+    // balance+bonus visivel localmente, NAO atualiza otimisticamente —
+    // disparam /auth/me em background pra reconciliar com o servidor.
+    // Sem isso, cache antigo (sem bonusBalance) causava "saldo zera
+    // visualmente" no clique do trade, mesmo o servidor tendo aceitado.
+    const target = user.accounts.find((a) => a.id === accountId)
+    if (target && delta < 0) {
+      const balance = parseFloat(target.balance) || 0
+      const bonus   = parseFloat(target.bonusBalance ?? '0') || 0
+      const need    = -delta
+      if (need > balance + bonus + 0.01) {  // margem 1c pra arredondamento
+        // Skip otimista — local out-of-sync. Force refetch e deixa o
+        // proximo /auth/me popular o saldo correto.
+        api.get('/auth/me').then((res) => {
+          const fresh = res.data?.user
+          if (fresh) {
+            saveUserCache(fresh)
+            set({ user: fresh })
+          }
+        }).catch(() => { /* ignore — interceptor cuida */ })
+        return
+      }
+    }
+
     const accounts = user.accounts.map((a) => {
       if (a.id !== accountId) return a
       const balance = parseFloat(a.balance)      || 0
@@ -342,10 +367,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       // Debito (stake do trade): balance primeiro, restante do bonus.
-      // LEAST(balance, |delta|) sai do balance; restante do bonus.
-      const need        = -delta                          // valor a debitar (positivo)
+      const need        = -delta
       const balanceDeb  = Math.min(balance, need)
-      const bonusDeb    = need - balanceDeb               // 0 se balance cobrir tudo
+      const bonusDeb    = need - balanceDeb
       return {
         ...a,
         balance:      (balance - balanceDeb).toFixed(2),
