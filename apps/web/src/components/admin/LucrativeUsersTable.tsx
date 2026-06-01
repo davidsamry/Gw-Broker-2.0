@@ -6,13 +6,15 @@ import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
 
 export interface LucrativeUserRow {
-  id:            string
-  name:          string
-  email:         string
-  deposited:     number
-  profit:        number
-  netProfit:     number
-  liquidityMode: boolean
+  id:             string
+  name:           string
+  email:          string
+  deposited:      number
+  profit:         number
+  netProfit:      number
+  liquidityMode:  boolean
+  canTradeOtc:    boolean
+  canTradeCrypto: boolean
 }
 
 interface Props {
@@ -108,9 +110,9 @@ export function LucrativeUsersTable({ rows, total }: Props) {
                       Dep: <span className="text-white">R$ {formatBRL(row.deposited)}</span>
                     </span>
                     <div className="flex items-center gap-3 whitespace-nowrap">
-                      <LiquidityToggle userId={row.id} initial={row.liquidityMode} />
-                      <MarketToggle label="OTC"    on={true}  />
-                      <MarketToggle label="Crypto" on={false} />
+                      <ToggleAction label="Liquidez" userId={row.id} initial={row.liquidityMode}  field="liquidityMode"  hint="Ativa motor de liquidez forcada (7L+3W)" />
+                      <ToggleAction label="OTC"      userId={row.id} initial={row.canTradeOtc}    field="canTradeOtc"    hint="Permite operar nos OTC (Gold, EUR/USD OTC, etc)" />
+                      <ToggleAction label="Crypto"   userId={row.id} initial={row.canTradeCrypto} field="canTradeCrypto" hint="Permite operar em crypto (BTC/USDT, ETH/USDT, etc)" />
                     </div>
                   </div>
                 </div>
@@ -168,12 +170,20 @@ function RankBadge({ rank }: { rank: number }) {
   )
 }
 
-// Toggle inline pro modo Liquidez do user. Chama PATCH /admin/users/:id
-// com { liquidityMode } e mantem o estado otimisticamente. Se a request
-// falha, reverte. Loading state desabilita o click pra evitar double-fire.
-function LiquidityToggle({ userId, initial }: { userId: string; initial: boolean }) {
-  const [on, setOn]       = useState(initial)
-  const [busy, setBusy]   = useState(false)
+// Toggle inline generico — Liquidez, OTC, Crypto. Chama PATCH /admin/users/:id
+// com o field correspondente e mantem o estado otimisticamente; se falha,
+// reverte. Loading state desabilita o click pra evitar double-fire.
+function ToggleAction({
+  label, userId, initial, field, hint,
+}: {
+  label:   string
+  userId:  string
+  initial: boolean
+  field:   'liquidityMode' | 'canTradeOtc' | 'canTradeCrypto'
+  hint?:   string
+}) {
+  const [on, setOn]     = useState(initial)
+  const [busy, setBusy] = useState(false)
 
   async function toggle() {
     if (busy) return
@@ -181,7 +191,7 @@ function LiquidityToggle({ userId, initial }: { userId: string; initial: boolean
     setBusy(true)
     setOn(next)  // otimista
     try {
-      await api.patch(`/admin/users/${userId}`, { liquidityMode: next })
+      await api.patch(`/admin/users/${userId}`, { [field]: next })
     } catch {
       setOn(!next)  // reverte
     } finally {
@@ -198,32 +208,15 @@ function LiquidityToggle({ userId, initial }: { userId: string; initial: boolean
         'flex items-center gap-1.5 select-none',
         busy ? 'opacity-50 cursor-default' : 'cursor-pointer',
       )}
-      title={on ? 'Liquidez ATIVA — proximas ops desse user passam pelo motor' : 'Ativar liquidez forcada'}
+      title={hint ?? (on ? `${label} ATIVO` : `Ativar ${label}`)}
     >
-      <span className="text-[#8b8f9a]">Liquidez</span>
+      <span className="text-[#8b8f9a]">{label}</span>
       <span className={cn(
         'relative w-7 h-3.5 rounded-full transition-colors',
         on ? 'bg-emerald-500' : 'bg-[#1f232e]'
       )}>
         {/* left explicito pra evitar drift de translate-x. Bolinha 10px num
             track de 28px: off=left-0.5 (2px), on=left-[16px] (28-10-2). */}
-        <span className={cn(
-          'absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-all',
-          on ? 'left-[16px]' : 'left-0.5'
-        )} />
-      </span>
-    </div>
-  )
-}
-
-function MarketToggle({ label, on }: { label: string; on: boolean }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[#8b8f9a]">{label}</span>
-      <span className={cn(
-        'relative w-7 h-3.5 rounded-full transition-colors',
-        on ? 'bg-emerald-500' : 'bg-[#1f232e]'
-      )}>
         <span className={cn(
           'absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-all',
           on ? 'left-[16px]' : 'left-0.5'

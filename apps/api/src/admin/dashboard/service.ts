@@ -37,10 +37,13 @@ export interface LucrativeUser {
   deposited: number
   profit:    number
   netProfit: number
-  // Flag pro toggle "Liquidez" inline na tabela admin. Quando true, as
-  // proximas operacoes desse user passam pelo motor de liquidez forcada
-  // (apps/api/src/operations/liquidityManipulation.ts).
-  liquidityMode: boolean
+  // Flags pros toggles inline na tabela admin.
+  // - liquidityMode: ativa motor de liquidez forcada (7L+3W cycle)
+  // - canTradeOtc:   permite operar nos OTC (Gold, EUR/USD OTC, etc)
+  // - canTradeCrypto: permite operar em crypto Binance (BTC/USDT, etc)
+  liquidityMode:  boolean
+  canTradeOtc:    boolean
+  canTradeCrypto: boolean
 }
 
 export interface DashboardResponse {
@@ -168,16 +171,21 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
     //
     // Fake users excluidos pra staged accounts nao aparecerem.
     prisma.$queryRaw<Array<{
-      id:             string
-      name:           string
-      email:          string
-      deposited:      any
-      profit:         any
-      net_profit:     any
-      liquidity_mode: boolean
+      id:               string
+      name:             string
+      email:            string
+      deposited:        any
+      profit:           any
+      net_profit:       any
+      liquidity_mode:   boolean
+      can_trade_otc:    boolean
+      can_trade_crypto: boolean
     }>>`
       SELECT
-        u.id, u.name, u.email, u."liquidityMode" AS liquidity_mode,
+        u.id, u.name, u.email,
+        u."liquidityMode"  AS liquidity_mode,
+        u."canTradeOtc"    AS can_trade_otc,
+        u."canTradeCrypto" AS can_trade_crypto,
         COALESCE(SUM(CASE WHEN t.type = 'DEPOSIT'::"TransactionType"   THEN t.amount END), 0) AS deposited,
         COALESCE(SUM(CASE WHEN t.type = 'TRADE_WIN'::"TransactionType" THEN t.amount END), 0) AS profit,
         COALESCE(MAX(a.balance), 0) -
@@ -186,7 +194,7 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
       LEFT JOIN accounts a     ON a."userId" = u.id AND a.type = 'REAL'::"AccountType"
       LEFT JOIN transactions t ON t."accountId" = a.id
       WHERE u.role = 'USER'::"UserRole" AND u."isFake" = false
-      GROUP BY u.id, u.name, u.email, u."liquidityMode"
+      GROUP BY u.id, u.name, u.email, u."liquidityMode", u."canTradeOtc", u."canTradeCrypto"
       HAVING
         COALESCE(MAX(a.balance), 0) -
         COALESCE(SUM(CASE WHEN t.type = 'DEPOSIT'::"TransactionType"   THEN t.amount END), 0) > 0
@@ -221,13 +229,15 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
   const last7days = days.map((d) => ({ date: d, ...dailyMap.get(d)! }))
 
   const lucrativeUsers: LucrativeUser[] = lucrativeRaw.map((r) => ({
-    id:            r.id,
-    name:          r.name,
-    email:         r.email,
-    deposited:     decimalToNumber(r.deposited),
-    profit:        decimalToNumber(r.profit),
-    netProfit:     decimalToNumber(r.net_profit),
-    liquidityMode: !!r.liquidity_mode,
+    id:             r.id,
+    name:           r.name,
+    email:          r.email,
+    deposited:      decimalToNumber(r.deposited),
+    profit:         decimalToNumber(r.profit),
+    netProfit:      decimalToNumber(r.net_profit),
+    liquidityMode:  !!r.liquidity_mode,
+    canTradeOtc:    !!r.can_trade_otc,
+    canTradeCrypto: !!r.can_trade_crypto,
   }))
 
   return {
