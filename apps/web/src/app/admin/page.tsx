@@ -9,7 +9,6 @@ import {
 } from 'lucide-react'
 import { KpiCard } from '@/components/admin/KpiCard'
 import { PeriodFilter, rangeFromPreset, type PeriodPreset } from '@/components/admin/PeriodFilter'
-import { AreaChart } from '@/components/admin/charts/AreaChart'
 import { LucrativeUsersTable, type LucrativeUserRow } from '@/components/admin/LucrativeUsersTable'
 import { api } from '@/lib/api'
 
@@ -127,48 +126,16 @@ export default function AdminDashboardPage() {
         <KpiCard label="Resultado Plataforma" value={`R$ ${fmtBRL(data?.kpis.platformNetResult ?? 0)}`} hint="Ganhos - Perdas" icon={<ArrowUpRight size={14} />} tone="bg-emerald-500/15 text-emerald-400" valueTone={data && data.kpis.platformNetResult >= 0 ? 'text-emerald-400' : 'text-red-400'} />
       </div>
 
-      {/* Charts: area chart + financial summary side-by-side.
-          2026-06-01: removidos cards "Distribuição de Resultados" (donut)
-          e "Quantidade de Operações" (bar horizontal) — admin pediu pra
-          limpar dados redundantes. Os numeros ja' aparecem nos KPIs acima
-          (Ganhos/Perdas Plataforma) e o que sobra (last7days + financeiro)
-          e' o que de fato adiciona contexto historico. */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-5">
-        <div className="bg-[#13161f] border border-[#1f232e] rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp size={14} className="text-emerald-400" />
-            <h3 className="text-sm font-bold text-white">Desempenho dos Últimos 7 Dias</h3>
-          </div>
-          <AreaChart data={data?.charts.last7days ?? []} />
-        </div>
-        <div className="bg-[#13161f] border border-[#1f232e] rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Wallet size={14} className="text-emerald-400" />
-            <h3 className="text-sm font-bold text-white">Resumo Financeiro</h3>
-          </div>
-          <div className="flex flex-col gap-2.5">
-            <FinancialRow label="Entradas (Depósitos)" value={`R$ ${fmtBRL(data?.kpis.totalDeposits        ?? 0)}`} tone="text-emerald-400" />
-            <FinancialRow label="Saídas (Saques)"      value={`R$ ${fmtBRL(data?.kpis.totalWithdrawals     ?? 0)}`} tone="text-red-400" />
-            <FinancialRow label="Saldo em Contas"      value={`R$ ${fmtBRL(data?.kpis.userBalancePlusBonus ?? 0)}`} tone="text-blue-400" />
-            <FinancialRow label="Lucro da Plataforma"  value={`R$ ${fmtBRL(data?.kpis.platformNetResult    ?? 0)}`} tone={data && data.kpis.platformNetResult >= 0 ? 'text-emerald-400' : 'text-red-400'} />
-          </div>
-        </div>
-      </div>
+      {/* 2026-06-01: charts intermediarios todos removidos por pedido do
+          admin (Distribuicao, Qtd Operacoes, Desempenho 7 Dias, Resumo
+          Financeiro). Dados ja' cobertos pelos KPIs no topo. Sobra a
+          tabela de Usuarios Lucrativos abaixo. */}
 
       {/* Lucrative users table */}
       <LucrativeUsersTable
         rows={data?.lucrativeUsers ?? []}
         total={data?.lucrativeCount ?? 0}
       />
-    </div>
-  )
-}
-
-function FinancialRow({ label, value, tone }: { label: string; value: string; tone: string }) {
-  return (
-    <div className="flex items-center justify-between px-4 py-3 rounded-lg bg-[#0f1117] border border-[#1f232e]">
-      <span className="text-xs text-[#8b8f9a]">{label}</span>
-      <span className={`text-sm font-bold ${tone}`}>{value}</span>
     </div>
   )
 }
