@@ -7,11 +7,20 @@ export async function listAccounts(userId: string) {
     where:   { userId },
     orderBy: { type: 'asc' },
   })
+  // IMPORTANTE: payload tem que bater com o que /auth/me sanitizeUser
+  // retorna. Quando o frontend chama refreshAccounts() apos um SSE de
+  // trade, ele faz set({user: {...user, accounts: data.accounts}}) — se
+  // este endpoint NAO incluir bonusBalance/rollover*, esses campos somem
+  // do user.accounts e o display zera o saldo do bonus. Bug visivel:
+  // "saldo todo zera ao clicar em operar" — investigado 2026-05-31.
   return accounts.map((a) => ({
-    id:       a.id,
-    type:     a.type,
-    balance:  a.balance.toString(),
-    currency: a.currency,
+    id:               a.id,
+    type:             a.type,
+    balance:          a.balance.toString(),
+    currency:         a.currency,
+    bonusBalance:     a.bonusBalance.toString(),
+    rolloverRequired: a.rolloverRequired.toString(),
+    rolloverProgress: a.rolloverProgress.toString(),
   }))
 }
 
