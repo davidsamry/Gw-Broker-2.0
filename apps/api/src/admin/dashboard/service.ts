@@ -154,11 +154,10 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
     // depositou.
     //
     // 2026-06-01: revisao do calculo (admin reclamou que estava inflado).
-    //   Lucro Liquido = (balance + bonusBalance) - SUM(DEPOSIT)
-    // Antes era SUM(TRADE_WIN) - SUM(DEPOSIT), o que IGNORAVA as perdas e
-    // mostrava users com R$ 6k de "lucro" quando tinham na real R$ 50 na
-    // conta. O calculo novo bate exatamente com o saldo atual do user —
-    // se ele tem R$ 6k visivel, e' porque ele LUCROU R$ 6k de fato.
+    //   Lucro Liquido = balance - SUM(DEPOSIT)
+    // Bonus NAO entra na conta — bonus e' dinheiro da plataforma com
+    // rollover pendente, nao lucro real do user. So' o balance principal
+    // (sacavel) conta como "ganho de verdade".
     //
     // "Lucro Total" mantido como SUM(TRADE_WIN) pro admin ver o giro
     // bruto de wins (util pra ver quem opera muito vs. lucra muito).
@@ -176,7 +175,7 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
         u.id, u.name, u.email,
         COALESCE(SUM(CASE WHEN t.type = 'DEPOSIT'::"TransactionType"   THEN t.amount END), 0) AS deposited,
         COALESCE(SUM(CASE WHEN t.type = 'TRADE_WIN'::"TransactionType" THEN t.amount END), 0) AS profit,
-        COALESCE(MAX(a.balance + a."bonusBalance"), 0) -
+        COALESCE(MAX(a.balance), 0) -
         COALESCE(SUM(CASE WHEN t.type = 'DEPOSIT'::"TransactionType"   THEN t.amount END), 0) AS net_profit
       FROM users u
       LEFT JOIN accounts a     ON a."userId" = u.id AND a.type = 'REAL'::"AccountType"
@@ -184,7 +183,7 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
       WHERE u.role = 'USER'::"UserRole" AND u."isFake" = false
       GROUP BY u.id, u.name, u.email
       HAVING
-        COALESCE(MAX(a.balance + a."bonusBalance"), 0) -
+        COALESCE(MAX(a.balance), 0) -
         COALESCE(SUM(CASE WHEN t.type = 'DEPOSIT'::"TransactionType"   THEN t.amount END), 0) > 0
       ORDER BY net_profit DESC
       LIMIT 50
