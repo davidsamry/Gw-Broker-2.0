@@ -90,7 +90,13 @@ function LoginPageInner() {
     setLoading(true)
     try {
       await login(email, password, twoFA ? code : undefined)
-      router.replace('/')
+      // ?next=/admin/foo permite que o AdminGuard (admin tentando acessar
+      // /admin/* deslogado) mande direto pra rota desejada — apos logar
+      // como user, o admin segue pra /admin/login que faz o step-up 2FA.
+      // Sanitiza: so' aceita paths que comecam com /, evitando open-redirect.
+      const nextRaw = searchParams?.get('next') ?? ''
+      const next    = nextRaw.startsWith('/') ? nextRaw : '/'
+      router.replace(next)
     } catch (err: any) {
       const errCode = err.response?.data?.error
       if (errCode === 'REQUIRES_2FA') {

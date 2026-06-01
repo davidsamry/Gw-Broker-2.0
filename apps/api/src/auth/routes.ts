@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { loginSchema, registerSchema, updateProfileSchema, twoFactorCodeSchema, kycSubmitSchema, changePasswordSchema } from './schema.js'
-import { changeUserPassword, getKycSubmission, getUserById, loginUser, registerUser, submitKyc, updateUserProfile } from './service.js'
+import { changeUserPassword, getKycSubmission, getUserById, loginUser, registerUser, submitKyc, updateUserProfile, verifyAdminStepUp } from './service.js'
 import { requestPasswordReset, resetPasswordWithToken } from './passwordReset.js'
 import { getSettings } from '../settings/service.js'
 import { listOperations } from '../operations/service.js'
@@ -96,6 +96,46 @@ export async function authRoutes(app: FastifyInstance) {
       if (err.message === 'INVALID_2FA_CODE') {
         return reply.status(401).send({ error: 'INVALID_2FA_CODE', requires2FA: true })
       }
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // ── Admin step-up 2FA ────────────────────────────────────────────────────
+  // 2026-06-01: 2FA agora protege ESPECIFICAMENTE o painel admin, nao o
+  // login. Admin loga em /auth/login so' com senha (vira "trader mode").
+  // Pra acessar /admin/*, faz step-up aqui: passa o code 2FA, recebe NOVO
+  // access token com claim adminAuth=true. O refresh cookie permanece o
+  // mesmo (mesma sessao). requireAdmin exige essa claim.
+  //
+  // Rate-limit conservador (5/15min) — protege contra brute-force do TOTP
+  // (10^6 combinacoes mas com janela curta + replay-protection do TOTP
+  // tornam isso ja' impraticavel; rate-limit e' belt-and-suspenders).
+  app.post('/admin-step-up', {
+    preHandler: (app as any).authenticate,
+    config: {
+      rateLimit: {
+        max:        5,
+        timeWindow: '15 minutes',
+        skipOnError: true,
+      },
+    },
+  }, async (req, reply) => {
+    const parsed = twoFactorCodeSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
+    }
+    const userId = (req as any).user?.sub as string | undefined
+    if (!userId) return reply.status(401).send({ error: 'UNAUTHORIZED' })
+
+    try {
+      await verifyAdminStepUp(userId, parsed.data.code)
+      const token = await issueTokens(app, reply, userId, { adminAuth: true })
+      return reply.send({ token })
+    } catch (err: any) {
+      if (err.message === 'NOT_ADMIN')              return reply.status(403).send({ error: 'NOT_ADMIN' })
+      if (err.message === 'TWO_FACTOR_NOT_ENABLED') return reply.status(400).send({ error: 'TWO_FACTOR_NOT_ENABLED' })
+      if (err.message === 'INVALID_2FA_CODE')       return reply.status(401).send({ error: 'INVALID_2FA_CODE' })
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }
@@ -345,8 +385,18 @@ export async function authRoutes(app: FastifyInstance) {
   })
 }
 
-async function issueTokens(app: FastifyInstance, reply: FastifyReply, userId: string) {
-  const accessToken  = await app.jwt.sign({ sub: userId })
+async function issueTokens(
+  app: FastifyInstance,
+  reply: FastifyReply,
+  userId: string,
+  opts: { adminAuth?: boolean } = {},
+) {
+  // adminAuth=true e' embutido na claim do JWT apenas apos o /auth/admin-step-up
+  // validar o codigo 2FA. requireAdmin verifica essa claim — sem ela, /admin/*
+  // retorna 403 STEP_UP_REQUIRED. Login normal (sem step-up) sempre emite
+  // token SEM essa claim, mesmo pra users com role=ADMIN.
+  const payload = opts.adminAuth ? { sub: userId, adminAuth: true } : { sub: userId }
+  const accessToken  = await app.jwt.sign(payload)
   const refreshToken = await (app.jwt as any).refresh.sign({ sub: userId })
 
   reply.setCookie(REFRESH_COOKIE, refreshToken, {

@@ -106,15 +106,47 @@ export async function loginUser(input: LoginInput) {
     throw new Error('ACCOUNT_BLOCKED')
   }
 
-  // Password OK. If 2FA is enabled, require + verify the code now.
-  // Non-2FA users skip this branch entirely → existing behavior preserved.
-  if (user.twoFactorEnabled) {
+  // 2026-06-01: Login normal (trader) NAO exige mais 2FA, mesmo pra admins.
+  // Admins precisam fazer step-up (POST /auth/admin-step-up) com o code 2FA
+  // pra obter um token marcado com adminAuth=true antes de acessar /admin/*.
+  // O requireAdmin decorator agora exige essa claim. Tokens antigos sem ela
+  // sao tratados como "trader mode" e bloqueados em rotas admin.
+  //
+  // Users normais com 2FA habilitado: comportamento mantido (exige code).
+  // So admins ganharam o "skip" — o 2FA deles agora protege ESPECIFICAMENTE
+  // o painel admin, nao o login da plataforma.
+  if (user.twoFactorEnabled && user.role !== 'ADMIN') {
     if (!input.code) throw new Error('REQUIRES_2FA')
     const valid = user.twoFactorSecret && verifyTotp(user.twoFactorSecret, input.code)
     if (!valid) throw new Error('INVALID_2FA_CODE')
   }
 
   return sanitizeUser(user)
+}
+
+/**
+ * Step-up authentication pro admin. Chamado depois do login normal:
+ * recebe o code 2FA e, se valido, retorna o "marker" pro caller (route
+ * handler) usar quando re-emitir o JWT com claim adminAuth=true.
+ *
+ * Throws:
+ *   NOT_ADMIN          — user nao tem role=ADMIN
+ *   TWO_FACTOR_NOT_ENABLED — admin sem 2FA configurado (deveria nao
+ *                            existir; AdminGuard manda pra setup-2fa)
+ *   INVALID_2FA_CODE   — code rejeitado pelo verifyTotp
+ */
+export async function verifyAdminStepUp(userId: string, code: string): Promise<void> {
+  const user = await prisma.user.findUnique({
+    where:  { id: userId },
+    select: { role: true, twoFactorEnabled: true, twoFactorSecret: true },
+  })
+  if (!user || user.role !== 'ADMIN') throw new Error('NOT_ADMIN')
+  if (!user.twoFactorEnabled || !user.twoFactorSecret) {
+    throw new Error('TWO_FACTOR_NOT_ENABLED')
+  }
+  if (!verifyTotp(user.twoFactorSecret, code)) {
+    throw new Error('INVALID_2FA_CODE')
+  }
 }
 
 export async function getUserById(userId: string) {

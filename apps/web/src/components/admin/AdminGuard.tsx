@@ -50,9 +50,10 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
     // Wait for auth init to finish.
     if (loading) return
 
-    // No user → redirect to admin login.
+    // No user → send to LOGIN normal (com next=current). Apos logar como
+    // admin, login redireciona pra /admin/login pra fazer o step-up 2FA.
     if (!user) {
-      router.replace('/admin/login')
+      router.replace(`/login?next=${encodeURIComponent(pathname)}`)
       return
     }
 
@@ -68,14 +69,24 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
       return
     }
 
-    // Authoritative server-side check.
+    // Authoritative server-side check. /admin/ping requer adminAuth=true
+    // no JWT (set pelo /auth/admin-step-up). Se retornar 403 STEP_UP_REQUIRED,
+    // mandamos pro /admin/login pra digitar o code 2FA.
     let cancelled = false
     api.get('/admin/ping')
       .then(() => { if (!cancelled) setVerified(true) })
-      .catch(() => { if (!cancelled) router.replace('/admin/login') })
+      .catch((err) => {
+        if (cancelled) return
+        const code = err?.response?.data?.error
+        if (code === 'STEP_UP_REQUIRED') {
+          router.replace('/admin/login')
+        } else {
+          router.replace(`/login?next=${encodeURIComponent(pathname)}`)
+        }
+      })
 
     return () => { cancelled = true }
-  }, [loading, user, router, isPublic])
+  }, [loading, user, router, isPublic, pathname])
 
   if (!verified) {
     return (

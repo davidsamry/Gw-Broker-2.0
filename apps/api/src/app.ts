@@ -131,6 +131,12 @@ export async function buildApp() {
   // role === ADMIN. We query the DB instead of stuffing the role into the
   // JWT so admin grants/revocations take effect immediately without waiting
   // for the access token to expire (15min).
+  //
+  // 2026-06-01: agora exige tambem a claim adminAuth=true (set pelo
+  // /auth/admin-step-up apos verificar o code 2FA). Tokens emitidos pelo
+  // login normal NAO tem essa claim — admin vira "trader mode" e precisa
+  // fazer step-up antes de acessar /admin/*. Retorna 403 STEP_UP_REQUIRED
+  // pra que o frontend (AdminGuard) redirecione automaticamente.
   app.decorate('requireAdmin', async (req: any, reply: any) => {
     try {
       await req.jwtVerify()
@@ -145,6 +151,9 @@ export async function buildApp() {
     })
     if (!user || user.role !== 'ADMIN') {
       return reply.status(403).send({ error: 'FORBIDDEN' })
+    }
+    if (req.user?.adminAuth !== true) {
+      return reply.status(403).send({ error: 'STEP_UP_REQUIRED' })
     }
   })
 
