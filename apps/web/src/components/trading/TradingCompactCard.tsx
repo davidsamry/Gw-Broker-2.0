@@ -53,12 +53,15 @@ export function TradingCompactCard({
     if (!accountId || placing) return
     setTradeError('')
 
-    // ── Pre-check balance ───────────────────────────────────────────────────
-    // Avoid the optimistic-debit / refund bounce when the server is going
-    // to refuse anyway. Show the error immediately, don't even POST.
-    const myAccount = useAuthStore.getState().user?.accounts.find((a) => a.id === accountId)
-    const balance   = parseFloat(myAccount?.balance ?? '0')
-    if (balance < investment) {
+    // ── Pre-check balance + bonus ───────────────────────────────────────────
+    // 2026-05-31: stake pode vir do saldo principal + bonus (backend faz o
+    // split: balance primeiro, restante do bonus). Validacao local checa
+    // a SOMA pra alinhar com a CTE do createOperation.
+    const myAccount  = useAuthStore.getState().user?.accounts.find((a) => a.id === accountId)
+    const balance    = parseFloat(myAccount?.balance ?? '0')
+    const bonusBal   = parseFloat(myAccount?.bonusBalance ?? '0')
+    const totalAvail = balance + bonusBal
+    if (totalAvail < investment) {
       setTradeError('Saldo insuficiente.')
       return
     }

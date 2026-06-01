@@ -114,10 +114,24 @@ export async function createOperation(userId: string, input: CreateOperationInpu
   const rows = await prisma.$queryRaw<Array<Record<string, unknown>>>`
     WITH
       valid AS (
-        SELECT id FROM accounts
+        -- 2026-05-31: stake pode vir do balance principal + bonusBalance.
+        -- Validacao verifica a SOMA — user com balance=50 e bonus=200
+        -- consegue operar R\$ 150 (50 do balance + 100 do bonus).
+        -- CHECK constraints (balance>=0, bonusBalance>=0) garantidos pelo
+        -- split abaixo (LEAST/GREATEST nunca cria valores negativos).
+        SELECT id, balance, "bonusBalance" FROM accounts
         WHERE id = ${input.accountId}
           AND "userId" = ${userId}
-          AND balance >= ${new Prisma.Decimal(input.amount)}
+          AND (balance + "bonusBalance") >= ${new Prisma.Decimal(input.amount)}
+      ),
+      split AS (
+        -- Distribui o stake: gasta balance primeiro, restante do bonus.
+        --   balance_debit = MIN(balance, amount)
+        --   bonus_debit   = MAX(amount - balance, 0)
+        SELECT id,
+               LEAST(balance, ${new Prisma.Decimal(input.amount)}::decimal) AS balance_debit,
+               GREATEST(${new Prisma.Decimal(input.amount)}::decimal - balance, 0::decimal) AS bonus_debit
+        FROM valid
       ),
       ins_op AS (
         INSERT INTO operations
@@ -131,18 +145,21 @@ export async function createOperation(userId: string, input: CreateOperationInpu
         RETURNING *
       ),
       upd_bal AS (
-        -- Debit stake + accumulate rollover progress on REAL accounts.
-        -- DEMO trades don't count toward the deposit rollover, otherwise
-        -- a user could spam demo trades to unlock real-money withdrawals.
-        UPDATE accounts
-        SET balance          = balance - ${new Prisma.Decimal(input.amount)},
+        -- Debit stake (balance + bonus split) + acumula rollover na REAL.
+        -- DEMO trades NAO contam pro rollover (anti bonus-farming).
+        -- rolloverProgress incrementa pelo amount TOTAL (independe da
+        -- fonte: usar bonus pra operar tambem conta como rollover legit).
+        UPDATE accounts a
+        SET balance        = a.balance        - sp.balance_debit,
+            "bonusBalance" = a."bonusBalance" - sp.bonus_debit,
             "rolloverProgress" = CASE
-              WHEN type = 'REAL'::"AccountType"
-                THEN "rolloverProgress" + ${new Prisma.Decimal(input.amount)}
-              ELSE "rolloverProgress"
+              WHEN a.type = 'REAL'::"AccountType"
+                THEN a."rolloverProgress" + ${new Prisma.Decimal(input.amount)}
+              ELSE a."rolloverProgress"
             END
-        WHERE id IN (SELECT id FROM valid)
-        RETURNING id
+        FROM split sp
+        WHERE a.id = sp.id
+        RETURNING a.id
       ),
       ins_tx AS (
         INSERT INTO transactions (id, "accountId", type, amount, description, "createdAt")

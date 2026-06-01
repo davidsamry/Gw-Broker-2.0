@@ -321,19 +321,34 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // so the UI updates instantly without paying a /accounts RTT. Server stays
   // the source of truth (next /auth/me revalidate reconciles any drift).
   //
-  // Honest math: NO clamp to zero. If the optimistic debit drives balance
-  // negative (rare cross-tab race), the next refund must end at the right
-  // value. A clamp here would silently swallow the debit, then the refund
-  // would add the stake back over the un-debited zero — making the visible
-  // balance grow when it should stay the same.
+  // 2026-05-31: SPLIT balance + bonus. Espelha a logica do backend
+  // (createOperation CTE): debita do balance principal primeiro, restante
+  // sai do bonus. Credits (win/refund/deposit) vao TODOS pro balance —
+  // user "promove" bonus pra saldo real ao ganhar com ele, ou no pior
+  // caso recupera valor no balance (refund leve a favor do user).
   applyBalanceDelta: (accountId, delta) => {
     const user = get().user
     if (!user) return
     const accounts = user.accounts.map((a) => {
       if (a.id !== accountId) return a
-      const current = parseFloat(a.balance) || 0
-      const next    = current + delta
-      return { ...a, balance: next.toFixed(2) }
+      const balance = parseFloat(a.balance)      || 0
+      const bonus   = parseFloat(a.bonusBalance ?? '0') || 0
+
+      if (delta >= 0) {
+        // Credito (win, refund, deposito) — tudo vai pro balance principal
+        return { ...a, balance: (balance + delta).toFixed(2) }
+      }
+
+      // Debito (stake do trade): balance primeiro, restante do bonus.
+      // LEAST(balance, |delta|) sai do balance; restante do bonus.
+      const need        = -delta                          // valor a debitar (positivo)
+      const balanceDeb  = Math.min(balance, need)
+      const bonusDeb    = need - balanceDeb               // 0 se balance cobrir tudo
+      return {
+        ...a,
+        balance:      (balance - balanceDeb).toFixed(2),
+        bonusBalance: Math.max(0, bonus - bonusDeb).toFixed(2),
+      }
     })
     const nextUser = { ...user, accounts }
     saveUserCache(nextUser)
