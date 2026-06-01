@@ -88,26 +88,51 @@ export function LucrativeUsersTable({ rows, total }: Props) {
             return (
               <div
                 key={row.id}
-                className="grid grid-cols-1 md:grid-cols-[40px_1fr_120px_120px_280px] gap-3 py-3 border-b border-[#1f232e]/60 items-center hover:bg-white/[0.02] transition-colors"
+                className="border-b border-[#1f232e]/60 hover:bg-white/[0.02] transition-colors"
               >
-                <RankBadge rank={rank} />
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-white truncate">{row.email || '—'}</div>
+                {/* Mobile layout (< md): 2 linhas compactas
+                    Linha 1: rank + email truncado + pill lucro liquido
+                    Linha 2: deposito + toggles */}
+                <div className="md:hidden flex flex-col gap-2 py-2.5 px-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <RankBadge rank={rank} />
+                    <div className="text-xs font-semibold text-white truncate flex-1 min-w-0">
+                      {row.email || '—'}
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-[10px] font-bold text-emerald-400 whitespace-nowrap flex-shrink-0">
+                      +R$ {formatBRL(row.netProfit)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 pl-8 text-[10px]">
+                    <span className="text-[#8b8f9a]">
+                      Dep: <span className="text-white">R$ {formatBRL(row.deposited)}</span>
+                    </span>
+                    <div className="flex items-center gap-3 whitespace-nowrap">
+                      <LiquidityToggle userId={row.id} initial={row.liquidityMode} />
+                      <MarketToggle label="OTC"    on={true}  />
+                      <MarketToggle label="Crypto" on={false} />
+                    </div>
+                  </div>
                 </div>
-                <div className="text-xs md:text-sm text-white text-right">R$ {formatBRL(row.deposited)}</div>
-                <div className="flex justify-end">
-                  <span className="px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-[11px] font-bold text-emerald-400 whitespace-nowrap">
-                    +R$ {formatBRL(row.netProfit)}
-                  </span>
-                </div>
-                {/* Liquidez (funcional) + OTC/Crypto (visual stubs). 2026-06-01:
-                    "Forex" foi removido (cTrader off, mercado nao existe mais).
-                    Lugar reaproveitado pelo toggle Liquidez que aciona o motor
-                    de liquidez forcada do user (User.liquidityMode no banco). */}
-                <div className="flex items-center justify-end gap-4 text-[10px] whitespace-nowrap">
-                  <LiquidityToggle userId={row.id} initial={row.liquidityMode} />
-                  <MarketToggle label="OTC"    on={true}  />
-                  <MarketToggle label="Crypto" on={false} />
+
+                {/* Desktop layout (>= md): grid horizontal */}
+                <div className="hidden md:grid grid-cols-[40px_1fr_120px_120px_280px] gap-3 py-3 items-center">
+                  <RankBadge rank={rank} />
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-white truncate">{row.email || '—'}</div>
+                  </div>
+                  <div className="text-sm text-white text-right">R$ {formatBRL(row.deposited)}</div>
+                  <div className="flex justify-end">
+                    <span className="px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-[11px] font-bold text-emerald-400 whitespace-nowrap">
+                      +R$ {formatBRL(row.netProfit)}
+                    </span>
+                  </div>
+                  {/* Liquidez (funcional) + OTC/Crypto (visual stubs). */}
+                  <div className="flex items-center justify-end gap-4 text-[10px] whitespace-nowrap">
+                    <LiquidityToggle userId={row.id} initial={row.liquidityMode} />
+                    <MarketToggle label="OTC"    on={true}  />
+                    <MarketToggle label="Crypto" on={false} />
+                  </div>
                 </div>
               </div>
             )
