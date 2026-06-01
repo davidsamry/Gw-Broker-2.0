@@ -174,9 +174,7 @@ function LiquidityToggle({ userId, initial }: { userId: string; initial: boolean
       className="flex items-center gap-1.5 disabled:opacity-50"
       title={on ? 'Liquidez ATIVA — proximas ops desse user passam pelo motor' : 'Ativar liquidez forcada'}
     >
-      <span className={cn('text-[10px]', on ? 'text-emerald-400 font-semibold' : 'text-[#8b8f9a]')}>
-        Liquidez
-      </span>
+      <span className="text-[#8b8f9a]">Liquidez</span>
       <span className={cn(
         'relative w-7 h-3.5 rounded-full transition-colors',
         on ? 'bg-emerald-500' : 'bg-[#1f232e]'
