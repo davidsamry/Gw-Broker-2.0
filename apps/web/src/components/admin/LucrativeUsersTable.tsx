@@ -168,10 +168,14 @@ function LiquidityToggle({ userId, initial }: { userId: string; initial: boolean
   }
 
   return (
-    <button
-      onClick={toggle}
-      disabled={busy}
-      className="flex items-center gap-1.5 disabled:opacity-50"
+    <div
+      onClick={busy ? undefined : toggle}
+      role="button"
+      aria-disabled={busy}
+      className={cn(
+        'flex items-center gap-1.5 select-none',
+        busy ? 'opacity-50 cursor-default' : 'cursor-pointer',
+      )}
       title={on ? 'Liquidez ATIVA — proximas ops desse user passam pelo motor' : 'Ativar liquidez forcada'}
     >
       <span className="text-[#8b8f9a]">Liquidez</span>
@@ -179,12 +183,14 @@ function LiquidityToggle({ userId, initial }: { userId: string; initial: boolean
         'relative w-7 h-3.5 rounded-full transition-colors',
         on ? 'bg-emerald-500' : 'bg-[#1f232e]'
       )}>
+        {/* left explicito pra evitar drift de translate-x. Bolinha 10px num
+            track de 28px: off=left-0.5 (2px), on=left-[16px] (28-10-2). */}
         <span className={cn(
-          'absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform',
-          on ? 'translate-x-3.5' : 'translate-x-0.5'
+          'absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-all',
+          on ? 'left-[16px]' : 'left-0.5'
         )} />
       </span>
-    </button>
+    </div>
   )
 }
 
@@ -197,8 +203,8 @@ function MarketToggle({ label, on }: { label: string; on: boolean }) {
         on ? 'bg-emerald-500' : 'bg-[#1f232e]'
       )}>
         <span className={cn(
-          'absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform',
-          on ? 'translate-x-3.5' : 'translate-x-0.5'
+          'absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-all',
+          on ? 'left-[16px]' : 'left-0.5'
         )} />
       </span>
     </div>
