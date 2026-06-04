@@ -238,16 +238,22 @@ export default function AdminDepositsPage() {
                       />
                     </td>
                     <td className="px-3 py-3 text-center">
+                      {/* PAID: ícone preenchido verde, NÃO clicável — confirma
+                          que ja' foi creditado. PENDING: botao OUTLINE com texto
+                          "Confirmar" — diferencia visualmente da acao ja feita.
+                          CANCELLED/FAILED: traco. */}
                       {d.status === 'PAID' ? (
-                        <CheckCircle2 size={16} className="text-emerald-400 mx-auto" />
+                        <span className="inline-flex items-center justify-center" title="Depósito ja' confirmado e creditado">
+                          <CheckCircle2 size={16} className="text-emerald-400" fill="currentColor" stroke="#0e1116" />
+                        </span>
                       ) : d.status === 'PENDING' ? (
                         <button
                           onClick={() => markPaid(d)}
                           disabled={busyId === d.id}
-                          title="Confirmar recebimento (credita saldo + bônus)"
-                          className="inline-flex items-center justify-center w-7 h-7 rounded border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-30 transition-colors"
+                          title="Confirmar recebimento manual (credita saldo + bônus)"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-emerald-500/40 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/15 disabled:opacity-30 transition-colors"
                         >
-                          <CheckCircle2 size={13} />
+                          Confirmar
                         </button>
                       ) : (
                         <span className="text-[#8b8f9a]">—</span>
