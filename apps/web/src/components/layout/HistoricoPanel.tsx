@@ -83,9 +83,11 @@ export function HistoricoPanel({ onClose, isDemo }: HistoricoPanelProps) {
   })
 
   return (
-    // Width: 280px on desktop (side panel beside chart). Full width + height
+    // Width: 380px on desktop (side panel beside chart). Full width + height
     // on mobile, where page.tsx renders this as the sole content of HISTORICO.
-    <div className="flex flex-col bg-[#1a1e2e] md:border-r border-[#2a2e3b] flex-shrink-0 w-full h-full md:w-[280px]">
+    // 2026-06-01: era 280px — apertado pra mostrar "BTC/USDT R\$ 5233,00
+    // +R\$ 4448,05 (+85%)" sem espacar/quebrar visual. 380px da conforto.
+    <div className="flex flex-col bg-[#1a1e2e] md:border-r border-[#2a2e3b] flex-shrink-0 w-full h-full md:w-[380px]">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a2e3b]">
         <h2 className="text-base font-bold text-white">Histórico Trading</h2>
