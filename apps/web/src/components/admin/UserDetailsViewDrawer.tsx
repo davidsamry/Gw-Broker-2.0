@@ -121,8 +121,11 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
   const loadOps = useCallback(async () => {
     setOpsLoading(true); setOpsError('')
     try {
+      // accountType=REAL — drawer mostra so' historico da conta real,
+      // que e' o que importa pro admin (DEMO e' "treino" do user, nao
+      // entra em KPI e nao afeta a regulacao do user).
       const res = await api.get<OpsListResponse>('/admin/operations', {
-        params: { userId, page, pageSize: PAGE_SIZE },
+        params: { userId, page, pageSize: PAGE_SIZE, accountType: 'REAL' },
       })
       setOps(res.data)
     } catch {
