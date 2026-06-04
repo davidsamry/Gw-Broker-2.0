@@ -32,9 +32,12 @@ interface UserSummary {
     email: string
   }
   accounts: Array<{
-    id:      string
-    type:    'REAL' | 'DEMO'
-    balance: string
+    id:               string
+    type:             'REAL' | 'DEMO'
+    balance:          string
+    bonusBalance?:    string
+    rolloverRequired?: string
+    rolloverProgress?: string
   }>
   // Inclui ops + transactions usados pros KPIs (sem precisar paginar).
   operations: Array<{
@@ -92,6 +95,9 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
   const [deletingAll, setDeletingAll] = useState(false)
   // Estado do botao "Logar como Usuario"
   const [impersonating, setImpersonating] = useState(false)
+  // Rollover editavel — input controlado + flag salvando
+  const [rolloverDraft, setRolloverDraft] = useState('')
+  const [savingRollover, setSavingRollover] = useState(false)
 
   // ESC fecha (pattern do UserDetailDrawer)
   useEffect(() => {
@@ -214,8 +220,11 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
   }
 
   // ── KPIs calculados ───────────────────────────────────────────────────
-  const realAccount    = summary?.accounts.find(a => a.type === 'REAL')
-  const saldoOpera     = parseFloat(realAccount?.balance ?? '0')
+  const realAccount     = summary?.accounts.find(a => a.type === 'REAL')
+  const saldoOpera      = parseFloat(realAccount?.balance ?? '0')
+  const bonusBal        = parseFloat(realAccount?.bonusBalance ?? '0')
+  const rolloverReq     = parseFloat(realAccount?.rolloverRequired ?? '0')
+  const rolloverProg    = parseFloat(realAccount?.rolloverProgress ?? '0')
   const totalGanho     = (summary?.operations ?? [])
     .filter(o => o.status === 'WON')
     .reduce((sum, o) => sum + parseFloat(o.profit ?? '0'), 0)
@@ -225,6 +234,37 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
   const totalDepositado = (summary?.transactions ?? [])
     .filter(t => t.type === 'DEPOSIT')
     .reduce((sum, t) => sum + parseFloat(t.amount), 0)
+  // Lucro liquido = saldo atual (balance principal) - total depositado.
+  // Bonus NAO entra na conta (e' dinheiro da plataforma com rollover).
+  const lucroLiquido = saldoOpera - totalDepositado
+
+  // Hidrata o draft do rollover quando o summary carrega ou muda.
+  useEffect(() => {
+    if (realAccount?.rolloverRequired != null) {
+      setRolloverDraft(realAccount.rolloverRequired)
+    }
+  }, [realAccount?.rolloverRequired])
+
+  // Handler: PATCH /admin/users/:id { rolloverRequired }
+  async function saveRollover() {
+    const value = parseFloat(rolloverDraft)
+    if (!isFinite(value) || value < 0) {
+      alert('Rollover invalido — informe um numero >= 0')
+      return
+    }
+    setSavingRollover(true)
+    try {
+      await api.patch(`/admin/users/${userId}`, { rolloverRequired: value })
+      // Re-busca summary pra refletir o valor novo
+      const sres = await api.get<UserSummary>(`/admin/users/${userId}`)
+      setSummary(sres.data)
+      onChanged?.()
+    } catch {
+      alert('Erro ao salvar rollover.')
+    } finally {
+      setSavingRollover(false)
+    }
+  }
 
   const totalPages = ops ? Math.max(1, Math.ceil(ops.total / PAGE_SIZE)) : 1
 
@@ -275,13 +315,26 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
           )}
           {summary && !summaryLoading && !summaryError && (
             <>
-              {/* KPIs */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+              {/* KPIs — 6 cards no total. Em desktop fica 3 colunas x 2 linhas. */}
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
                 <KpiCard
-                  label="Saldo Operacional"
+                  label="Valor Depositado"
+                  value={fmtBRL(totalDepositado)}
+                  tone="neutral"
+                  icon={<DollarSign size={14} />}
+                />
+                <KpiCard
+                  label="Saldo Atual"
                   value={fmtBRL(saldoOpera)}
                   tone={saldoOpera >= 0 ? 'neutral' : 'red'}
-                  icon={<TrendingDown size={14} />}
+                  icon={<TrendingUp size={14} />}
+                  hint={bonusBal > 0 ? `+ R\$ ${fmtBRL(bonusBal)} bonus` : undefined}
+                />
+                <KpiCard
+                  label="Lucro Liquido"
+                  value={`${lucroLiquido >= 0 ? '+' : ''}${fmtBRL(lucroLiquido)}`}
+                  tone={lucroLiquido >= 0 ? 'green' : 'red'}
+                  icon={lucroLiquido >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
                 />
                 <KpiCard
                   label="Total Ganho"
@@ -295,12 +348,34 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
                   tone="red"
                   icon={<TrendingDown size={14} />}
                 />
-                <KpiCard
-                  label="Total Depositado"
-                  value={fmtBRL(totalDepositado)}
-                  tone="neutral"
-                  icon={<DollarSign size={14} />}
-                />
+                {/* Rollover EDITAVEL — admin pode forcar um valor especifico
+                    (ex: zerar pra liberar saque, aumentar pra travar). */}
+                <div className="bg-[#13161f] border border-[#1f232e] rounded-xl p-3 flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-[#8b8f9a] font-medium uppercase tracking-wide">Rollover (R$)</span>
+                    <DollarSign size={14} className="text-blue-400" />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={rolloverDraft}
+                      onChange={(e) => setRolloverDraft(e.target.value)}
+                      className="flex-1 min-w-0 bg-[#0f1117] border border-[#1f232e] rounded px-2 py-1 text-sm font-bold text-white outline-none focus:border-blue-500/60"
+                    />
+                    <button
+                      onClick={saveRollover}
+                      disabled={savingRollover || rolloverDraft === (realAccount?.rolloverRequired ?? '')}
+                      className="px-2 py-1 rounded bg-blue-500/15 border border-blue-500/40 text-[10px] font-bold text-blue-400 hover:bg-blue-500/25 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {savingRollover ? '...' : 'Salvar'}
+                    </button>
+                  </div>
+                  <div className="text-[10px] text-[#8b8f9a]">
+                    Progresso: <span className="text-white font-semibold">R$ {fmtBRL(rolloverProg)}</span> / R$ {fmtBRL(rolloverReq)}
+                  </div>
+                </div>
               </div>
 
               {/* Header da tabela */}
@@ -431,11 +506,12 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
 
 // ── Subcomponentes ────────────────────────────────────────────────────
 
-function KpiCard({ label, value, tone, icon }: {
+function KpiCard({ label, value, tone, icon, hint }: {
   label: string
   value: string
   tone:  'green' | 'red' | 'neutral'
   icon:  React.ReactNode
+  hint?: string
 }) {
   const toneClasses = {
     green:   'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
@@ -455,6 +531,7 @@ function KpiCard({ label, value, tone, icon }: {
         tone === 'red'   ? 'text-red-400'     : 'text-white')}>
         R$ {value}
       </div>
+      {hint && <div className="text-[10px] text-yellow-400 mt-0.5">{hint}</div>}
     </div>
   )
 }

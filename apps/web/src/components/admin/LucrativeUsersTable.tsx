@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { AlertTriangle, Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
+import { UserDetailsViewDrawer } from './UserDetailsViewDrawer'
 
 export interface LucrativeUserRow {
   id:             string
@@ -30,6 +31,8 @@ const PAGE_SIZE = 10
 export function LucrativeUsersTable({ rows, total }: Props) {
   const [search, setSearch] = useState('')
   const [page,   setPage]   = useState(1)
+  // Drawer "Detalhes do Usuario" — abre ao clicar no email da row.
+  const [detailUserId, setDetailUserId] = useState<string | null>(null)
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -98,9 +101,14 @@ export function LucrativeUsersTable({ rows, total }: Props) {
                 <div className="md:hidden flex flex-col gap-2 py-2.5 px-1">
                   <div className="flex items-center gap-2 min-w-0">
                     <RankBadge rank={rank} />
-                    <div className="text-xs font-semibold text-white truncate flex-1 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setDetailUserId(row.id)}
+                      className="text-xs font-semibold text-white truncate flex-1 min-w-0 text-left hover:text-emerald-400 transition-colors"
+                      title="Ver detalhes do usuario"
+                    >
                       {row.email || '—'}
-                    </div>
+                    </button>
                     <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/40 text-[10px] font-bold text-emerald-400 whitespace-nowrap flex-shrink-0">
                       +R$ {formatBRL(row.netProfit)}
                     </span>
@@ -121,7 +129,14 @@ export function LucrativeUsersTable({ rows, total }: Props) {
                 <div className="hidden md:grid grid-cols-[40px_1fr_120px_120px_280px] gap-3 py-3 items-center">
                   <RankBadge rank={rank} />
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold text-white truncate">{row.email || '—'}</div>
+                    <button
+                      type="button"
+                      onClick={() => setDetailUserId(row.id)}
+                      className="text-sm font-semibold text-white truncate text-left hover:text-emerald-400 transition-colors w-full"
+                      title="Ver detalhes do usuario"
+                    >
+                      {row.email || '—'}
+                    </button>
                   </div>
                   <div className="text-sm text-white text-right">R$ {formatBRL(row.deposited)}</div>
                   <div className="flex justify-end">
@@ -152,6 +167,16 @@ export function LucrativeUsersTable({ rows, total }: Props) {
             </div>
           </div>
         </>
+      )}
+
+      {/* Drawer "Detalhes do Usuario" — abre ao clicar no email da row.
+          Reusa o componente do /admin/operacoes (KPIs + historico paginado
+          + rollover editavel + logar como usuario + excluir trades). */}
+      {detailUserId && (
+        <UserDetailsViewDrawer
+          userId={detailUserId}
+          onClose={() => setDetailUserId(null)}
+        />
       )}
     </div>
   )
