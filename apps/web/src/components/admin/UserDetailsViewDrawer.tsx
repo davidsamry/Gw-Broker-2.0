@@ -40,14 +40,17 @@ interface UserSummary {
     rolloverProgress?: string
   }>
   // Inclui ops + transactions usados pros KPIs (sem precisar paginar).
+  // accountType e' incluido pra filtrar so' a REAL nos calculos.
   operations: Array<{
-    status: 'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
-    amount: string
-    profit: string | null
+    status:      'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
+    amount:      string
+    profit:      string | null
+    accountType: 'REAL' | 'DEMO'
   }>
   transactions: Array<{
-    type:   string         // DEPOSIT, WITHDRAWAL, BUY, PROFIT, etc.
-    amount: string
+    type:        string         // DEPOSIT, WITHDRAWAL, BUY, PROFIT, etc.
+    amount:      string
+    accountType: 'REAL' | 'DEMO'
   }>
 }
 
@@ -228,14 +231,17 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
   const bonusBal        = parseFloat(realAccount?.bonusBalance ?? '0')
   const rolloverReq     = parseFloat(realAccount?.rolloverRequired ?? '0')
   const rolloverProg    = parseFloat(realAccount?.rolloverProgress ?? '0')
+  // 2026-06-01: filtra accountType === 'REAL' em tudo — DEMO e' treino do
+  // user, nao deve contar nos KPIs reais. Backend retorna o accountType
+  // junto pra essa filtragem no frontend.
   const totalGanho     = (summary?.operations ?? [])
-    .filter(o => o.status === 'WON')
+    .filter(o => o.accountType === 'REAL' && o.status === 'WON')
     .reduce((sum, o) => sum + parseFloat(o.profit ?? '0'), 0)
   const totalPerdido   = (summary?.operations ?? [])
-    .filter(o => o.status === 'LOST')
+    .filter(o => o.accountType === 'REAL' && o.status === 'LOST')
     .reduce((sum, o) => sum + parseFloat(o.amount), 0)
   const totalDepositado = (summary?.transactions ?? [])
-    .filter(t => t.type === 'DEPOSIT')
+    .filter(t => t.accountType === 'REAL' && t.type === 'DEPOSIT')
     .reduce((sum, t) => sum + parseFloat(t.amount), 0)
   // Lucro liquido = saldo atual (balance principal) - total depositado.
   // Bonus NAO entra na conta (e' dinheiro da plataforma com rollover).

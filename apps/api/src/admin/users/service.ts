@@ -174,13 +174,15 @@ export async function getUserDetail(userId: string) {
     prisma.$queryRaw<any[]>`
       SELECT o.id, o."assetSymbol", o.direction::text AS direction, o.amount, o.payout,
              o."entryPrice", o."exitPrice", o.profit, o.status::text AS status,
-             o."openedAt", o."closedAt", o."expiresAt"
+             o."openedAt", o."closedAt", o."expiresAt",
+             a.type::text AS "accountType"
       FROM operations o INNER JOIN accounts a ON a.id = o."accountId"
       WHERE a."userId" = ${userId}
       ORDER BY o."openedAt" DESC LIMIT 50
     `,
     prisma.$queryRaw<any[]>`
-      SELECT t.id, t.type::text AS type, t.amount, t.description, t."createdAt"
+      SELECT t.id, t.type::text AS type, t.amount, t.description, t."createdAt",
+             a.type::text AS "accountType"
       FROM transactions t INNER JOIN accounts a ON a.id = t."accountId"
       WHERE a."userId" = ${userId}
       ORDER BY t."createdAt" DESC LIMIT 50
