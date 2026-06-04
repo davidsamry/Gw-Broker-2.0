@@ -152,12 +152,20 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
   // hiccup), force the overlay off so the user isn't trapped staring
   // at a spinner forever. Resets whenever the asset changes.
   const [overlayTimedOut, setOverlayTimedOut] = useState(false)
+  // 2026-06-01: tempo MINIMO de exibicao do overlay. Quando os candles
+  // vem do cache local (instant), o chartReady virava true em <50ms e o
+  // user nao via o splash. Garantia: assim que o asset muda, o overlay
+  // fica visivel por pelo menos 500ms (suficiente pra registrar visualmente
+  // o "trocou de ativo" antes do novo chart aparecer).
+  const [minHoldElapsed, setMinHoldElapsed] = useState(false)
   useEffect(() => {
     setOverlayTimedOut(false)
-    const t = setTimeout(() => setOverlayTimedOut(true), 3000)
-    return () => clearTimeout(t)
+    setMinHoldElapsed(false)
+    const t1 = setTimeout(() => setOverlayTimedOut(true), 3000)
+    const t2 = setTimeout(() => setMinHoldElapsed(true),   500)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
   }, [asset.id])
-  const showLoadingOverlay = !chartReady && !overlayTimedOut
+  const showLoadingOverlay = (!chartReady || !minHoldElapsed) && !overlayTimedOut
   const [candleSecsLeft, setCandleSecsLeft] = useState(0)
   const [candleTimerY, setCandleTimerY] = useState<number | null>(null)
   const [candleTimerX, setCandleTimerX] = useState<number | null>(null)
