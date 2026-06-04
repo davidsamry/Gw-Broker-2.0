@@ -115,6 +115,17 @@ export interface MeRanking {
 }
 
 export async function getMyWeeklyRanking(userId: string): Promise<MeRanking> {
+  // 2026-06-01: admin e isFake nao aparecem no ranking publico. Admin e'
+  // staff (nao compete com users reais) e isFake forca WIN sempre (apareceria
+  // sempre no topo, quebra o realismo). Retorna direto antes de processar.
+  const userMeta = await prisma.user.findUnique({
+    where:  { id: userId },
+    select: { role: true, isFake: true },
+  })
+  if (!userMeta || userMeta.role === 'ADMIN' || userMeta.isFake) {
+    return { amount: 0, position: null }
+  }
+
   // Week starts on Monday 00:00 in BRT (UTC-3). Mirrors the "Líderes da
   // semana" wording in the panel header.
   const now = new Date()
