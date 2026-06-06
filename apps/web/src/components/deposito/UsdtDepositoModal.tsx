@@ -201,12 +201,7 @@ export function UsdtDepositoModal({ onClose, onSwitchToPix }: Props) {
               <div className="flex items-center gap-2.5">
                 <PixLogo size={28} />
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-bold text-white leading-tight">PIX</span>
-                    <span className="inline-flex items-center px-1.5 py-px rounded bg-emerald-500/15 border border-emerald-500/30 text-[8px] font-bold text-emerald-300 uppercase tracking-wide">
-                      Top
-                    </span>
-                  </div>
+                  <div className="text-sm font-bold text-white leading-tight">PIX</div>
                   <div className="text-[10px] text-[#7c8195] leading-tight mt-0.5">Depósito instantâneo</div>
                 </div>
               </div>
