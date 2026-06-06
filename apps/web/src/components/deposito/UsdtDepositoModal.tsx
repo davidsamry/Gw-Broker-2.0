@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { X, Loader2, Copy, CheckCircle2, ArrowLeft } from 'lucide-react'
+import { X, Loader2, Copy, CheckCircle2, Banknote } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/store/auth'
 
@@ -147,58 +147,90 @@ export function UsdtDepositoModal({ onClose, onSwitchToPix }: Props) {
         className="w-full max-w-[420px] bg-[#13161f] border border-[#1f232e] rounded-xl shadow-2xl flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#1f232e]">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-md bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center">
-              <span className="text-emerald-400 font-black text-xs">₮</span>
-            </div>
-            <h2 className="text-sm font-bold text-white">Depositar em USDT</h2>
+        {/* Header — clean: titulo + close. Tabs vem abaixo. */}
+        <div className="flex items-center justify-between px-5 pt-4 pb-3 flex-shrink-0">
+          <div>
+            <h2 className="text-[15px] font-bold text-white leading-tight">Depósito</h2>
+            <p className="text-[11px] text-[#7c8195] leading-tight mt-0.5">
+              Pagamento em USDT · rede Tron (TRC20)
+            </p>
           </div>
-          <button onClick={onClose} className="text-[#8b8f9a] hover:text-white p-1">
-            <X size={16} />
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors"
+            aria-label="Fechar"
+          >
+            <X size={18} />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        {/* Tabs PIX / USDT — visiveis so' no form */}
+        {phase === 'form' && onSwitchToPix && (
+          <div className="px-5 pb-3 flex-shrink-0">
+            <div className="flex gap-1 p-1 rounded-lg bg-[#1a1e2a] border border-[#2a2e3b]">
+              <button
+                onClick={onSwitchToPix}
+                className="flex-1 h-9 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-[#7c8195] hover:text-white hover:bg-white/[0.03]"
+              >
+                <Banknote size={13} />
+                PIX
+              </button>
+              <button
+                className="flex-1 h-9 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-1.5 bg-gradient-to-b from-emerald-500/20 to-emerald-600/15 text-emerald-300 border border-emerald-500/40 shadow-[0_2px_8px_-2px_rgba(16,185,129,0.3)]"
+              >
+                <span className="text-sm font-black">₮</span>
+                USDT
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto px-5 pb-4">
           {/* ── FORM phase ── */}
           {phase === 'form' && (
             <div className="flex flex-col gap-4">
-              <p className="text-xs text-[#8b8f9a] leading-relaxed">
-                Depósito em USDT na rede <span className="text-emerald-400 font-semibold">TRC20</span> (Tron).
-                Você digita o valor em <span className="text-white font-semibold">R$</span> — fazemos
-                a cotação automática para USDT.
-              </p>
 
               <div>
-                <label className="text-[10px] text-[#8b8f9a] uppercase font-bold tracking-wide">Valor em R$</label>
-                <input
-                  type="number"
-                  min={MIN_BRL}
-                  max={MAX_BRL}
-                  step="0.01"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="100,00"
-                  className="w-full mt-1 bg-[#0f1117] border border-[#1f232e] rounded-lg px-3 py-2.5 text-white font-bold text-lg outline-none focus:border-emerald-500/60"
-                />
-                <p className="text-[10px] text-[#8b8f9a] mt-1">
-                  Mín R$ {formatBrl(MIN_BRL)} · Máx R$ {formatBrl(MAX_BRL)}
-                </p>
+                <div className="flex items-baseline justify-between mb-2">
+                  <label className="text-[11px] font-bold text-[#bdc1cf] uppercase tracking-wide">Valor do depósito</label>
+                  <span className="text-[10px] text-[#7c8195]">
+                    Mín R$ {formatBrl(MIN_BRL)} · Máx R$ {formatBrl(MAX_BRL)}
+                  </span>
+                </div>
+                <div className={`relative flex items-center rounded-xl border-2 transition-colors bg-gradient-to-b from-[#1d2130] to-[#191c29] ${
+                  validAmount ? 'border-emerald-500/50 shadow-[0_0_0_3px_rgba(16,185,129,0.06)]' : 'border-[#2a2e3b] focus-within:border-emerald-500/40'
+                }`}>
+                  <span className="pl-4 pr-1 text-base font-bold text-emerald-400/80 select-none">R$</span>
+                  <input
+                    type="number"
+                    min={MIN_BRL}
+                    max={MAX_BRL}
+                    step="0.01"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="0,00"
+                    className="flex-1 bg-transparent py-3.5 pr-4 text-xl font-bold text-white outline-none placeholder:text-[#3d4256] placeholder:font-normal tracking-tight"
+                  />
+                </div>
               </div>
 
-              {/* Preview USDT */}
-              <div className="bg-[#0f1117] border border-[#1f232e] rounded-lg p-3 flex items-center justify-between">
-                <span className="text-xs text-[#8b8f9a]">Você vai enviar</span>
-                <span className="text-base font-bold text-emerald-400">
-                  {usdtPreview > 0 ? `${usdtPreview.toFixed(4)} USDT` : '— USDT'}
-                </span>
+              {/* Preview USDT — destaque maior */}
+              <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 border border-emerald-500/30 rounded-xl p-4">
+                <div className="flex items-baseline justify-between">
+                  <div>
+                    <p className="text-[10px] text-emerald-400/70 uppercase tracking-wide font-bold">Você vai enviar</p>
+                    <p className="text-xl font-black text-emerald-400 mt-0.5">
+                      {usdtPreview > 0 ? usdtPreview.toFixed(4) : '—'} <span className="text-sm font-bold">USDT</span>
+                    </p>
+                  </div>
+                  {rate && (
+                    <div className="text-right">
+                      <p className="text-[9px] text-[#7c8195] uppercase tracking-wide">cotação</p>
+                      <p className="text-[11px] text-white font-mono font-semibold">R$ {rate.toFixed(4)}</p>
+                    </div>
+                  )}
+                </div>
               </div>
-              {rate && (
-                <p className="text-[10px] text-[#8b8f9a] -mt-2">
-                  Cotação: 1 USDT = R$ {rate.toFixed(4)} <span className="text-emerald-400">(spot Binance)</span>
-                </p>
-              )}
 
               {error && (
                 <p className="text-red-400 text-xs text-center bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
@@ -209,19 +241,14 @@ export function UsdtDepositoModal({ onClose, onSwitchToPix }: Props) {
               <button
                 onClick={generate}
                 disabled={loading || !validAmount || !rate}
-                className="w-full h-11 rounded-lg bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] transition-all font-bold text-black flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                className={`mt-1 w-full h-12 rounded-xl text-[13px] font-bold transition-all duration-200 flex items-center justify-center gap-2 ${
+                  loading || !validAmount || !rate
+                    ? 'bg-[#1d2130] text-[#4d5266] border border-[#2a2e3b] cursor-not-allowed'
+                    : 'bg-gradient-to-b from-emerald-500 to-emerald-600 text-white shadow-[0_8px_24px_-8px_rgba(16,185,129,0.7)] hover:-translate-y-px hover:shadow-[0_10px_28px_-8px_rgba(16,185,129,0.8)] active:translate-y-0'
+                }`}
               >
-                {loading ? <Loader2 size={16} className="animate-spin" /> : 'Gerar endereço USDT'}
+                {loading ? <><Loader2 size={14} className="animate-spin" /> Gerando…</> : 'Gerar endereço USDT'}
               </button>
-
-              {onSwitchToPix && (
-                <button
-                  onClick={onSwitchToPix}
-                  className="flex items-center justify-center gap-1 text-xs text-[#8b8f9a] hover:text-white transition-colors"
-                >
-                  <ArrowLeft size={12} /> Pagar com PIX
-                </button>
-              )}
             </div>
           )}
 

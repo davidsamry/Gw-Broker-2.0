@@ -288,37 +288,43 @@ export function DepositoModal({ onClose, initialBonusCode, onSwitchToUsdt }: Dep
           'shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)]',
         )}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#2a2e3b] flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center">
-              <Banknote size={18} className="text-emerald-400" />
-            </div>
-            <div>
-              <h2 className="text-[15px] font-bold text-white leading-tight">Depositar via PIX</h2>
-              <p className="text-[11px] text-[#7c8195] leading-tight mt-0.5">Depósito instantâneo via PIX</p>
-            </div>
+        {/* Header — clean: titulo + close. Tabs vem abaixo. */}
+        <div className="flex items-center justify-between px-5 pt-4 pb-3 flex-shrink-0">
+          <div>
+            <h2 className="text-[15px] font-bold text-white leading-tight">Depósito</h2>
+            <p className="text-[11px] text-[#7c8195] leading-tight mt-0.5">
+              Confirmação instantânea · sem taxa pro depositante
+            </p>
           </div>
-          <div className="flex items-center gap-2">
-            {onSwitchToUsdt && phase === 'form' && (
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors"
+            aria-label="Fechar"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Tabs PIX / USDT — visiveis so' no phase form */}
+        {phase === 'form' && onSwitchToUsdt && (
+          <div className="px-5 pb-3 flex-shrink-0">
+            <div className="flex gap-1 p-1 rounded-lg bg-[#1a1e2a] border border-[#2a2e3b]">
+              <button
+                className="flex-1 h-9 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-1.5 bg-gradient-to-b from-emerald-500/20 to-emerald-600/15 text-emerald-300 border border-emerald-500/40 shadow-[0_2px_8px_-2px_rgba(16,185,129,0.3)]"
+              >
+                <Banknote size={13} />
+                PIX
+              </button>
               <button
                 onClick={onSwitchToUsdt}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors text-[10px] font-bold"
-                title="Pagar com USDT (TRC20) em vez de PIX"
+                className="flex-1 h-9 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-[#7c8195] hover:text-white hover:bg-white/[0.03]"
               >
-                <span className="font-black">₮</span>
+                <span className="text-sm font-black">₮</span>
                 USDT
               </button>
-            )}
-            <button
-              onClick={onClose}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors"
-              aria-label="Fechar"
-            >
-              <X size={18} />
-            </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Body */}
         <div className="overflow-y-auto px-5 py-4">
@@ -384,34 +390,30 @@ function FormStep({
 }: FormStepProps) {
   return (
     <div className="flex flex-col gap-4">
-      {/* Limits info bar */}
-      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#222637] border border-[#2a2e3b]">
-        <AlertCircle size={13} className="text-[#7c8195] flex-shrink-0" />
-        <span className="text-[11px] text-[#bdc1cf]">
-          Mín: <strong className="text-white">R$ {formatBrl(min)}</strong>{' '}·{' '}
-          Máx: <strong className="text-white">R$ {formatBrl(max)}</strong>
-        </span>
-      </div>
-
       {/* Valor do depósito */}
       <div>
-        <label className="block text-sm font-bold text-white mb-2">Valor do depósito</label>
+        <div className="flex items-baseline justify-between mb-2">
+          <label className="text-[11px] font-bold text-[#bdc1cf] uppercase tracking-wide">Valor do depósito</label>
+          <span className="text-[10px] text-[#7c8195]">
+            Mín R$ {formatBrl(min)} · Máx R$ {formatBrl(max)}
+          </span>
+        </div>
         <div className={cn(
-          'relative flex items-center rounded-lg border transition-colors mb-2',
-          'bg-[#222637]',
+          'relative flex items-center rounded-xl border-2 transition-colors mb-3',
+          'bg-gradient-to-b from-[#1d2130] to-[#191c29]',
           validAmount
-            ? 'border-emerald-500/40'
+            ? 'border-emerald-500/50 shadow-[0_0_0_3px_rgba(16,185,129,0.06)]'
             : amount
               ? 'border-amber-500/40'
               : 'border-[#2a2e3b] focus-within:border-emerald-500/40',
         )}>
-          <span className="pl-3 pr-1 text-sm font-semibold text-[#7c8195] select-none">R$</span>
+          <span className="pl-4 pr-1 text-base font-bold text-emerald-400/80 select-none">R$</span>
           <input
             inputMode="decimal"
             value={amount}
             onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,]/g, ''))}
             placeholder="0,00"
-            className="flex-1 bg-transparent py-3 pr-3 text-base font-bold text-white outline-none placeholder:text-[#4d5266] placeholder:font-normal"
+            className="flex-1 bg-transparent py-3.5 pr-4 text-xl font-bold text-white outline-none placeholder:text-[#3d4256] placeholder:font-normal tracking-tight"
           />
         </div>
         <div className="grid grid-cols-3 gap-2">
@@ -422,10 +424,10 @@ function FormStep({
                 key={v}
                 onClick={() => setAmount(String(v))}
                 className={cn(
-                  'h-11 rounded-lg text-sm font-bold border transition-colors',
+                  'h-10 rounded-lg text-[12px] font-bold border transition-all',
                   selected
-                    ? 'bg-emerald-500/15 border-emerald-400/60 text-emerald-300'
-                    : 'bg-[#222637] border-[#2a2e3b] text-white hover:border-[#3a4055] hover:bg-[#262b3e]',
+                    ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-300 shadow-[0_2px_8px_-2px_rgba(16,185,129,0.4)]'
+                    : 'bg-[#1d2130] border-[#2a2e3b] text-[#bdc1cf] hover:border-emerald-500/40 hover:text-white hover:-translate-y-px',
                 )}
               >
                 R$ {v}
@@ -437,16 +439,21 @@ function FormStep({
 
       {/* CPF */}
       <div>
-        <label className="block text-sm font-bold text-white mb-2">
-          CPF <span className="text-[#7c8195] font-normal">(obrigatório para PIX)</span>
-        </label>
+        <div className="flex items-baseline justify-between mb-2">
+          <label className="text-[11px] font-bold text-[#bdc1cf] uppercase tracking-wide">CPF do pagador</label>
+          {cpfDigits.length === 11 && profileCpf === cpfDigits && (
+            <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+              <Check size={10} /> cadastrado
+            </span>
+          )}
+        </div>
         <input
           inputMode="numeric"
           value={maskCpf(cpfDigits)}
           onChange={(e) => setCpfDigits(unmaskCpf(e.target.value))}
           placeholder="000.000.000-00"
           className={cn(
-            'w-full h-11 px-3 rounded-lg bg-[#222637] border text-sm font-mono text-white outline-none transition-colors',
+            'w-full h-11 px-3.5 rounded-lg bg-[#1d2130] border text-sm font-mono text-white outline-none transition-colors',
             cpfDigits.length === 11
               ? 'border-emerald-500/40'
               : cpfDigits.length > 0
@@ -454,20 +461,19 @@ function FormStep({
                 : 'border-[#2a2e3b] focus:border-emerald-500/40',
           )}
         />
-        {profileCpf === cpfDigits && cpfDigits.length === 11 && (
-          <p className="text-[10px] text-[#7c8195] mt-1">CPF cadastrado</p>
-        )}
         {cpfDigits.length > 0 && cpfDigits.length < 11 && (
-          <p className="text-[10px] text-amber-400 mt-1">CPF deve ter 11 dígitos</p>
+          <p className="text-[10px] text-amber-400 mt-1.5">CPF deve ter 11 dígitos</p>
         )}
       </div>
 
       {/* Bonus */}
       <div>
-        <label className="block text-sm font-bold text-white mb-2 flex items-center gap-1.5">
-          <Gift size={14} className="text-emerald-400" />
-          Código de bônus <span className="text-[#7c8195] font-normal">(opcional)</span>
-        </label>
+        <div className="flex items-center gap-1.5 mb-2">
+          <Gift size={12} className="text-emerald-400" />
+          <label className="text-[11px] font-bold text-[#bdc1cf] uppercase tracking-wide">
+            Código de bônus <span className="text-[#5d6275] font-medium normal-case tracking-normal">(opcional)</span>
+          </label>
+        </div>
 
         {/* Dropdown of available codes */}
         <div className="relative mb-2">
@@ -475,7 +481,7 @@ function FormStep({
             value={selectedDropdown}
             onChange={(e) => onDropdownChange(e.target.value)}
             disabled={availableBonuses.length === 0}
-            className="w-full h-11 px-3 pr-9 rounded-lg bg-[#222637] border border-[#2a2e3b] text-sm text-white outline-none focus:border-emerald-500/40 appearance-none disabled:text-[#5d6275]"
+            className="w-full h-11 px-3 pr-9 rounded-lg bg-[#1d2130] border border-[#2a2e3b] text-sm text-white outline-none focus:border-emerald-500/40 appearance-none disabled:text-[#5d6275]"
           >
             <option value="">
               {availableBonuses.length === 0 ? 'Sem códigos disponíveis' : 'Selecione um código de bônus'}
@@ -503,7 +509,7 @@ function FormStep({
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onApplyManual() } }}
             placeholder="Ou digite o código aqui"
             maxLength={32}
-            className="flex-1 h-11 px-3 rounded-lg bg-[#222637] border border-[#2a2e3b] text-sm font-mono text-white outline-none focus:border-emerald-500/40 placeholder:text-[#4d5266] placeholder:font-sans"
+            className="flex-1 h-11 px-3 rounded-lg bg-[#1d2130] border border-[#2a2e3b] text-sm font-mono text-white outline-none focus:border-emerald-500/40 placeholder:text-[#4d5266] placeholder:font-sans"
           />
           <button
             type="button"
@@ -554,16 +560,16 @@ function FormStep({
         onClick={submit}
         disabled={!canSubmit || (!!bonusInput.trim() && !bonusInfo)}
         className={cn(
-          'w-full h-12 rounded-lg text-sm font-bold text-white transition-all duration-200',
+          'mt-1 w-full h-12 rounded-xl text-[13px] font-bold transition-all duration-200',
           'flex items-center justify-center gap-2',
           canSubmit && (!bonusInput.trim() || bonusInfo)
-            ? 'bg-gradient-to-b from-emerald-500 to-emerald-600 shadow-[0_4px_20px_-4px_rgba(16,185,129,0.6)] hover:-translate-y-px active:translate-y-0'
-            : 'bg-[#2a2e3b] text-[#5d6275] cursor-not-allowed',
+            ? 'bg-gradient-to-b from-emerald-500 to-emerald-600 text-white shadow-[0_8px_24px_-8px_rgba(16,185,129,0.7)] hover:-translate-y-px hover:shadow-[0_10px_28px_-8px_rgba(16,185,129,0.8)] active:translate-y-0'
+            : 'bg-[#1d2130] text-[#4d5266] border border-[#2a2e3b] cursor-not-allowed',
         )}
       >
         {loading
-          ? (<><Loader2 size={14} className="animate-spin" /> Gerando QR…</>)
-          : (<><QrCode size={16} /> Gerar QR Code PIX</>)}
+          ? (<><Loader2 size={14} className="animate-spin" /> Gerando QR Code…</>)
+          : (<><QrCode size={15} /> Gerar QR Code PIX</>)}
       </button>
     </div>
   )
@@ -579,7 +585,7 @@ function QrStep({
 }) {
   return (
     <div className="flex flex-col items-center gap-4">
-      <div className="w-full rounded-xl bg-[#222637] border border-[#2a2e3b] px-4 py-3 flex items-baseline justify-between">
+      <div className="w-full rounded-xl bg-[#1d2130] border border-[#2a2e3b] px-4 py-3 flex items-baseline justify-between">
         <span className="text-[11px] text-[#7c8195] uppercase tracking-wider font-semibold">Valor a pagar</span>
         <span className="text-xl font-bold text-white tabular-nums">R$ {formatBrl(amountNum)}</span>
       </div>
@@ -605,7 +611,7 @@ function QrStep({
           'w-full h-11 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-2',
           copied
             ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-300'
-            : 'bg-[#222637] border-[#2a2e3b] text-white hover:border-emerald-500/40',
+            : 'bg-[#1d2130] border-[#2a2e3b] text-white hover:border-emerald-500/40',
         )}
       >
         {copied
