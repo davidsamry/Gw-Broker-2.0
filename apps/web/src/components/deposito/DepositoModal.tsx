@@ -288,41 +288,58 @@ export function DepositoModal({ onClose, initialBonusCode, onSwitchToUsdt }: Dep
           'shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)]',
         )}
       >
-        {/* Header — clean: titulo + close. Tabs vem abaixo. */}
-        <div className="flex items-center justify-between px-5 pt-4 pb-3 flex-shrink-0">
-          <div>
-            <h2 className="text-[15px] font-bold text-white leading-tight">Depósito</h2>
+        {/* Header — icone + titulo + close */}
+        <div className="flex items-center gap-3 px-5 pt-4 pb-3 flex-shrink-0">
+          <div className="w-11 h-11 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
+            <Banknote size={20} className="text-emerald-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="text-base font-bold text-white leading-tight">Depósito</h2>
             <p className="text-[11px] text-[#7c8195] leading-tight mt-0.5">
-              Confirmação instantânea · sem taxa pro depositante
+              Escolha o método e faça seu depósito
             </p>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors"
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors flex-shrink-0"
             aria-label="Fechar"
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Tabs PIX / USDT — visiveis so' no phase form */}
+        {/* Cards de metodo — PIX (ativo) + USDT (switch) */}
         {phase === 'form' && onSwitchToUsdt && (
-          <div className="px-5 pb-3 flex-shrink-0">
-            <div className="flex gap-1 p-1 rounded-lg bg-[#1a1e2a] border border-[#2a2e3b]">
-              <button
-                className="flex-1 h-9 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-1.5 bg-gradient-to-b from-emerald-500/20 to-emerald-600/15 text-emerald-300 border border-emerald-500/40 shadow-[0_2px_8px_-2px_rgba(16,185,129,0.3)]"
-              >
-                <Banknote size={13} />
-                PIX
-              </button>
-              <button
-                onClick={onSwitchToUsdt}
-                className="flex-1 h-9 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-1.5 text-[#7c8195] hover:text-white hover:bg-white/[0.03]"
-              >
-                <span className="text-sm font-black">₮</span>
-                USDT
-              </button>
+          <div className="px-5 pb-3 grid grid-cols-2 gap-3 flex-shrink-0">
+            {/* PIX card — ATIVO */}
+            <div className="rounded-xl border-2 border-emerald-500/60 bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 px-3 py-3 shadow-[0_4px_16px_-4px_rgba(16,185,129,0.3)]">
+              <div className="flex items-center gap-2.5">
+                <PixLogo size={28} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-bold text-white leading-tight">PIX</div>
+                  <div className="text-[10px] text-emerald-300 leading-tight mt-0.5">Depósito instantâneo</div>
+                </div>
+              </div>
+              <div className="mt-2 inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-[9px] font-bold text-emerald-300 uppercase tracking-wide">
+                Recomendado
+              </div>
             </div>
+            {/* USDT card — switch */}
+            <button
+              onClick={onSwitchToUsdt}
+              className="rounded-xl border-2 border-[#2a2e3b] bg-[#1a1e2a] px-3 py-3 hover:border-emerald-500/40 hover:bg-[#1d2130] transition-all text-left group"
+            >
+              <div className="flex items-center gap-2.5">
+                <TetherLogo size={28} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-bold text-white leading-tight">USDT</div>
+                  <div className="text-[10px] text-[#7c8195] leading-tight mt-0.5">Transferência via rede</div>
+                </div>
+              </div>
+              <div className="mt-2 inline-flex items-center px-2 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-[9px] font-bold text-blue-300 uppercase tracking-wide">
+                1 a 3 confirmações
+              </div>
+            </button>
           </div>
         )}
 
@@ -689,5 +706,36 @@ function ExpiredStep({ onRetry }: { onRetry: () => void }) {
         Tentar novamente
       </button>
     </div>
+  )
+}
+
+// ── Logo helpers ─────────────────────────────────────────────────────────
+// SVG inline pra evitar dependencia de assets/icons externos. Mesma palette
+// emerald do app — PIX mantem 4 losangos clasicos, USDT mantem T-circular
+// do Tether.
+
+function PixLogo({ size = 28 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* 4 losangos posicionados em + */}
+      <rect x="11" y="2"  width="10" height="10" rx="2" transform="rotate(45 16 7)"  fill="#34d399" opacity="0.95"/>
+      <rect x="11" y="20" width="10" height="10" rx="2" transform="rotate(45 16 25)" fill="#34d399" opacity="0.95"/>
+      <rect x="2"  y="11" width="10" height="10" rx="2" transform="rotate(45 7 16)"  fill="#10b981" opacity="0.85"/>
+      <rect x="20" y="11" width="10" height="10" rx="2" transform="rotate(45 25 16)" fill="#10b981" opacity="0.85"/>
+      <circle cx="16" cy="16" r="3.5" fill="#0e1116" />
+    </svg>
+  )
+}
+
+function TetherLogo({ size = 28 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="16" cy="16" r="15" fill="#059669" stroke="#10b981" strokeWidth="1"/>
+      {/* "T" do Tether */}
+      <rect x="8"  y="9"  width="16" height="3"  rx="0.5" fill="white"/>
+      <rect x="14" y="9"  width="4"  height="14" rx="0.5" fill="white"/>
+      {/* Linha horizontal no meio do T (dash do simbolo USDT) */}
+      <rect x="11" y="14" width="10" height="2"  rx="0.5" fill="#059669"/>
+    </svg>
   )
 }
