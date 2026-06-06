@@ -201,12 +201,14 @@ export function UsdtDepositoModal({ onClose, onSwitchToPix }: Props) {
               <div className="flex items-center gap-2.5">
                 <PixLogo size={28} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-white leading-tight">PIX</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-bold text-white leading-tight">PIX</span>
+                    <span className="inline-flex items-center px-1.5 py-px rounded bg-emerald-500/15 border border-emerald-500/30 text-[8px] font-bold text-emerald-300 uppercase tracking-wide">
+                      Top
+                    </span>
+                  </div>
                   <div className="text-[10px] text-[#7c8195] leading-tight mt-0.5">Depósito instantâneo</div>
                 </div>
-              </div>
-              <div className="mt-2 inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[9px] font-bold text-emerald-300 uppercase tracking-wide">
-                Recomendado
               </div>
             </button>
             {/* USDT — ATIVO */}
@@ -214,12 +216,14 @@ export function UsdtDepositoModal({ onClose, onSwitchToPix }: Props) {
               <div className="flex items-center gap-2.5">
                 <TetherLogo size={28} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-white leading-tight">USDT</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-bold text-white leading-tight">USDT</span>
+                    <span className="inline-flex items-center px-1.5 py-px rounded bg-blue-500/15 border border-blue-500/30 text-[8px] font-bold text-blue-300 uppercase tracking-wide">
+                      Tron
+                    </span>
+                  </div>
                   <div className="text-[10px] text-emerald-300 leading-tight mt-0.5">Transferência via rede</div>
                 </div>
-              </div>
-              <div className="mt-2 inline-flex items-center px-2 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-[9px] font-bold text-blue-300 uppercase tracking-wide">
-                Rede: Tron
               </div>
             </div>
           </div>
