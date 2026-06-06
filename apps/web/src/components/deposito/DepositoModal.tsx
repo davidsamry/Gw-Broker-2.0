@@ -17,6 +17,8 @@ interface DepositoModalProps {
   // pre-filled and the dropdown selection is synced; validation fires as
   // soon as the user enters a deposit amount.
   initialBonusCode?: string
+  /** Pai abre o UsdtDepositoModal. Quando set, mostra link "Pagar com USDT". */
+  onSwitchToUsdt?: () => void
 }
 
 interface CreatedDeposit {
@@ -84,7 +86,7 @@ function formatBrl(n: number): string {
   return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-export function DepositoModal({ onClose, initialBonusCode }: DepositoModalProps) {
+export function DepositoModal({ onClose, initialBonusCode, onSwitchToUsdt }: DepositoModalProps) {
   const authStore = useAuthStore()
   const profileCpf = authStore.user?.cpf ?? null
   // Pull deposit min/max from admin-edited PlatformSettings (lands in
@@ -297,13 +299,25 @@ export function DepositoModal({ onClose, initialBonusCode }: DepositoModalProps)
               <p className="text-[11px] text-[#7c8195] leading-tight mt-0.5">Depósito instantâneo via PIX</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors"
-            aria-label="Fechar"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2">
+            {onSwitchToUsdt && phase === 'form' && (
+              <button
+                onClick={onSwitchToUsdt}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors text-[10px] font-bold"
+                title="Pagar com USDT (TRC20) em vez de PIX"
+              >
+                <span className="font-black">₮</span>
+                USDT
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors"
+              aria-label="Fechar"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Body */}

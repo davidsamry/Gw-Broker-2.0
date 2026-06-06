@@ -24,6 +24,7 @@ import { RankingPanel } from '@/components/layout/RankingPanel'
 import { BonusPanel } from '@/components/layout/BonusPanel'
 import { ConfiguracoesPanel, type TradeSettings } from '@/components/layout/ConfiguracoesPanel'
 import { DepositoModal } from '@/components/deposito/DepositoModal'
+import { UsdtDepositoModal } from '@/components/deposito/UsdtDepositoModal'
 import { BonusWelcomeModal } from '@/components/layout/BonusWelcomeModal'
 import { AccountDropdown } from '@/components/layout/AccountDropdown'
 import { ASSETS, type Asset, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
@@ -166,7 +167,8 @@ export default function TradingPage() {
   const [switchModal, setSwitchModal] = useState<'demo' | 'real' | null>(null)
   const [assetInfoOpen, setAssetInfoOpen] = useState(false)
   const [assetSelectorOpen, setAssetSelectorOpen] = useState(false)
-  const [depositoOpen, setDepositoOpen] = useState(false)
+  const [depositoOpen,     setDepositoOpen]     = useState(false)
+  const [usdtDepositoOpen, setUsdtDepositoOpen] = useState(false)
   // Optional bonus code to pre-apply when the deposit modal opens. Set by
   // the BonusPanel's "Depositar agora" CTA so the user doesn't have to
   // copy/paste the code manually.
@@ -629,6 +631,13 @@ export default function TradingPage() {
         <DepositoModal
           onClose={() => { setDepositoOpen(false); setDepositoBonusCode(undefined) }}
           initialBonusCode={depositoBonusCode}
+          onSwitchToUsdt={() => { setDepositoOpen(false); setDepositoBonusCode(undefined); setUsdtDepositoOpen(true) }}
+        />
+      )}
+      {usdtDepositoOpen && (
+        <UsdtDepositoModal
+          onClose={() => setUsdtDepositoOpen(false)}
+          onSwitchToPix={() => { setUsdtDepositoOpen(false); setDepositoOpen(true) }}
         />
       )}
       {switchModal && (
