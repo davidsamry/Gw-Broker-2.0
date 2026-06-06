@@ -117,16 +117,17 @@ export async function bspayWebhookRoutes(app: FastifyInstance) {
       )
     }
 
-    // ── Lógica original (inalterada) ────────────────────────────────────────
+    // ── Processamento (PIX + crypto compartilham fluxo) ────────────────────
     const body       = (req.body ?? {}) as any
     const event      = body.event ?? body.type ?? ''
-    const externalId = body.external_id ?? body.externalId ?? body.data?.external_id
-    const status     = (body.status ?? body.data?.status ?? '').toLowerCase()
+    const data       = body.data ?? body
+    const externalId = body.external_id ?? body.externalId ?? data?.external_id
+    const status     = (body.status ?? data?.status ?? '').toLowerCase()
+    // currency_type='crypto' diferencia de PIX ('fiat')
+    const isCrypto   = data?.currency_type === 'crypto'
 
-    req.log.info({ event, externalId, status }, 'BSPay webhook received')
+    req.log.info({ event, externalId, status, isCrypto }, 'BSPay webhook received')
 
-    // Only act on cash-in confirmations. Ignore everything else (we don't
-    // do crypto / cash-out via this app yet).
     const isConfirmed =
       event === 'cashin.confirmed' ||
       status === 'paid'            ||
@@ -134,6 +135,28 @@ export async function bspayWebhookRoutes(app: FastifyInstance) {
 
     if (!isConfirmed || !externalId) {
       return reply.send({ ok: true, acted: false })
+    }
+
+    // Crypto: persiste tx_hash + from_address pra auditoria on-chain
+    // ANTES de creditar. Failure aqui nao bloqueia o credit (apenas perda
+    // de auditoria — o admin pode buscar manual via BSPay dashboard).
+    if (isCrypto) {
+      try {
+        const txHash   = data?.tx_hash ?? data?.txHash ?? null
+        const fromAddr = data?.from_address ?? data?.from ?? null
+        if (txHash || fromAddr) {
+          const { prisma } = await import('../prisma.js')
+          await prisma.$executeRaw`
+            UPDATE deposits
+            SET "cryptoTxHash"   = COALESCE(${txHash},   "cryptoTxHash"),
+                "cryptoFromAddr" = COALESCE(${fromAddr}, "cryptoFromAddr"),
+                "updatedAt"      = NOW()
+            WHERE id = ${externalId}
+          `
+        }
+      } catch (err) {
+        req.log.warn({ err, externalId }, 'Crypto webhook: failed to persist tx_hash (non-fatal)')
+      }
     }
 
     try {

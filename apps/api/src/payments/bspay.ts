@@ -119,6 +119,99 @@ export async function createCashin(input: CashinInput): Promise<CashinResponse> 
   return { qrcode, providerId, raw: json }
 }
 
+// ── Cash-in CRYPTO (USDT/BTC/etc deposit) ──────────────────────────────────
+// Diferente do PIX:
+//   - currency e' o ativo crypto ("USDT", "BTC", etc) — NAO "BRL"
+//   - chain e' obrigatorio ("tron", "ethereum", "bsc")
+//   - amount e' em CRYPTO (ex: 10.50 USDT) — BSPay NAO converte de BRL
+//   - response retorna deposit_address (carteira) + expires_at
+//
+// Spec: https://dev.bspay.co/reference/cryptocurrencies
+
+export interface CryptoCashinInput {
+  amount:      number   // valor em CRYPTO (ex: 10.5 USDT)
+  currency:    string   // "USDT" | "BTC" | "ETH" | etc
+  chain:       string   // "tron" | "ethereum" | "bsc"
+  externalId:  string   // nosso Deposit.id
+  postbackUrl: string   // HTTPS publico
+}
+
+export interface CryptoCashinResponse {
+  depositAddress: string         // carteira gerada pra esse pagamento
+  expiresAt:      Date | null    // quando o address invalida
+  providerId:     string | null  // transaction_id do BSPay
+  raw:            any
+}
+
+export async function createCryptoCashin(input: CryptoCashinInput): Promise<CryptoCashinResponse> {
+  const { baseUrl } = readConfig()
+  const token = await getAccessToken()
+
+  const res = await fetch(`${baseUrl}/v2/transactions/cashin`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type':  'application/json',
+    },
+    body: JSON.stringify({
+      amount:       input.amount,
+      currency:     input.currency,
+      chain:        input.chain,
+      external_id:  input.externalId,
+      postback_url: input.postbackUrl,
+    }),
+    signal: AbortSignal.timeout(15_000),
+  })
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`BSPAY_CRYPTO_CASHIN_FAILED:${res.status}:${body.slice(0, 400)}`)
+  }
+
+  const json = await res.json() as any
+  // Response envelope: { success: true, data: { deposit_address, expires_at, transaction_id } }
+  // Defensive: tentamos varios paths comuns.
+  const data = json?.data ?? json
+  const depositAddress = data?.deposit_address ?? data?.address ?? data?.payment_info?.address
+  const expiresAtStr   = data?.expires_at ?? data?.expiresAt ?? null
+  const providerId     = data?.transaction_id ?? data?.id ?? null
+
+  if (!depositAddress) throw new Error('BSPAY_CRYPTO_CASHIN_INVALID_RESPONSE')
+
+  return {
+    depositAddress,
+    expiresAt: expiresAtStr ? new Date(expiresAtStr) : null,
+    providerId,
+    raw: json,
+  }
+}
+
+// ── Cotacao BRL -> USDT via Binance ────────────────────────────────────────
+// BSPay nao converte BRL pra USDT automatico — user digita R$ X, calculamos
+// USDT = X / rate. Usamos Binance USDTBRL spot price (fonte mais liquida).
+// Cache de 30s — UI re-cota a cada gera nova cobranca.
+
+let cachedBrlToUsdtRate:    number | null = null
+let cachedBrlToUsdtFetchedAt: number = 0
+const RATE_CACHE_TTL_MS = 30_000
+
+export async function getBrlToUsdtRate(): Promise<number> {
+  const now = Date.now()
+  if (cachedBrlToUsdtRate && now - cachedBrlToUsdtFetchedAt < RATE_CACHE_TTL_MS) {
+    return cachedBrlToUsdtRate
+  }
+  const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=USDTBRL', {
+    signal: AbortSignal.timeout(5_000),
+  })
+  if (!res.ok) throw new Error('BINANCE_RATE_FETCH_FAILED')
+  const json = await res.json() as { price: string }
+  const rate = Number(json.price)
+  if (!isFinite(rate) || rate <= 0) throw new Error('BINANCE_RATE_INVALID')
+  cachedBrlToUsdtRate    = rate
+  cachedBrlToUsdtFetchedAt = now
+  return rate
+}
+
 // ── Health check ───────────────────────────────────────────────────────────
 // Used to surface configuration errors early (e.g. on app boot).
 export function isConfigured(): boolean {

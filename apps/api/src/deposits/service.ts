@@ -3,7 +3,7 @@ import { sendEmailAsync } from '../email/service.js'
 import { getSettings } from '../settings/service.js'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
-import { createCashin, isConfigured } from '../payments/bspay.js'
+import { createCashin, createCryptoCashin, getBrlToUsdtRate, isConfigured } from '../payments/bspay.js'
 import type { CreatePixDepositInput } from './schema.js'
 import {
   validateCodeForUser, createPendingGrantForDeposit, activateForPaidDeposit,
@@ -164,6 +164,131 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
     status:    'PENDING',
     qrcode,
     createdAt: new Date(),
+  }
+}
+
+// ── Depósito USDT TRC20 via BSPay crypto cashin ─────────────────────────
+// User digita R$ X → cotamos USDT (USDTBRL spot Binance) → criamos cobranca
+// na BSPay com currency=USDT, chain=tron, amount=USDT calculado. BSPay
+// retorna um endereco de wallet — frontend mostra + QR code do address.
+// User envia EXATAMENTE Y USDT pra esse endereco. BSPay detecta on-chain
+// e dispara webhook cashin.confirmed com tx_hash.
+//
+// O saldo creditado e o `amount` em BRL original (independe do que chegou
+// em USDT — se chegar valor diferente, o admin tem o tx_hash pra auditar).
+
+export interface CreatedUsdtDeposit {
+  id:             string
+  amountBrl:      string         // valor original em R$
+  amountUsdt:     string         // valor cobrado em USDT
+  rate:           string         // taxa USDTBRL aplicada (auditoria)
+  network:        string         // 'TRC20'
+  depositAddress: string         // wallet pra o user enviar
+  expiresAt:      Date | null    // quando a cobranca vence
+  status:         string
+  createdAt:      Date
+}
+
+export async function createUsdtDeposit(
+  userId:    string,
+  amountBrl: number,
+): Promise<CreatedUsdtDeposit> {
+  if (!isConfigured()) throw new Error('BSPAY_NOT_CONFIGURED')
+
+  // Conta REAL do user
+  const accountRows = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM accounts
+    WHERE "userId" = ${userId} AND type = 'REAL'::"AccountType"
+    LIMIT 1
+  `
+  if (accountRows.length === 0) throw new Error('REAL_ACCOUNT_NOT_FOUND')
+  const accountId = accountRows[0].id
+
+  // Auto-cancela PIX/crypto PENDING desta conta (igual createPixDeposit).
+  // Se user gerou um QR antes e nao pagou, abandonamos pra gerar novo.
+  await prisma.$transaction([
+    prisma.$executeRaw`
+      UPDATE bonus_grants
+      SET status = 'CANCELLED'::"BonusGrantStatus", "cancelledAt" = NOW()
+      WHERE status = 'PENDING'::"BonusGrantStatus"
+        AND "depositId" IN (
+          SELECT id FROM deposits
+          WHERE "accountId" = ${accountId} AND status = 'PENDING'::"DepositStatus"
+        )
+    `,
+    prisma.$executeRaw`
+      UPDATE deposits
+      SET status = 'CANCELLED'::"DepositStatus", "updatedAt" = NOW(),
+          notes = COALESCE(notes, '') || ' [auto-cancelado: novo deposito gerado]'
+      WHERE "accountId" = ${accountId} AND status = 'PENDING'::"DepositStatus"
+    `,
+  ])
+
+  // Cotacao + calculo USDT (8 casas decimais — padrao crypto)
+  const rate = await getBrlToUsdtRate()
+  const usdtAmount = Math.round((amountBrl / rate) * 1e8) / 1e8
+
+  const depositId = randomUUID()
+  const amountDec = new Prisma.Decimal(amountBrl)
+  const usdtDec   = new Prisma.Decimal(usdtAmount.toFixed(8))
+
+  // INSERT PENDING. amount em BRL, cryptoAmount em USDT.
+  await prisma.$executeRaw`
+    INSERT INTO deposits (
+      id, "accountId", amount, method, status,
+      "cryptoNetwork", "cryptoCurrency", "cryptoAmount",
+      "createdAt", "updatedAt"
+    )
+    VALUES (
+      ${depositId}, ${accountId}, ${amountDec},
+      'CRYPTO'::"DepositMethod", 'PENDING'::"DepositStatus",
+      'TRC20', 'USDT', ${usdtDec},
+      NOW(), NOW()
+    )
+  `
+
+  // Chama BSPay pra gerar endereco. Se falhar, marca FAILED e propaga erro.
+  let depositAddress: string
+  let expiresAt:      Date | null = null
+  let providerId:     string | null = null
+  try {
+    const r = await createCryptoCashin({
+      amount:      usdtAmount,
+      currency:    'USDT',
+      chain:       'tron',
+      externalId:  depositId,
+      postbackUrl: buildPostbackUrl(),
+    })
+    depositAddress = r.depositAddress
+    expiresAt      = r.expiresAt
+    providerId     = r.providerId
+  } catch (err: any) {
+    await prisma.$executeRaw`
+      UPDATE deposits SET status = 'FAILED'::"DepositStatus", "updatedAt" = NOW()
+      WHERE id = ${depositId}
+    `
+    throw err
+  }
+
+  // Persiste endereco + provider id pra reconciliacao do webhook
+  await prisma.$executeRaw`
+    UPDATE deposits
+    SET "cryptoAddress" = ${depositAddress},
+        "externalId"    = ${providerId},
+        "updatedAt"     = NOW()
+    WHERE id = ${depositId}
+  `
+
+  return {
+    id:             depositId,
+    amountBrl:      amountDec.toString(),
+    amountUsdt:     usdtAmount.toFixed(8),
+    rate:           rate.toFixed(4),
+    network:        'TRC20',
+    depositAddress,
+    expiresAt,
+    status:         'PENDING',
+    createdAt:      new Date(),
   }
 }
 

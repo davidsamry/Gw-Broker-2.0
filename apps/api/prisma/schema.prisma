@@ -321,13 +321,21 @@ model KycSubmission {
 model Deposit {
   id          String         @id @default(cuid())
   accountId   String
-  amount      Decimal        @db.Decimal(18, 2)
+  amount      Decimal        @db.Decimal(18, 2)  // valor em BRL (mesmo pra crypto, convertido)
   bonus       Decimal?       @db.Decimal(18, 2)  // promotional bonus credited on payment
   method      DepositMethod  @default(PIX)
   externalId  String?        // gateway transaction reference
   status      DepositStatus  @default(PENDING)
   isFake      Boolean        @default(false)     // admin marker: test/manual deposit
   notes       String?
+  // ── Crypto-specific (USDT/BTC/etc via BSPay cashin) ──────────────────
+  // Preenchidos quando method=CRYPTO. Null pra PIX.
+  cryptoNetwork  String?   // "TRC20" | "ERC20" | "BEP20"
+  cryptoCurrency String?   // "USDT" | "BTC" | etc
+  cryptoAddress  String?   // endereco da carteira gerado pela BSPay (user envia pra ca')
+  cryptoAmount   Decimal?  @db.Decimal(18, 8)  // valor em crypto (ex: 10.50 USDT)
+  cryptoTxHash   String?   // hash da tx on-chain (preenchido pelo webhook)
+  cryptoFromAddr String?   // endereco do payer (auditoria)
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   paidAt      DateTime?
@@ -336,6 +344,7 @@ model Deposit {
 
   @@index([status, createdAt])
   @@index([accountId, status])
+  @@index([cryptoTxHash])  // pra lookup rapido no webhook
   @@map("deposits")
 }
 
