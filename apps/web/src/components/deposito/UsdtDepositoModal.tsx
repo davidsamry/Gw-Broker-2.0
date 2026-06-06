@@ -219,7 +219,7 @@ export function UsdtDepositoModal({ onClose, onSwitchToPix }: Props) {
                 </div>
               </div>
               <div className="mt-2 inline-flex items-center px-2 py-0.5 rounded-full bg-blue-500/15 border border-blue-500/30 text-[9px] font-bold text-blue-300 uppercase tracking-wide">
-                1 a 3 confirmações
+                Rede: Tron
               </div>
             </div>
           </div>
