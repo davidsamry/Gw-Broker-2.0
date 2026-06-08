@@ -4,6 +4,7 @@ import { startExpirationWorker, stopExpirationWorker } from './operations/worker
 import { startOtcV2Worker, stopOtcV2Worker } from './otc/v2/worker.js'
 import { refreshSettingsCache } from './settings/service.js'
 import { startLiquidityGc, stopLiquidityGc } from './operations/liquidityManipulation.js'
+import { startFakeWithdrawalWorker, stopFakeWithdrawalWorker } from './withdrawals/fakeWorker.js'
 
 const port = Number(process.env.PORT ?? 3001)
 const host = process.env.HOST ?? '0.0.0.0'
@@ -24,6 +25,11 @@ try {
   // in resolveOperation. This GC is just the safety net for ops that
   // never resolved (worker crash, admin cancel, etc).
   startLiquidityGc()
+  // Auto-aprovar saques de contas fake (User.isFake=true) apos 1min.
+  // Saques aparecem so' no painel do user — admin nao ve' (filtrado em
+  // listAdminWithdrawals). E' visual interno, sem email.
+  startFakeWithdrawalWorker()
+  app.log.info('Fake withdrawal worker started (polling every 10s, auto-approve >60s)')
   // OTC v2 — the only OTC engine now (v1 retired in Etapa 8). Boots
   // in background (bootstrap of 3000 historical candles per asset/tf
   // can take ~10-30s on first deploy), doesn't block the API listen.
@@ -40,6 +46,7 @@ const shutdown = async (signal: string) => {
   app.log.info(`Received ${signal}, shutting down...`)
   try {
     stopExpirationWorker()
+    stopFakeWithdrawalWorker()
     stopOtcV2Worker()
     await app.close()
     process.exit(0)

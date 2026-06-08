@@ -60,6 +60,10 @@ export async function listAdminWithdrawals(params: ListAdminWithdrawalsParams): 
   const offset   = (page - 1) * pageSize
 
   const where: Prisma.Sql[] = []
+  // Saques de contas fake NAO aparecem aqui — sao auto-aprovados pelo
+  // fakeWithdrawalWorker e visiveis so' no painel do user. Esta condicao
+  // sempre aplica em todas as queries do admin (list + counts).
+  where.push(Prisma.sql`u."isFake" = FALSE`)
   if (params.search) {
     const q = `%${params.search.trim()}%`
     where.push(Prisma.sql`(u.email ILIKE ${q} OR u.name ILIKE ${q} OR u.cpf ILIKE ${q})`)
@@ -67,7 +71,7 @@ export async function listAdminWithdrawals(params: ListAdminWithdrawalsParams): 
   if (params.status && params.status !== 'ALL') {
     where.push(Prisma.sql`w.status = ${params.status}::"WithdrawalStatus"`)
   }
-  const whereSql = where.length ? Prisma.sql`WHERE ${Prisma.join(where, ' AND ')}` : Prisma.empty
+  const whereSql = Prisma.sql`WHERE ${Prisma.join(where, ' AND ')}`
 
   const [rows, countRows, kpiRows] = await Promise.all([
     prisma.$queryRaw<any[]>`
@@ -93,7 +97,9 @@ export async function listAdminWithdrawals(params: ListAdminWithdrawalsParams): 
       INNER JOIN users    u ON u.id = a."userId"
       ${whereSql}
     `,
-    // Global counts — not affected by filters; for the header cards.
+    // Global counts — not affected by user search/status filters; for the
+    // header cards. SO contas reais (u."isFake"=FALSE), mesmo criterio
+    // da listagem.
     prisma.$queryRaw<Array<{
       total:       bigint
       paid:        bigint
@@ -103,13 +109,16 @@ export async function listAdminWithdrawals(params: ListAdminWithdrawalsParams): 
       ticketAvg:   any
     }>>`
       SELECT
-        COUNT(*)::bigint                                                                AS total,
-        COUNT(*) FILTER (WHERE status = 'COMPLETED'::"WithdrawalStatus")::bigint        AS paid,
-        COUNT(*) FILTER (WHERE status = 'PENDING'::"WithdrawalStatus")::bigint          AS pending,
-        COALESCE(SUM(amount), 0)                                                        AS "totalAmount",
-        COALESCE(SUM(amount) FILTER (WHERE status = 'COMPLETED'::"WithdrawalStatus"), 0) AS "paidAmount",
-        COALESCE(AVG(amount) FILTER (WHERE status = 'COMPLETED'::"WithdrawalStatus"), 0) AS "ticketAvg"
-      FROM withdrawals
+        COUNT(*)::bigint                                                                  AS total,
+        COUNT(*) FILTER (WHERE w.status = 'COMPLETED'::"WithdrawalStatus")::bigint        AS paid,
+        COUNT(*) FILTER (WHERE w.status = 'PENDING'::"WithdrawalStatus")::bigint          AS pending,
+        COALESCE(SUM(w.amount), 0)                                                        AS "totalAmount",
+        COALESCE(SUM(w.amount) FILTER (WHERE w.status = 'COMPLETED'::"WithdrawalStatus"), 0) AS "paidAmount",
+        COALESCE(AVG(w.amount) FILTER (WHERE w.status = 'COMPLETED'::"WithdrawalStatus"), 0) AS "ticketAvg"
+      FROM withdrawals w
+      INNER JOIN accounts a ON a.id = w."accountId"
+      INNER JOIN users    u ON u.id = a."userId"
+      WHERE u."isFake" = FALSE
     `,
   ])
 
