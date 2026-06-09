@@ -50,8 +50,36 @@ function useReveal() {
   }, [])
 }
 
+// Detecta se ha um token JWT no localStorage (mesma chave que o
+// auth store usa). Retorna null durante SSR + primeiro render do
+// client (pra evitar hydration mismatch — o servidor nao tem acesso
+// ao localStorage), e true/false depois do mount.
+//
+// Token expirado retorna true aqui — e' OK: ao chegar em /app o
+// guard do app valida e, se invalido, redireciona pro /login.
+function useIsLogged(): boolean | null {
+  const [logged, setLogged] = useState<boolean | null>(null)
+  useEffect(() => {
+    try {
+      setLogged(!!localStorage.getItem('token'))
+    } catch {
+      setLogged(false)
+    }
+  }, [])
+  return logged
+}
+
 export default function VxLandingPage() {
   useReveal()
+  const isLogged = useIsLogged()
+  // Logado → "Entrar" vira "Painel" e linka direto pra /app.
+  // Default (SSR/loading) renderiza o estado deslogado pra evitar
+  // mismatch — depois do mount troca pra "Painel" se houver token.
+  const loggedIn        = isLogged === true
+  const entrarHref      = loggedIn ? '/app' : '/login'
+  const entrarLabel     = loggedIn ? 'Acessar painel' : 'Entrar'
+  const heroPrimaryHref = loggedIn ? '/app' : '/login?tab=register'
+  const heroPrimaryText = loggedIn ? 'Voltar pro painel' : 'Abrir minha conta'
 
   // Parallax sutil no grid de fundo — segue scroll com um leve offset.
   const [scrollY, setScrollY] = useState(0)
@@ -146,22 +174,29 @@ export default function VxLandingPage() {
             <a href="#faq"          className="hover:text-white transition-colors">FAQ</a>
           </nav>
           <div className="flex items-center gap-2">
+            {/* "Entrar" sempre visivel (inclusive mobile). Se ja' logado,
+                vira "Acessar painel" e linka direto pro /app — pula a
+                tela de login pra quem ja' tem token no dispositivo. */}
             <Link
-              href="/login"
-              className="hidden sm:inline-flex items-center justify-center px-3.5 py-2 rounded-xl border border-white/10 bg-white/5 text-sm font-semibold text-white hover:bg-white/10 hover:border-white/20 transition"
+              href={entrarHref}
+              className="inline-flex items-center justify-center px-3 sm:px-3.5 py-2 rounded-xl border border-white/10 bg-white/5 text-xs sm:text-sm font-semibold text-white hover:bg-white/10 hover:border-white/20 transition whitespace-nowrap"
             >
-              Entrar
+              {entrarLabel}
             </Link>
-            <Link
-              href="/login?tab=register"
-              className="inline-flex items-center justify-center px-3.5 py-2 rounded-xl text-sm font-bold text-white transition hover:brightness-110"
-              style={{
-                background: 'linear-gradient(135deg, #3080ff, #22d3ee)',
-                boxShadow: '0 14px 40px -8px rgba(48,128,255,.45)',
-              }}
-            >
-              Abrir conta
-            </Link>
+            {/* "Abrir conta" some quando ja' logado — nao faz sentido
+                cadastrar de novo. */}
+            {!loggedIn && (
+              <Link
+                href="/login?tab=register"
+                className="inline-flex items-center justify-center px-3 sm:px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold text-white transition hover:brightness-110 whitespace-nowrap"
+                style={{
+                  background: 'linear-gradient(135deg, #3080ff, #22d3ee)',
+                  boxShadow: '0 14px 40px -8px rgba(48,128,255,.45)',
+                }}
+              >
+                Abrir conta
+              </Link>
+            )}
           </div>
         </div>
       </header>
@@ -197,14 +232,14 @@ export default function VxLandingPage() {
 
               <div className="mt-6 flex flex-wrap gap-3">
                 <Link
-                  href="/login?tab=register"
+                  href={heroPrimaryHref}
                   className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold text-white transition hover:brightness-110"
                   style={{
                     background: 'linear-gradient(135deg, #3080ff, #22d3ee)',
                     boxShadow: '0 18px 55px -10px rgba(48,128,255,.5)',
                   }}
                 >
-                  Abrir minha conta
+                  {heroPrimaryText}
                   <ArrowRight size={16} />
                 </Link>
                 <a
@@ -460,26 +495,30 @@ export default function VxLandingPage() {
               Pronto pra começar?
             </h2>
             <p className="mt-3 mx-auto max-w-[55ch] text-white/70 leading-relaxed">
-              Crie sua conta agora e teste a plataforma com demo gratuita. Sem cartão de crédito, sem compromisso.
+              {loggedIn
+                ? 'Sua conta ja\' esta ativa. Volte pro painel e continue de onde parou.'
+                : 'Crie sua conta agora e teste a plataforma com demo gratuita. Sem cartao de credito, sem compromisso.'}
             </p>
             <div className="mt-7 flex flex-wrap justify-center gap-3">
               <Link
-                href="/login?tab=register"
+                href={heroPrimaryHref}
                 className="inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl text-sm font-bold text-white transition hover:brightness-110"
                 style={{
                   background: 'linear-gradient(135deg, #3080ff, #22d3ee)',
                   boxShadow: '0 18px 55px -10px rgba(48,128,255,.5)',
                 }}
               >
-                Abrir minha conta grátis
+                {loggedIn ? 'Voltar pro painel' : 'Abrir minha conta grátis'}
                 <ArrowRight size={16} />
               </Link>
-              <Link
-                href="/login"
-                className="inline-flex items-center px-6 py-3.5 rounded-2xl text-sm font-semibold text-white/90 border border-white/12 bg-white/5 hover:bg-white/10 transition"
-              >
-                Já tenho conta
-              </Link>
+              {!loggedIn && (
+                <Link
+                  href="/login"
+                  className="inline-flex items-center px-6 py-3.5 rounded-2xl text-sm font-semibold text-white/90 border border-white/12 bg-white/5 hover:bg-white/10 transition"
+                >
+                  Já tenho conta
+                </Link>
+              )}
             </div>
           </div>
         </section>
@@ -516,8 +555,10 @@ export default function VxLandingPage() {
               <span>© {new Date().getFullYear()} VX Global. Todos os direitos reservados.</span>
             </div>
             <div className="flex gap-5 text-white/55">
-              <Link href="/login" className="hover:text-white transition-colors">Entrar</Link>
-              <Link href="/login?tab=register" className="hover:text-white transition-colors">Abrir conta</Link>
+              <Link href={entrarHref} className="hover:text-white transition-colors">{entrarLabel}</Link>
+              {!loggedIn && (
+                <Link href="/login?tab=register" className="hover:text-white transition-colors">Abrir conta</Link>
+              )}
             </div>
           </div>
         </div>
