@@ -180,14 +180,14 @@ export default function VxLandingPage() {
               </div>
 
               <h1 className="mt-5 text-4xl md:text-[54px] font-black leading-[1.02] tracking-tight">
-                A corretora que une{' '}
+                A corretora que transforma oportunidades em{' '}
                 <span
                   className="bg-clip-text text-transparent"
                   style={{ backgroundImage: 'linear-gradient(90deg, #fff, #c8e0ff 50%, #22d3ee)' }}
                 >
-                  tecnologia
-                </span>{' '}
-                e segurança para você operar.
+                  resultados
+                </span>
+                .
               </h1>
 
               <p className="mt-4 max-w-[55ch] text-white/70 leading-relaxed text-[15px]">
