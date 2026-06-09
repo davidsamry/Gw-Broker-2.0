@@ -32,11 +32,11 @@ export default function AdminStepUpPage() {
   // trust-device cookie. Mostra loader em vez do form pra evitar flash.
   const [trustChecking, setTrustChecking] = useState(true)
 
-  // Guards: se nao logado → /login. Se logado mas nao admin → /.
+  // Guards: se nao logado → /login. Se logado mas nao admin → /app.
   useEffect(() => {
     if (loading) return
     if (!user) { router.replace('/login?next=/admin/login'); return }
-    if (user.role !== 'ADMIN') { router.replace('/'); return }
+    if (user.role !== 'ADMIN') { router.replace('/app'); return }
   }, [user, loading, router])
 
   // Tenta step-up automatico via trust-device cookie. Se o user ja' marcou
@@ -186,7 +186,7 @@ export default function AdminStepUpPage() {
 
         <div className="text-center mt-5">
           <Link
-            href="/"
+            href="/app"
             className="text-xs text-[#8b8f9a] hover:text-white transition-colors"
           >
             <span className="text-emerald-400">← Voltar pro trader</span>

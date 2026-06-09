@@ -94,8 +94,9 @@ function LoginPageInner() {
       // /admin/* deslogado) mande direto pra rota desejada — apos logar
       // como user, o admin segue pra /admin/login que faz o step-up 2FA.
       // Sanitiza: so' aceita paths que comecam com /, evitando open-redirect.
+      // Default landing after login = /app (a "/" agora e' landing publica).
       const nextRaw = searchParams?.get('next') ?? ''
-      const next    = nextRaw.startsWith('/') ? nextRaw : '/'
+      const next    = nextRaw.startsWith('/') ? nextRaw : '/app'
       router.replace(next)
     } catch (err: any) {
       const errCode = err.response?.data?.error
@@ -139,7 +140,7 @@ function LoginPageInner() {
       // Use email prefix as name since we don't ask for name
       const name = rEmail.split('@')[0]
       await register(name, rEmail, rPassword, cpfDigits)
-      router.replace('/')
+      router.replace('/app')
     } catch (err: any) {
       const code = err.response?.data?.error
       if      (code === 'EMAIL_TAKEN') setError('Este e-mail já está em uso.')

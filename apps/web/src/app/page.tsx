@@ -1,680 +1,710 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import { useAuthStore, useCurrentAccount } from '@/store/auth'
-import { useOperationsStore } from '@/store/operations'
-import { GraduationCap, Plus, Bell, ChevronDown, X } from 'lucide-react'
-import { getAccountLevel } from '@/lib/accountLevel'
-import { Sidebar } from '@/components/layout/Sidebar'
-import { Header } from '@/components/layout/Header'
-import { Logo } from '@/components/layout/Logo'
-import { MobileNav } from '@/components/layout/MobileNav'
-import { TradingChart } from '@/components/trading/TradingChart'
-import { TradingPanel } from '@/components/trading/TradingPanel'
-import { TradingCompactCard } from '@/components/trading/TradingCompactCard'
-import { AccountSwitchModal } from '@/components/layout/AccountSwitchModal'
-import { AssetInfoModal } from '@/components/trading/AssetInfoModal'
-import { AssetSelectorModal } from '@/components/trading/AssetSelectorModal'
-import { NiveisModal } from '@/components/layout/NiveisModal'
-import { SupportPanel } from '@/components/layout/SupportPanel'
-import { ContaPage } from '@/components/conta/ContaPage'
-import { HistoricoPanel } from '@/components/layout/HistoricoPanel'
-import { RankingPanel } from '@/components/layout/RankingPanel'
-import { BonusPanel } from '@/components/layout/BonusPanel'
-import { ConfiguracoesPanel, type TradeSettings } from '@/components/layout/ConfiguracoesPanel'
-import { DepositoModal } from '@/components/deposito/DepositoModal'
-import { UsdtDepositoModal } from '@/components/deposito/UsdtDepositoModal'
-import { BonusWelcomeModal } from '@/components/layout/BonusWelcomeModal'
-import { AccountDropdown } from '@/components/layout/AccountDropdown'
-import { ASSETS, type Asset, type ActiveTrade, type ChartTradeEvent } from '@/lib/mockData'
-import { useBinanceTicker } from '@/lib/binanceMarket'
-import { fetchMarketAssets, fetchDisabledAssetIds } from '@/lib/marketApi'
-import { useOperationsStream } from '@/lib/operationsStream'
-import { api } from '@/lib/api'
-import { cn } from '@/lib/utils'
-import { playResolveSound } from '@/lib/sounds'
-
-type SidebarTab = 'TRADE' | 'HISTORICO' | 'RANKING' | 'SUPORTE' | 'CONTA' | 'COPY' | 'BONUS'
-
-// ── localStorage-backed asset tabs (persist across sessions) ──────────────
-// IDs only — full Asset objects are resolved against ASSETS on read so a
-// catalog change (asset removed / renamed) doesn't crash; missing IDs are
-// silently dropped.
+// VX Global — Landing institucional
 //
-// IMPORTANT: localStorage is read inside a useEffect, NOT inside the
-// useState initializer. Reading from useState would diverge between SSR
-// (typeof window === 'undefined' → defaults) and the client's first
-// render (reads persisted values), causing a hydration mismatch on the
-// asset tabs (FlagPair tree differs).
-const OPEN_ASSETS_KEY     = 'vx:openAssetIds'
-const SELECTED_ASSET_KEY  = 'vx:selectedAssetId'
-const DEFAULT_OPEN_ASSETS = [ASSETS[0], ASSETS[3]]
-const DEFAULT_SELECTED    = ASSETS[3]
+// Servida em vx-global.com/ (root publico). Quem ja' tem conta clica em
+// "Entrar no painel" e vai pra /app (onde mora a plataforma de trading
+// — movida pra la' quando criamos essa landing).
+//
+// Layout root do site usa `body className="overflow-hidden h-full"` pra
+// travar scroll do app de trading. Escapamos disso com um wrapper
+// `fixed inset-0 overflow-y-auto` — cria scroll proprio sem precisar
+// mexer no body (e sem flash de unstyled content).
+//
+// Animacoes: IntersectionObserver simples + classes .reveal/.in. Cores
+// derivadas da paleta VX: #3080ff (primary) + #22d3ee (accent ciano) +
+// #0e1019 (bg) + #171b27 (card). Tudo Tailwind inline pra evitar
+// poluir o globals do app.
 
-export default function TradingPage() {
-  const router        = useRouter()
-  const authStore     = useAuthStore()
-  const currentAccount = useCurrentAccount(authStore)
+import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
+import Image from 'next/image'
+import {
+  Zap, Shield, BarChart3, Smartphone, Wallet, Headphones,
+  TrendingUp, Globe, LineChart, Briefcase,
+  ArrowRight, CheckCircle2, ChevronDown, Star,
+} from 'lucide-react'
 
-  // Live operations sync — opens an SSE to /operations/stream so trades
-  // placed via the Bot API (or on a second logged-in device) appear in
-  // this tab instantly + resolution credits show up without reload.
-  useOperationsStream()
-
+// ── Reveal-on-scroll hook ────────────────────────────────────────────────
+// Substitui o IntersectionObserver inline do mock do Rivox. Adiciona
+// classe `in` aos filhos com `data-reveal` quando entram no viewport,
+// reaproveitando os keyframes inline definidos abaixo.
+function useReveal() {
   useEffect(() => {
-    authStore.init().then(() => {
-      if (!useAuthStore.getState().user) router.replace('/login')
-    })
-  }, [])
-
-  // Pre-warm the API connection: opens TLS + TCP + CORS preflight on page load
-  // so the first trade doesn't pay the ~340ms handshake cost. Cheap fire-and-
-  // forget GET — server returns 200 in <5ms.
-  useEffect(() => {
-    api.get('/health').catch(() => { /* silent: warming, not blocking */ })
-  }, [])
-
-  useEffect(() => {
-    let active = true
-
-    async function loadMarketAssets() {
-      try {
-        // Parallel: Binance assets come pre-filtered by admin status
-        // (handled server-side in listBinanceAssets). OTC entries live
-        // in mockData.ts on the frontend, so we also fetch the list of
-        // admin-disabled IDs to hide them client-side.
-        const [binanceAssets, disabledIds] = await Promise.all([
-          fetchMarketAssets('BINANCE'),
-          fetchDisabledAssetIds().catch(() => [] as string[]),
-        ])
-        if (!active || binanceAssets.length === 0) return
-
-        const disabled = new Set(disabledIds)
-        const internalAssets = ASSETS.filter(
-          (asset) => asset.source !== 'BINANCE' && !disabled.has(asset.id),
-        )
-        const nextAssets = [...internalAssets, ...binanceAssets]
-
-        setAssets(nextAssets)
-        setSelectedAsset((prev) => nextAssets.find((asset) => asset.id === prev.id) ?? prev)
-        setOpenAssets((prev) => prev.map((asset) => nextAssets.find((next) => next.id === asset.id) ?? asset))
-      } catch {
-        if (active) setAssets(ASSETS)
-      }
-    }
-
-    loadMarketAssets()
-    return () => { active = false }
-  }, [])
-
-  const [assets, setAssets] = useState<Asset[]>(ASSETS)
-  // openAssets + selectedAsset persist across sessions in localStorage so
-  // the user comes back to the same tabs they last had open. Stored as
-  // bare IDs and re-resolved against ASSETS after mount (NOT in the
-  // useState initializer — that would cause a hydration mismatch since
-  // SSR can't read localStorage and the asset tab tree would diverge).
-  const [selectedAsset, setSelectedAsset] = useState<Asset>(DEFAULT_SELECTED)
-  const [openAssets,    setOpenAssets]    = useState<Asset[]>(DEFAULT_OPEN_ASSETS)
-
-  // After hydration, restore the user's last-seen tabs. Defaults render
-  // for ~16ms before this fires, but the swap is invisible because the
-  // chart and trading panel hide until auth.init resolves anyway.
-  // `restoredRef` flips to true after the restore completes — the persist
-  // effects below check it to avoid overwriting the persisted state with
-  // the defaults on initial mount (effects fire even when state hasn't
-  // changed yet, so without the guard the defaults would clobber the
-  // user's saved tabs on every page load).
-  const restoredRef = useRef(false)
-  useEffect(() => {
-    if (typeof window === 'undefined') { restoredRef.current = true; return }
-    try {
-      const raw = localStorage.getItem(OPEN_ASSETS_KEY)
-      if (raw) {
-        const ids = JSON.parse(raw) as unknown
-        if (Array.isArray(ids)) {
-          const resolved = ids
-            .map((id) => ASSETS.find((a) => a.id === id))
-            .filter((a): a is Asset => !!a)
-          if (resolved.length > 0) setOpenAssets(resolved)
-        }
-      }
-      const selId = localStorage.getItem(SELECTED_ASSET_KEY)
-      if (selId) {
-        const sel = ASSETS.find((a) => a.id === selId)
-        if (sel) setSelectedAsset(sel)
-      }
-    } catch { /* quota / parse / disabled */ }
-    restoredRef.current = true
-  }, [])
-
-  // Persist on every change. Guarded by restoredRef so the initial mount
-  // (still rendering defaults) doesn't write defaults to localStorage
-  // before the restore effect above has had a chance to read the
-  // previously persisted values.
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!restoredRef.current) return
-    try { localStorage.setItem(OPEN_ASSETS_KEY, JSON.stringify(openAssets.map(a => a.id))) }
-    catch { /* quota / disabled */ }
-  }, [openAssets])
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!restoredRef.current) return
-    try { localStorage.setItem(SELECTED_ASSET_KEY, selectedAsset.id) }
-    catch { /* quota / disabled */ }
-  }, [selectedAsset])
-  const [switchModal, setSwitchModal] = useState<'demo' | 'real' | null>(null)
-  const [assetInfoOpen, setAssetInfoOpen] = useState(false)
-  const [assetSelectorOpen, setAssetSelectorOpen] = useState(false)
-  const [depositoOpen,     setDepositoOpen]     = useState(false)
-  const [usdtDepositoOpen, setUsdtDepositoOpen] = useState(false)
-  // Optional bonus code to pre-apply when the deposit modal opens. Set by
-  // the BonusPanel's "Depositar agora" CTA so the user doesn't have to
-  // copy/paste the code manually.
-  const [depositoBonusCode, setDepositoBonusCode] = useState<string | undefined>(undefined)
-
-  // Deep-link support — landing on the trading page with `?deposit=1` or
-  // `?bonus=CODE` (or both) opens the deposit modal automatically, with
-  // the bonus code pre-applied when present. Same effect as clicking the
-  // BonusPanel's "Depositar agora" CTA. Used by email campaigns, shareable
-  // promo links, and the BÔNUS welcome modal's call-to-action so the
-  // recipient lands one step away from depositing.
-  //
-  // After consuming the params we wipe them via history.replaceState so a
-  // page refresh doesn't reopen the modal indefinitely. We use the raw
-  // History API (not router.replace) because router.replace would re-run
-  // the page render and unmount the modal we just opened.
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const params  = new URLSearchParams(window.location.search)
-    const bonus   = params.get('bonus')?.trim() || null
-    const wantOpen = params.get('deposit') === '1' || !!bonus
-    if (!wantOpen) return
-    if (bonus) setDepositoBonusCode(bonus)
-    setDepositoOpen(true)
-    const url = new URL(window.location.href)
-    url.searchParams.delete('deposit')
-    url.searchParams.delete('bonus')
-    window.history.replaceState({}, '', url.toString())
-  }, [])
-  const [contaInitialTab, setContaInitialTab] = useState<'retirada' | 'minha-conta'>('minha-conta')
-  const [configOpen, setConfigOpen] = useState(false)
-  const [niveisOpen, setNiveisOpen] = useState(false)
-  const [theme, setTheme] = useState<'diurno' | 'crepusculo' | 'noite'>('noite')
-  const [tradeSettings, setTradeSettings] = useState<TradeSettings>({
-    autoScroll: true,
-    performanceMode: true,
-    shortLabels: true,
-  })
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('TRADE')
-  const [mobileAccountOpen, setMobileAccountOpen] = useState(false)
-  const [activeTrades, setActiveTrades] = useState<ActiveTrade[]>([])
-  const [chartTradeEvents, setChartTradeEvents] = useState<ChartTradeEvent[]>([])
-
-  // ── Chart-marker sync for remote/bot trades ───────────────────────────
-  // Locally-placed trades go through handleTradePlaced → activeTrades.
-  // Trades opened via the Bot API or on another logged-in device arrive
-  // via /operations/stream → useOperationsStream upserts into the store,
-  // but the chart's activeTrades wouldn't see them without this effect.
-  //
-  // Adds OPEN ops (for the currently-selected asset only) that aren't
-  // already in activeTrades, and prunes activeTrades entries whose store
-  // status flipped away from OPEN (resolved or cancelled). Entries the
-  // store hasn't seen yet (fresh local trades pending SSE delivery) stay
-  // — they'll be reconciled on the next pass.
-  const storeOps = useOperationsStore((s) => s.operations)
-  // BRT-shifted epoch seconds (UTC - 3h) — matches what placeTrade uses
-  // for entryTime/expiryTime so the chart renders both with one formula.
-  const BRT_OFFSET = -3 * 3600
-  useEffect(() => {
-    // Detect ops that were OPEN in our local activeTrades but the store now
-    // reports as resolved (WON/LOST). These are remote/bot trades that
-    // never went through handleTradePlaced — so the result card would
-    // never paint without this branch. Build a RESOLVED ChartTradeEvent
-    // per match and push to chartTradeEvents (same shape handleTradePlaced
-    // uses for UI-placed trades). CANCELLED skips the card on purpose:
-    // a failed-to-place trade shouldn't celebrate a result.
-    const storeById = new Map(storeOps.map((o) => [o.id, o]))
-    const resolvedFromActive: ChartTradeEvent[] = []
-    for (const t of activeTrades) {
-      const op = storeById.get(t.id)
-      if (!op) continue                            // store hasn't seen it yet — keep waiting
-      if (op.status === 'OPEN') continue           // still in flight — keep marker
-      if (op.status === 'CANCELLED') continue      // silent removal — no card
-      if (op.assetId !== selectedAsset.id) continue // only the on-screen asset
-      resolvedFromActive.push({
-        id:         op.id,
-        entryPrice: parseFloat(op.entryPrice ?? '0'),
-        entryTime:  Math.floor(new Date(op.openedAt).getTime() / 1000) + BRT_OFFSET,
-        expiryTime: Math.floor(new Date(op.expiresAt).getTime() / 1000) + BRT_OFFSET,
-        direction:  op.direction,
-        amount:     parseFloat(op.amount),
-        payout:     op.payout,
-        status:     'RESOLVED',
-        won:        op.status === 'WON',
-        profit:     parseFloat(op.profit ?? '0'),
-      })
-    }
-    if (resolvedFromActive.length > 0) {
-      // Dedupe by id — if handleTradePlaced already pushed (UI trade), the
-      // last write wins (same payload anyway). Bot/remote trades always
-      // land here for the first time.
-      setChartTradeEvents((prev) => {
-        const incomingIds = new Set(resolvedFromActive.map((e) => e.id))
-        return [...prev.filter((e) => !incomingIds.has(e.id)), ...resolvedFromActive]
-      })
-      // Sound: 1 toque por op (dedupe interno por id). Cobre tanto trades
-      // do bot/outro device (que NÃO passam por handleTradePlaced) quanto
-      // trades locais cujo card chegou aqui antes do GET resolver. Se já
-      // tocou via handleTradePlaced, o Set interno bloqueia o duplo.
-      for (const ev of resolvedFromActive) {
-        playResolveSound(ev.id, ev.won === true)
-      }
-    }
-
-    setActiveTrades((prev) => {
-      const prevIds        = new Set(prev.map((t) => t.id))
-      const storeOpenIds   = new Set(storeOps.filter((o) => o.status === 'OPEN').map((o) => o.id))
-      const storeKnownIds  = new Set(storeOps.map((o) => o.id))
-
-      // 1. Drop entries the store now reports as resolved/cancelled.
-      //    Untouched if the store doesn't know the trade at all (fresh
-      //    optimistic local trade — SSE will deliver shortly).
-      const trimmed = prev.filter((t) => !storeKnownIds.has(t.id) || storeOpenIds.has(t.id))
-
-      // 2. Add remote OPEN ops for the current asset that we don't yet have.
-      const additions = storeOps
-        .filter((o) => o.status === 'OPEN' && o.assetId === selectedAsset.id && !prevIds.has(o.id))
-        .map((o) => ({
-          id:         o.id,
-          entryPrice: parseFloat(o.entryPrice ?? '0'),
-          entryTime:  Math.floor(new Date(o.openedAt).getTime() / 1000) + BRT_OFFSET,
-          expiryTime: Math.floor(new Date(o.expiresAt).getTime() / 1000) + BRT_OFFSET,
-          direction:  o.direction,
-          amount:     parseFloat(o.amount),
-          payout:     o.payout,
-        }))
-
-      if (trimmed.length === prev.length && additions.length === 0) return prev
-      return [...trimmed, ...additions]
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeOps, selectedAsset.id])
-  const binanceTicker = useBinanceTicker(selectedAsset.source === 'BINANCE' ? selectedAsset.marketSymbol : undefined)
-  const displayPrice  = binanceTicker?.price ?? selectedAsset.price
-  // Signals to the chart whether `displayPrice` is fresh stream data
-  // (true) or the stale static asset.price fallback (false). Lets the
-  // chart's initial-sync logic distinguish "trust this price" from
-  // "ignore until the stream arrives" — eliminates the load-time
-  // candle jump. Binance kline WS is the only fresh source now.
-  const hasFreshTicker = binanceTicker != null
-
-  function handleTradePlaced(trade: ChartTradeEvent | null) {
-    // Legacy null call from TradingPanel's cleanup timeout is now redundant:
-    // we handle per-trade cleanup ourselves via setTimeout below.
-    if (!trade) return
-
-    if (trade.status === 'OPEN') {
-      // `replacesId` present → promotion call from TradingPanel after
-      // the POST returned. Drop both the old local-* entry AND any
-      // entry already keyed by the server uuid (the SSE 'created'
-      // upsert may have raced ahead and inserted one in the useEffect
-      // above). Then insert the canonical uuid entry. Net result: 1
-      // marker per trade regardless of POST-vs-SSE arrival order.
-      // Without this branch the user sees "1 click → 2 markers" (and
-      // the local-* one gets pruned a moment later by the useEffect,
-      // matching the reported "abre normal, depois tenta abrir outra,
-      // some dos pendentes mas fica no gráfico" behaviour).
-      setActiveTrades(prev => [
-        ...prev.filter(t => t.id !== trade.id && t.id !== trade.replacesId),
-        {
-          id:         trade.id,
-          entryPrice: trade.entryPrice,
-          entryTime:  trade.entryTime,
-          expiryTime: trade.expiryTime,
-          direction:  trade.direction,
-          amount:     trade.amount,
-          payout:     trade.payout,
-        },
-      ])
-    } else if (trade.status === 'CANCELLED') {
-      // Optimistic trade failed at the server — silently remove the marker.
-      // Stake refund + balance reconciliation happen at the call site.
-      setActiveTrades(prev => prev.filter(t => t.id !== trade.id))
-    } else { // RESOLVED
-      setActiveTrades(prev => prev.filter(t => t.id !== trade.id))
-      // Persist the result card on the chart until the user clicks its X.
-      // (Previously auto-dismissed after 4s — founder feedback: traders want
-      // to keep the result visible while they analyse the next setup.)
-      setChartTradeEvents(prev => [...prev.filter(t => t.id !== trade.id), trade])
-      // Sound (deduped by op id internamente — se o useEffect [storeOps]
-      // abaixo também disparar pra mesma op, só tocará uma vez).
-      playResolveSound(trade.id, trade.won === true)
-    }
-
-    // No refreshAccounts() — balance is now mutated locally by the trading
-    // components via applyBalanceDelta. Next /auth/me revalidate (page reload
-    // or stale-while-revalidate window) reconciles any drift.
-  }
-
-  const isDemo      = authStore.isDemo
-  const accounts    = authStore.user?.accounts ?? []
-  const demoBalance = parseFloat(accounts.find(a => a.type === 'DEMO')?.balance ?? '0')
-  const realBalance = parseFloat(accounts.find(a => a.type === 'REAL')?.balance ?? '0')
-  // Bonus separado do saldo principal (mostrado como "+R$ X bonus" no dropdown).
-  // bonusBalance pode nao existir em payloads antigos do cache — fallback 0.
-  const demoBonusBalance = parseFloat(accounts.find(a => a.type === 'DEMO')?.bonusBalance ?? '0')
-  const realBonusBalance = parseFloat(accounts.find(a => a.type === 'REAL')?.bonusBalance ?? '0')
-  // `balance` passado pro Header chip exibe o saldo TOTAL (principal + bonus).
-  // O TradingPanel continua usando demoBalance/realBalance separados quando
-  // precisa do "saldo livre" pra calcular stake disponivel (bonus tem rollover
-  // pendente — UI fica clara, mas operacao em si nao mistura por ora).
-  const balance     = isDemo ? demoBalance + demoBonusBalance : realBalance + realBonusBalance
-
-  // Mobile-header level icon + chip — same logic as desktop Header.tsx.
-  // The `mounted` gate avoids a hydration mismatch: SSR has no auth, so
-  // isDemo defaults to true (DEMO) AND realBalance is 0. The client,
-  // after rehydrating from localStorage, may show REAL with a non-zero
-  // balance — which would swap the lucide icon component itself
-  // (different SVG <path> tree). React's `suppressHydrationWarning` only
-  // covers the immediate element, not child SVG paths, so we must keep
-  // the rendered tree identical on first paint. Defer ALL account-state
-  // reads (isDemo + balance + realBalance) until after mount; render the
-  // DEMO chip during SSR + first client paint, then swap in a single tick.
-  const [headerMounted, setHeaderMounted] = useState(false)
-  useEffect(() => { setHeaderMounted(true) }, [])
-  const safeIsDemo  = headerMounted ? isDemo  : true
-  const safeBalance = headerMounted ? balance : 0
-  const level       = getAccountLevel(headerMounted ? realBalance : 0)
-
-  function handleSelectAsset(asset: Asset) {
-    setSelectedAsset(asset)
-    if (!openAssets.find((a) => a.id === asset.id)) {
-      setOpenAssets((prev) => [...prev, asset])
-    }
-  }
-
-  function handleCloseAsset(asset: Asset) {
-    const remaining = openAssets.filter((a) => a.id !== asset.id)
-    setOpenAssets(remaining)
-    if (selectedAsset.id === asset.id && remaining.length > 0) {
-      setSelectedAsset(remaining[remaining.length - 1])
-    }
-  }
-
-  function handleSelectDemo() {
-    if (!isDemo) { authStore.setIsDemo(true); setSwitchModal('demo') }
-  }
-
-  function handleSelectReal() {
-    if (isDemo) { authStore.setIsDemo(false); setSwitchModal('real') }
-  }
-
-  // ─── Shared content renderers ──────────────────────────────────────────────
-
-  function renderMainContent(isMobile = false) {
-    if (sidebarTab === 'SUPORTE') {
-      // On mobile the user opens Suporte to read tickets and type replies —
-      // the chart is irrelevant there and would only steal vertical space.
-      // Show the panel full-screen, same UX pattern as CONTA.
-      if (isMobile) return <SupportPanel onClose={() => setSidebarTab('TRADE')} />
-      return (
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          <SupportPanel onClose={() => setSidebarTab('TRADE')} />
-          <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        </div>
-      )
-    }
-    if (sidebarTab === 'CONTA')     return <ContaPage key={contaInitialTab} initialTab={contaInitialTab} onClose={() => setSidebarTab('TRADE')} />
-    if (sidebarTab === 'HISTORICO') {
-      // On mobile the user wants to scan their full history — chart on top
-      // would steal vertical space. Show the panel full-screen, matching
-      // the SUPORTE/CONTA pattern.
-      if (isMobile) return <HistoricoPanel onClose={() => setSidebarTab('TRADE')} isDemo={authStore.isDemo} />
-      return (
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          <HistoricoPanel onClose={() => setSidebarTab('TRADE')} isDemo={authStore.isDemo} />
-          <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        </div>
-      )
-    }
-    if (sidebarTab === 'RANKING') {
-      // Same mobile-vs-desktop split as HISTORICO / SUPORTE: on mobile show
-      // only the panel, on desktop pair it with the chart.
-      if (isMobile) return <RankingPanel onClose={() => setSidebarTab('TRADE')} userName={authStore.user?.name} userCode="br" />
-      return (
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          <RankingPanel onClose={() => setSidebarTab('TRADE')} userName={authStore.user?.name} userCode="br" />
-          <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        </div>
-      )
-    }
-    if (sidebarTab === 'BONUS') {
-      // Card CTA opens the deposit modal with the bonus code pre-applied.
-      const openWithBonus = (code: string) => {
-        setDepositoBonusCode(code)
-        setDepositoOpen(true)
-      }
-      if (isMobile) return <BonusPanel onClose={() => setSidebarTab('TRADE')} onDeposit={openWithBonus} />
-      return (
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          <BonusPanel onClose={() => setSidebarTab('TRADE')} onDeposit={openWithBonus} />
-          <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        </div>
-      )
-    }
-    if (sidebarTab === 'COPY')      return <ComingSoon title="Copy Trading" message="Em breve você poderá copiar automaticamente as melhores operações de traders profissionais." onClose={() => setSidebarTab('TRADE')} />
-
-    // TRADE (default)
-    return (
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {!isMobile && configOpen && (
-          <ConfiguracoesPanel onClose={() => setConfigOpen(false)} theme={theme} onThemeChange={setTheme} settings={tradeSettings} onSettingsChange={setTradeSettings} />
-        )}
-        <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
-        {!isMobile && <TradingPanel asset={selectedAsset} marketPrice={displayPrice} shortLabels={tradeSettings.shortLabels} accountId={currentAccount?.id} onTradePlaced={handleTradePlaced} onSelectAsset={handleSelectAsset} />}
-      </div>
+    const els = document.querySelectorAll<HTMLElement>('[data-reveal]:not(.in)')
+    if (!els.length) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting) {
+            e.target.classList.add('in')
+            io.unobserve(e.target)
+          }
+        })
+      },
+      { threshold: 0.12, rootMargin: '0px 0px -60px 0px' },
     )
-  }
+    els.forEach((el) => io.observe(el))
+    return () => io.disconnect()
+  }, [])
+}
+
+// Animacao de contagem dos numeros do "metrics" — 2s de duracao,
+// trigger uma unica vez quando a secao aparece.
+function useCountUp(target: number, trigger: boolean, decimals = 0) {
+  const [value, setValue] = useState(0)
+  useEffect(() => {
+    if (!trigger) return
+    const duration = 1800
+    const startedAt = performance.now()
+    let raf = 0
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - startedAt) / duration)
+      // ease-out cubic — comeca rapido, desacelera no fim
+      const eased = 1 - Math.pow(1 - t, 3)
+      setValue(target * eased)
+      if (t < 1) raf = requestAnimationFrame(tick)
+      else setValue(target)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [target, trigger])
+  return decimals === 0 ? Math.floor(value) : Number(value.toFixed(decimals))
+}
+
+export default function VxLandingPage() {
+  useReveal()
+
+  // Trigger pra contagem dos numeros — aciona quando o bloco de metrics
+  // entra no viewport (uma so' vez).
+  const [metricsLive, setMetricsLive] = useState(false)
+  const metricsRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = metricsRef.current
+    if (!el) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setMetricsLive(true)
+          io.disconnect()
+        }
+      },
+      { threshold: 0.4 },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+
+  const userCount = useCountUp(15000, metricsLive)
+  const uptime    = useCountUp(99.9, metricsLive, 1)
+
+  // Parallax sutil no grid de fundo — segue scroll com um leve offset.
+  const [scrollY, setScrollY] = useState(0)
+  useEffect(() => {
+    const onScroll = () => setScrollY(window.scrollY)
+    // Listener no wrapper (que tem o scroll real), nao no window.
+    const wrapper = document.getElementById('landing-scroll')
+    if (!wrapper) return
+    const handler = () => setScrollY(wrapper.scrollTop)
+    wrapper.addEventListener('scroll', handler, { passive: true })
+    return () => wrapper.removeEventListener('scroll', handler)
+  }, [])
 
   return (
-    <div className="h-full bg-[#151822] overflow-hidden">
+    <div
+      id="landing-scroll"
+      className="fixed inset-0 overflow-y-auto overflow-x-hidden text-white"
+      style={{
+        background:
+          'radial-gradient(1200px 800px at 20% 10%, rgba(48,128,255,0.18), transparent 65%),' +
+          'radial-gradient(900px 600px at 85% 15%, rgba(34,211,238,0.12), transparent 60%),' +
+          'radial-gradient(1100px 700px at 50% 50%, rgba(48,128,255,0.06), transparent 70%),' +
+          'radial-gradient(900px 600px at 15% 85%, rgba(38,166,154,0.08), transparent 65%),' +
+          'radial-gradient(800px 500px at 80% 90%, rgba(34,211,238,0.08), transparent 60%),' +
+          'linear-gradient(180deg, #0a0c14, #0e1019 50%, #0b0d16)',
+      }}
+    >
+      {/* Keyframes locais (sem poluir globals.css) */}
+      <style jsx>{`
+        [data-reveal] {
+          opacity: 0;
+          transform: translateY(18px);
+          filter: blur(6px);
+          transition: opacity .7s cubic-bezier(.2,.7,.2,1),
+                      transform .7s cubic-bezier(.2,.7,.2,1),
+                      filter .7s cubic-bezier(.2,.7,.2,1);
+          will-change: opacity, transform, filter;
+        }
+        [data-reveal].in { opacity: 1; transform: none; filter: blur(0); }
+        [data-stagger] > * {
+          opacity: 0;
+          transform: translateY(14px);
+          filter: blur(6px);
+          transition: opacity .7s cubic-bezier(.2,.7,.2,1),
+                      transform .7s cubic-bezier(.2,.7,.2,1),
+                      filter .7s cubic-bezier(.2,.7,.2,1);
+        }
+        [data-stagger].in > *           { opacity: 1; transform: none; filter: blur(0); }
+        [data-stagger].in > *:nth-child(1) { transition-delay: .05s; }
+        [data-stagger].in > *:nth-child(2) { transition-delay: .12s; }
+        [data-stagger].in > *:nth-child(3) { transition-delay: .19s; }
+        [data-stagger].in > *:nth-child(4) { transition-delay: .26s; }
+        [data-stagger].in > *:nth-child(5) { transition-delay: .33s; }
+        [data-stagger].in > *:nth-child(6) { transition-delay: .40s; }
+        @keyframes pulseGlow {
+          0%, 100% { opacity: .6; }
+          50%      { opacity: 1; }
+        }
+        .live-dot { animation: pulseGlow 1.6s ease-in-out infinite; }
+        @keyframes floatY {
+          0%, 100% { transform: translateY(0); }
+          50%      { transform: translateY(-8px); }
+        }
+        .floaty { animation: floatY 6s ease-in-out infinite; }
+      `}</style>
 
-      {/* ── DESKTOP layout (md+) ─────────────────────────────────────────── */}
-      <div className="hidden md:flex h-full overflow-hidden">
-        <Sidebar activeTab={sidebarTab} onTabChange={setSidebarTab} onSettings={() => setConfigOpen(!configOpen)} />
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <Header
-            selectedAsset={selectedAsset}
-            onSelectAsset={handleSelectAsset}
-            openAssets={openAssets}
-            onOpenAsset={handleSelectAsset}
-            onCloseAsset={handleCloseAsset}
-            onOpenSelector={() => setAssetSelectorOpen(true)}
-            onDeposito={() => setDepositoOpen(true)}
-            onRetirada={() => { setContaInitialTab('retirada'); setSidebarTab('CONTA') }}
-            onTransacoes={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA') }}
-            onOperacoes={() => setSidebarTab('TRADE')}
-            onMinhaConta={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA') }}
-            onNiveis={() => setNiveisOpen(true)}
-            onLogout={() => { authStore.logout().then(() => router.replace('/login')) }}
-            onResetDemo={() => authStore.resetDemo()}
-            isDemo={isDemo}
-            onSelectDemo={handleSelectDemo}
-            onSelectReal={handleSelectReal}
-            demoBalance={demoBalance}
-            realBalance={realBalance}
-            demoBonusBalance={demoBonusBalance}
-            realBonusBalance={realBonusBalance}
-            balance={balance}
-            userEmail={authStore.user?.email ?? ''}
-            userId={authStore.user?.id ?? ''}
-          />
-          <div className="flex-1 flex min-h-0 overflow-hidden relative">
-            {renderMainContent(false)}
+      {/* Grid pattern de fundo com parallax */}
+      <div
+        className="pointer-events-none fixed inset-0 opacity-30"
+        aria-hidden
+        style={{
+          backgroundImage:
+            'linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),' +
+            'linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px)',
+          backgroundSize: '52px 52px',
+          maskImage: 'radial-gradient(closest-side at 50% 30%, rgba(0,0,0,.9), transparent 70%)',
+          WebkitMaskImage: 'radial-gradient(closest-side at 50% 30%, rgba(0,0,0,.9), transparent 70%)',
+          transform: `translateY(${scrollY * 0.25}px)`,
+        }}
+      />
+
+      {/* HEADER */}
+      <header className="sticky top-0 z-50 backdrop-blur-md bg-[#0a0c14]/70 border-b border-white/5">
+        <div className="mx-auto w-full max-w-[1180px] px-5 flex items-center justify-between py-3.5 gap-4">
+          <Link href="/" className="flex items-center gap-2.5 min-w-0">
+            <Image src="/vx-logo.png" alt="VX Global" width={120} height={36} className="h-9 w-auto" priority />
+          </Link>
+          <nav className="hidden md:flex items-center gap-7 text-sm text-white/70">
+            <a href="#mercados"     className="hover:text-white transition-colors">Mercados</a>
+            <a href="#recursos"     className="hover:text-white transition-colors">Recursos</a>
+            <a href="#como-funciona" className="hover:text-white transition-colors">Como funciona</a>
+            <a href="#faq"          className="hover:text-white transition-colors">FAQ</a>
+          </nav>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/login"
+              className="hidden sm:inline-flex items-center justify-center px-3.5 py-2 rounded-xl border border-white/10 bg-white/5 text-sm font-semibold text-white hover:bg-white/10 hover:border-white/20 transition"
+            >
+              Entrar
+            </Link>
+            <Link
+              href="/login?tab=register"
+              className="inline-flex items-center justify-center px-3.5 py-2 rounded-xl text-sm font-bold text-white transition hover:brightness-110"
+              style={{
+                background: 'linear-gradient(135deg, #3080ff, #22d3ee)',
+                boxShadow: '0 14px 40px -8px rgba(48,128,255,.45)',
+              }}
+            >
+              Abrir conta
+            </Link>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* ── MOBILE layout (< md) ─────────────────────────────────────────── */}
-      <div className="flex md:hidden h-full flex-col overflow-hidden">
+      <main className="relative">
 
-        {/* Mobile header — taller (h-14 vs the previous h-12) so the
-            balance chip + deposit CTA have proper tap targets and
-            breathing room. */}
-        <header className="flex items-center justify-between gap-2 px-4 h-14 bg-[#1d2130] border-b border-[#2a2e3b] flex-shrink-0">
-          {/* Logo */}
-          <div className="flex-shrink min-w-0">
-            <Logo size="sm" />
-          </div>
+        {/* HERO ─────────────────────────────────────────────────────────── */}
+        <section className="mx-auto w-full max-w-[1180px] px-5 pt-14 md:pt-20 pb-8">
+          <div className="grid md:grid-cols-[1.1fr_0.9fr] gap-10 items-center">
+            <div data-reveal className="in">
+              <div className="inline-flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-xs font-bold text-white/80">
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 live-dot" />
+                </span>
+                <span><b className="text-white">Plataforma</b> rápida, segura, em tempo real</span>
+              </div>
 
+              <h1 className="mt-5 text-4xl md:text-[54px] font-black leading-[1.02] tracking-tight">
+                A corretora que une{' '}
+                <span
+                  className="bg-clip-text text-transparent"
+                  style={{ backgroundImage: 'linear-gradient(90deg, #fff, #c8e0ff 50%, #22d3ee)' }}
+                >
+                  tecnologia
+                </span>{' '}
+                e segurança para você operar.
+              </h1>
 
-          {/* Right: balance + deposit */}
-          <div className="flex items-center gap-1.5 min-w-0">
-            {/* Balance chip — shrinks if needed; h-10 sets a consistent
-                size with the deposit button alongside it. Icon + label +
-                balance are all gated on `headerMounted` so the SVG tree
-                matches between SSR and first client paint (see the long
-                comment by safeIsDemo/safeBalance — same reason as the
-                desktop Header.tsx fix). */}
-            <div className="relative min-w-0">
-              <button
-                onClick={() => setMobileAccountOpen(v => !v)}
-                className="flex items-center gap-1.5 h-10 px-2.5 rounded-lg bg-[#252a3a] border border-[#2a2e3b] max-w-full"
-              >
-                {safeIsDemo
-                  ? <GraduationCap size={18} className="text-yellow-400 flex-shrink-0" />
-                  : <level.Icon size={18} className={cn(level.color, 'flex-shrink-0')} />
-                }
-                <div className="text-left min-w-0">
-                  <div className={cn('text-[10px] font-bold leading-tight whitespace-nowrap', safeIsDemo ? 'text-yellow-400' : 'text-green-400')}>
-                    {safeIsDemo ? 'CONTA DEMO' : 'CONTA REAL'}
-                  </div>
-                  <div className="text-sm font-bold text-white leading-tight whitespace-nowrap">
-                    R${safeBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                </div>
-                <ChevronDown size={12} className={cn('text-[#8b8f9a] transition-transform flex-shrink-0', mobileAccountOpen && 'rotate-180')} />
-              </button>
+              <p className="mt-4 max-w-[55ch] text-white/70 leading-relaxed text-[15px]">
+                Crypto, Forex e ativos OTC com execução abaixo de 1 segundo, depósitos via PIX e USDT,
+                e uma interface pensada pra quem opera de verdade.
+              </p>
 
-              {mobileAccountOpen && (
-                <div className="absolute top-full right-0 mt-1 z-50">
-                  <AccountDropdown
-                    isDemo={isDemo}
-                    onSelectDemo={() => { handleSelectDemo(); setMobileAccountOpen(false) }}
-                    onSelectReal={() => { handleSelectReal(); setMobileAccountOpen(false) }}
-                    demoBalance={demoBalance}
-                    realBalance={realBalance}
-                    demoBonusBalance={demoBonusBalance}
-                    realBonusBalance={realBonusBalance}
-                    userEmail={authStore.user?.email ?? ''}
-                    userId={authStore.user?.id ?? ''}
-                    onClose={() => setMobileAccountOpen(false)}
-                    onLogout={() => { authStore.logout().then(() => router.replace('/login')) }}
-                    onResetDemo={() => authStore.resetDemo()}
-                    onDeposito={() => { setDepositoOpen(true); setMobileAccountOpen(false) }}
-                    onRetirada={() => { setContaInitialTab('retirada'); setSidebarTab('CONTA'); setMobileAccountOpen(false) }}
-                    onTransacoes={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA'); setMobileAccountOpen(false) }}
-                    onOperacoes={() => { setSidebarTab('TRADE'); setMobileAccountOpen(false) }}
-                    onMinhaConta={() => { setContaInitialTab('minha-conta'); setSidebarTab('CONTA'); setMobileAccountOpen(false) }}
-                    onNiveis={() => { setNiveisOpen(true); setMobileAccountOpen(false) }}
-                  />
-                </div>
-              )}
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Link
+                  href="/login?tab=register"
+                  className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold text-white transition hover:brightness-110"
+                  style={{
+                    background: 'linear-gradient(135deg, #3080ff, #22d3ee)',
+                    boxShadow: '0 18px 55px -10px rgba(48,128,255,.5)',
+                  }}
+                >
+                  Abrir minha conta
+                  <ArrowRight size={16} />
+                </Link>
+                <a
+                  href="#como-funciona"
+                  className="inline-flex items-center px-5 py-3 rounded-2xl text-sm font-semibold text-white/90 border border-white/12 bg-white/5 hover:bg-white/10 transition"
+                >
+                  Como funciona
+                </a>
+              </div>
+
+              {/* Trust micro-row */}
+              <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-xs text-white/55">
+                <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-400" /> Conta demo grátis</span>
+                <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-400" /> Depósito instantâneo (PIX)</span>
+                <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-400" /> Suporte 24/7</span>
+              </div>
             </div>
 
-            {/* Deposit — text hides on very narrow screens (< 380px).
-                h-10 matches the balance chip alongside for a consistent
-                row height on the new (taller) mobile header. */}
-            <button
-              onClick={() => setDepositoOpen(true)}
-              className="flex items-center gap-1.5 h-10 px-3 rounded-lg bg-green-500 hover:bg-green-400 text-sm font-bold text-white transition-colors flex-shrink-0"
+            {/* Hero mockup — painel de trade simulado */}
+            <aside
+              data-reveal
+              className="in floaty rounded-[26px] overflow-hidden border border-white/10 shadow-[0_18px_60px_rgba(0,0,0,.45)]"
+              style={{
+                background:
+                  'radial-gradient(420px 280px at 30% 15%, rgba(48,128,255,.22), transparent 60%),' +
+                  'radial-gradient(420px 280px at 80% 25%, rgba(34,211,238,.15), transparent 55%),' +
+                  'rgba(255,255,255,.035)',
+              }}
             >
-              <Plus size={15} strokeWidth={2.5} />
-              <span className="hidden min-[380px]:inline">Depósito</span>
-            </button>
+              {/* Top bar mock */}
+              <div className="px-4 pt-4 pb-2 flex items-center justify-between gap-2.5">
+                <div className="flex gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-white/15" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-white/15" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-white/15" />
+                </div>
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-[10px] font-bold text-emerald-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 live-dot" />
+                  AO VIVO · BTC/USD
+                </span>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <MockStat label="Saldo" value="R$ 12.847,32" up />
+                  <MockStat label="Hoje" value="+R$ 384,90" up positive />
+                </div>
+                {/* Mini chart canvas-ish */}
+                <div
+                  className="relative h-32 rounded-2xl border border-white/8 overflow-hidden"
+                  style={{
+                    background:
+                      'linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.012)),' +
+                      'radial-gradient(160px 100px at 30% 70%, rgba(48,128,255,.32), transparent 60%),' +
+                      'radial-gradient(160px 100px at 75% 35%, rgba(34,211,238,.22), transparent 60%)',
+                  }}
+                >
+                  <svg viewBox="0 0 320 120" className="absolute inset-0 w-full h-full">
+                    <defs>
+                      <linearGradient id="line" x1="0" x2="1" y1="0" y2="0">
+                        <stop offset="0%" stopColor="#3080ff" />
+                        <stop offset="100%" stopColor="#22d3ee" />
+                      </linearGradient>
+                      <linearGradient id="area" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="0%" stopColor="rgba(48,128,255,.4)" />
+                        <stop offset="100%" stopColor="rgba(48,128,255,0)" />
+                      </linearGradient>
+                    </defs>
+                    <path
+                      d="M0,90 C40,60 70,80 100,55 C130,30 160,70 200,45 C240,20 270,60 320,30 L320,120 L0,120 Z"
+                      fill="url(#area)"
+                    />
+                    <path
+                      d="M0,90 C40,60 70,80 100,55 C130,30 160,70 200,45 C240,20 270,60 320,30"
+                      fill="none"
+                      stroke="url(#line)"
+                      strokeWidth={2.4}
+                    />
+                  </svg>
+                </div>
+                {/* Buy/Sell mock */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl px-3 py-2.5 text-center font-bold text-sm text-white border border-emerald-500/40 bg-emerald-500/15">
+                    <div className="text-[10px] uppercase tracking-wider text-emerald-300/80">Comprar</div>
+                    <div>62.347,80</div>
+                  </div>
+                  <div className="rounded-xl px-3 py-2.5 text-center font-bold text-sm text-white border border-rose-500/40 bg-rose-500/15">
+                    <div className="text-[10px] uppercase tracking-wider text-rose-300/80">Vender</div>
+                    <div>62.341,20</div>
+                  </div>
+                </div>
+              </div>
+            </aside>
           </div>
-        </header>
+        </section>
 
-        {/* Main content area */}
-        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-          {renderMainContent(true)}
+        {/* METRICS ──────────────────────────────────────────────────────── */}
+        <section
+          ref={metricsRef}
+          className="mx-auto w-full max-w-[1180px] px-5 py-10"
+        >
+          <div
+            data-stagger
+            data-reveal
+            className="grid grid-cols-2 md:grid-cols-4 gap-3.5"
+          >
+            <MetricCard num={`+${(userCount / 1000).toFixed(0)}k`} label="Traders ativos" />
+            <MetricCard num="24/7" label="Suporte humano" />
+            <MetricCard num={`${uptime.toFixed(1)}%`} label="Uptime garantido" />
+            <MetricCard num="<1s" label="Execução de ordens" />
+          </div>
+        </section>
+
+        {/* MERCADOS ─────────────────────────────────────────────────────── */}
+        <section id="mercados" className="mx-auto w-full max-w-[1180px] px-5 py-14">
+          <h2 data-reveal className="text-3xl md:text-4xl font-black tracking-tight text-center">
+            Mercados disponíveis
+          </h2>
+          <p data-reveal className="mt-2 mx-auto max-w-[60ch] text-center text-white/65 leading-relaxed">
+            Mais de 70 ativos pra você diversificar — todos com cotação em tempo real.
+          </p>
+
+          <div data-stagger data-reveal className="mt-10 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <MarketCard
+              icon={<Coin />}
+              title="Crypto"
+              desc="BTC, ETH, SOL, XRP e mais. Operações 24/7 com payout até 92%."
+              tag="92% payout"
+              tagColor="#22d3ee"
+            />
+            <MarketCard
+              icon={<Globe size={22} />}
+              title="Forex"
+              desc="EUR/USD, GBP/JPY, USD/BRL. Liquidez global, spreads competitivos."
+              tag="80+ pares"
+              tagColor="#3080ff"
+            />
+            <MarketCard
+              icon={<LineChart size={22} />}
+              title="OTC"
+              desc="Mercados sintéticos que rodam 24/7, inclusive nos finais de semana."
+              tag="Sempre aberto"
+              tagColor="#26a69a"
+            />
+            <MarketCard
+              icon={<Briefcase size={22} />}
+              title="Ações & Commodities"
+              desc="Apple, Microsoft, ouro, petróleo. Diversifique além das cripto."
+              tag="Top mercados"
+              tagColor="#eab308"
+            />
+          </div>
+        </section>
+
+        {/* COMO FUNCIONA ────────────────────────────────────────────────── */}
+        <section id="como-funciona" className="mx-auto w-full max-w-[1180px] px-5 py-14">
+          <h2 data-reveal className="text-2xl md:text-3xl font-black tracking-tight">Como funciona</h2>
+          <p data-reveal className="mt-2 max-w-[60ch] text-white/65 leading-relaxed">
+            Em três passos você sai do zero pra operar de verdade.
+          </p>
+
+          <div data-stagger data-reveal className="mt-8 grid md:grid-cols-3 gap-4">
+            <StepCard n="1" title="Cadastre-se" desc="Preencha seu e-mail e CPF. Aprovação automática em minutos." />
+            <StepCard n="2" title="Deposite via PIX ou USDT" desc="A partir de R$ 60 (PIX) ou USDT TRC20. Saldo crédita na hora." />
+            <StepCard n="3" title="Comece a operar" desc="Escolha o ativo, defina valor e direção. Resultado em segundos." />
+          </div>
+        </section>
+
+        {/* RECURSOS ─────────────────────────────────────────────────────── */}
+        <section
+          id="recursos"
+          className="py-16"
+          style={{
+            background:
+              'radial-gradient(900px 500px at 30% 50%, rgba(34,211,238,.08), transparent 65%),' +
+              'radial-gradient(700px 400px at 75% 50%, rgba(48,128,255,.07), transparent 60%)',
+          }}
+        >
+          <div className="mx-auto w-full max-w-[1180px] px-5">
+            <h2 data-reveal className="text-center text-3xl md:text-4xl font-black tracking-tight">
+              Recursos que fazem{' '}
+              <span
+                className="bg-clip-text text-transparent"
+                style={{ backgroundImage: 'linear-gradient(135deg, #3080ff, #22d3ee)' }}
+              >
+                diferença
+              </span>
+            </h2>
+            <p data-reveal className="mt-2 mx-auto max-w-[65ch] text-center text-white/65 leading-relaxed">
+              A plataforma foi feita pra quem quer operar com confiança — não pra te confundir.
+            </p>
+
+            <div data-stagger data-reveal className="mt-10 grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <FeatureCard icon={<Zap size={20} />} title="Execução abaixo de 1s" desc="Ordens executadas sem delay perceptível, mesmo em dias de alta volatilidade." />
+              <FeatureCard icon={<Shield size={20} />} title="Segurança em camadas" desc="2FA obrigatório, sessões assinadas e proteção anti-fraude no backend." />
+              <FeatureCard icon={<BarChart3 size={20} />} title="Gráficos em tempo real" desc="Candles diretos da Binance / Twelve Data — sem atraso, sem mock." />
+              <FeatureCard icon={<Wallet size={20} />} title="Depósitos instantâneos" desc="PIX em até 30 segundos e USDT TRC20 com confirmação on-chain." />
+              <FeatureCard icon={<Smartphone size={20} />} title="Mobile-first" desc="Interface responsiva pra você operar do celular sem perder funcionalidade." />
+              <FeatureCard icon={<Headphones size={20} />} title="Suporte 24/7" desc="Equipe disponível todo dia via ticket. Resposta média abaixo de 15 minutos." />
+            </div>
+          </div>
+        </section>
+
+        {/* TESTIMONIALS ─────────────────────────────────────────────────── */}
+        <section
+          className="py-16"
+          style={{
+            background:
+              'radial-gradient(1000px 600px at 50% 50%, rgba(48,128,255,.10), transparent 70%),' +
+              'radial-gradient(800px 500px at 20% 50%, rgba(34,211,238,.06), transparent 65%)',
+          }}
+        >
+          <div className="mx-auto w-full max-w-[1180px] px-5">
+            <h2 data-reveal className="text-center text-2xl md:text-3xl font-black tracking-tight">
+              O que dizem nossos traders
+            </h2>
+            <p data-reveal className="mt-2 mx-auto max-w-[60ch] text-center text-white/65 leading-relaxed">
+              Milhares de operações por dia. Resultado de uma plataforma que respeita o tempo do trader.
+            </p>
+
+            <div data-stagger data-reveal className="mt-10 grid md:grid-cols-3 gap-4">
+              <TestimonialCard initials="CS" color="#3080ff" name="Carlos Silva" role="Day trader · 3 anos" quote="A execução é absurdamente rápida. Migrei de outra corretora e a diferença é gritante — nunca mais perdi entrada por travamento." />
+              <TestimonialCard initials="MS" color="#22d3ee" name="Maria Santos" role="Day trader" quote="Interface limpa, sem firula. Tudo na mão. O suporte responde em minutos, mesmo de madrugada." />
+              <TestimonialCard initials="JP" color="#26a69a" name="João Pedro" role="Investidor"   quote="Saques caem rápido e a transparência é o que faz eu confiar. PIX em minutos, USDT no mesmo dia." />
+            </div>
+          </div>
+        </section>
+
+        {/* FAQ ─────────────────────────────────────────────────────────── */}
+        <section id="faq" className="mx-auto w-full max-w-[920px] px-5 py-14">
+          <h2 data-reveal className="text-2xl md:text-3xl font-black tracking-tight">Perguntas frequentes</h2>
+          <p data-reveal className="mt-2 text-white/65 leading-relaxed">Tire suas dúvidas sobre a plataforma antes de começar.</p>
+
+          <div data-stagger data-reveal className="mt-8 space-y-2.5">
+            <FaqItem q="Como abro minha conta?" a="Clique em 'Abrir conta', preencha e-mail, senha e CPF. A aprovação leva minutos. Você pode operar imediatamente em conta demo (R$ 10.000 fictícios) enquanto valida sua conta real." />
+            <FaqItem q="Qual o depósito mínimo?" a="O mínimo é R$ 60 via PIX. Para USDT TRC20 também é o equivalente a R$ 60 (calculado pela cotação do momento via Binance)." />
+            <FaqItem q="A plataforma é segura?" a="Sim. Usamos 2FA obrigatório, sessões com tokens assinados HMAC, banco de dados criptografado em repouso e auditoria de cada ação administrativa." />
+            <FaqItem q="Posso operar pelo celular?" a="Sim — a plataforma é responsiva e funciona no navegador do celular sem necessidade de instalar app." />
+            <FaqItem q="Quanto tempo demora um saque?" a="Saques via PIX são processados em até 24 horas úteis. Na maioria dos casos cai em minutos. USDT no mesmo dia." />
+            <FaqItem q="Vocês oferecem conta demo?" a="Sim, gratuitamente e sem limite de tempo. Você troca entre demo e real a qualquer momento no painel." />
+          </div>
+        </section>
+
+        {/* CTA FINAL ───────────────────────────────────────────────────── */}
+        <section className="mx-auto w-full max-w-[1180px] px-5 py-14">
+          <div
+            data-reveal
+            className="relative overflow-hidden rounded-3xl border border-white/10 p-10 md:p-14 text-center"
+            style={{
+              background:
+                'radial-gradient(700px 350px at 50% 0%, rgba(48,128,255,.28), transparent 65%),' +
+                'radial-gradient(500px 280px at 80% 100%, rgba(34,211,238,.18), transparent 60%),' +
+                'rgba(10,12,20,.6)',
+            }}
+          >
+            <h2 className="text-3xl md:text-4xl font-black tracking-tight">
+              Pronto pra começar?
+            </h2>
+            <p className="mt-3 mx-auto max-w-[55ch] text-white/70 leading-relaxed">
+              Crie sua conta agora e teste a plataforma com demo gratuita. Sem cartão de crédito, sem compromisso.
+            </p>
+            <div className="mt-7 flex flex-wrap justify-center gap-3">
+              <Link
+                href="/login?tab=register"
+                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-2xl text-sm font-bold text-white transition hover:brightness-110"
+                style={{
+                  background: 'linear-gradient(135deg, #3080ff, #22d3ee)',
+                  boxShadow: '0 18px 55px -10px rgba(48,128,255,.5)',
+                }}
+              >
+                Abrir minha conta grátis
+                <ArrowRight size={16} />
+              </Link>
+              <Link
+                href="/login"
+                className="inline-flex items-center px-6 py-3.5 rounded-2xl text-sm font-semibold text-white/90 border border-white/12 bg-white/5 hover:bg-white/10 transition"
+              >
+                Já tenho conta
+              </Link>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      {/* FOOTER de risco */}
+      <footer
+        className="relative py-14 border-t border-white/5"
+        style={{
+          background:
+            'radial-gradient(1000px 500px at 20% 20%, rgba(48,128,255,.14), transparent 65%),' +
+            'radial-gradient(900px 450px at 85% 30%, rgba(34,211,238,.10), transparent 60%),' +
+            'linear-gradient(180deg, rgba(10,12,20,.25), rgba(10,12,20,.55))',
+        }}
+      >
+        <div className="mx-auto w-full max-w-[1180px] px-5 text-white/55">
+          <h3 className="font-bold text-white/80 text-sm tracking-wide">AVISO DE RISCO</h3>
+          <p className="mt-3 text-[13px] leading-relaxed max-w-[110ch]">
+            Operações financeiras envolvem riscos significativos e podem não ser adequadas para todos os investidores.
+            O desempenho passado não é garantia de resultados futuros. Antes de operar, certifique-se de entender
+            completamente os riscos envolvidos e considere seus objetivos de investimento, nível de experiência e
+            apetite ao risco. Você pode perder parte ou todo o seu capital investido. Não invista dinheiro que você
+            não pode perder.
+          </p>
+          <p className="mt-3 text-[13px] leading-relaxed max-w-[110ch]">
+            A VX Global não oferece consultoria financeira ou de investimento. Todo o conteúdo disponibilizado é
+            apenas para fins informativos e educacionais. As decisões de investimento são de sua exclusiva
+            responsabilidade.
+          </p>
+
+          <div className="mt-10 pt-5 border-t border-white/5 flex flex-wrap items-center justify-between gap-3 text-[13px]">
+            <div className="flex items-center gap-2 opacity-90">
+              <Image src="/vx-icon.png" alt="" width={20} height={20} className="opacity-80" />
+              <span>© {new Date().getFullYear()} VX Global. Todos os direitos reservados.</span>
+            </div>
+            <div className="flex gap-5 text-white/55">
+              <Link href="/login" className="hover:text-white transition-colors">Entrar</Link>
+              <Link href="/login?tab=register" className="hover:text-white transition-colors">Abrir conta</Link>
+            </div>
+          </div>
         </div>
-
-        {/* Mobile compact trading card (always visible on TRADE tab) */}
-        {sidebarTab === 'TRADE' && (
-          <TradingCompactCard
-            asset={selectedAsset}
-            marketPrice={displayPrice}
-            accountId={currentAccount?.id}
-            onOpenSelector={() => setAssetSelectorOpen(true)}
-            onTradePlaced={handleTradePlaced}
-          />
-        )}
-
-        {/* Mobile bottom navigation */}
-        <MobileNav activeTab={sidebarTab} onTabChange={setSidebarTab} />
-      </div>
-
-      {/* ── Global modals (shared desktop + mobile) ──────────────────────── */}
-      {niveisOpen && (
-        <NiveisModal realBalance={realBalance} onClose={() => setNiveisOpen(false)} />
-      )}
-      {assetSelectorOpen && (
-        <AssetSelectorModal selectedAsset={selectedAsset} assets={assets} onSelect={handleSelectAsset} onClose={() => setAssetSelectorOpen(false)} />
-      )}
-      {assetInfoOpen && (
-        <AssetInfoModal asset={selectedAsset} marketPrice={displayPrice} onClose={() => setAssetInfoOpen(false)} onTrade={() => setAssetInfoOpen(false)} />
-      )}
-      {depositoOpen && (
-        <DepositoModal
-          onClose={() => { setDepositoOpen(false); setDepositoBonusCode(undefined) }}
-          initialBonusCode={depositoBonusCode}
-          onSwitchToUsdt={() => { setDepositoOpen(false); setDepositoBonusCode(undefined); setUsdtDepositoOpen(true) }}
-        />
-      )}
-      {usdtDepositoOpen && (
-        <UsdtDepositoModal
-          onClose={() => setUsdtDepositoOpen(false)}
-          onSwitchToPix={() => { setUsdtDepositoOpen(false); setDepositoOpen(true) }}
-        />
-      )}
-      {switchModal && (
-        <AccountSwitchModal switchedTo={switchModal} demoBalance={demoBalance} realBalance={realBalance} onClose={() => setSwitchModal(null)} />
-      )}
-
-      {/* Welcome bonus — opens once per session AFTER auth hydrates.
-          Self-dismisses on X, backdrop click, or "Depositar agora" (which
-          also pre-fills the deposit modal with the bonus code). */}
-      <BonusWelcomeModal
-        enabled={!!authStore.user && !authStore.loading}
-        onDeposit={(code) => { setDepositoBonusCode(code); setDepositoOpen(true) }}
-      />
+      </footer>
     </div>
   )
 }
 
-function ComingSoon({ title, message, onClose }: { title: string; message: string; onClose?: () => void }) {
+// ──────────────────────────────────────────────────────────────────────────
+// Subcomponents
+// ──────────────────────────────────────────────────────────────────────────
+
+function MockStat({ label, value, positive = false }: { label: string; value: string; up?: boolean; positive?: boolean }) {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 text-center bg-[#151822] relative">
-      {onClose && (
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 w-9 h-9 flex items-center justify-center rounded-full text-[#8b8f9a] hover:text-white hover:bg-white/10 transition-colors"
-          title="Fechar"
-        >
-          <X size={16} />
-        </button>
-      )}
-      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-cyan-400/20 border border-blue-500/30 flex items-center justify-center mb-5">
-        <span className="text-2xl">🚀</span>
+    <div className="rounded-xl border border-white/8 bg-[#0e1019]/55 p-3">
+      <div className="text-[11px] font-bold text-white/55">{label}</div>
+      <div className={'mt-1 font-extrabold text-base ' + (positive ? 'text-emerald-400' : 'text-white')}>
+        {value}
       </div>
-      <h2 className="text-white text-xl font-bold mb-2">{title}</h2>
-      <p className="text-[#8b8f9a] text-sm max-w-md leading-relaxed">{message}</p>
-      <span className="mt-6 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-400 text-[10px] font-bold tracking-widest uppercase">
-        Em breve
+    </div>
+  )
+}
+
+function MetricCard({ num, label }: { num: string; label: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#0a0c14]/55 p-5 text-center shadow-[0_16px_46px_rgba(0,0,0,.22)]">
+      <p
+        className="m-0 text-[44px] font-black tracking-tight bg-clip-text text-transparent"
+        style={{ backgroundImage: 'linear-gradient(135deg, #3080ff, #22d3ee)' }}
+      >
+        {num}
+      </p>
+      <p className="mt-1 text-sm font-bold text-white/65">{label}</p>
+    </div>
+  )
+}
+
+function MarketCard({
+  icon, title, desc, tag, tagColor,
+}: { icon: React.ReactNode; title: string; desc: string; tag: string; tagColor: string }) {
+  return (
+    <div
+      className="group relative rounded-2xl border border-white/10 bg-[#0a0c14]/45 p-5 transition-all cursor-default
+                 hover:-translate-y-1.5 hover:border-[#3080ff]/40 hover:shadow-[0_24px_64px_rgba(48,128,255,.25)]"
+    >
+      <div
+        className="inline-flex items-center justify-center w-11 h-11 rounded-xl border border-white/10 bg-white/5 text-white"
+        style={{ color: tagColor }}
+      >
+        {icon}
+      </div>
+      <h3 className="mt-3 font-black text-base">{title}</h3>
+      <p className="mt-1 text-[13px] text-white/65 leading-relaxed">{desc}</p>
+      <span
+        className="mt-3 inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+        style={{ color: tagColor, background: `${tagColor}1f`, border: `1px solid ${tagColor}40` }}
+      >
+        {tag}
       </span>
     </div>
+  )
+}
+
+function StepCard({ n, title, desc }: { n: string; title: string; desc: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#0a0c14]/45 p-5">
+      <div
+        className="inline-flex items-center justify-center w-9 h-9 rounded-xl font-black text-white"
+        style={{ background: 'linear-gradient(135deg, #3080ff, #22d3ee)' }}
+      >
+        {n}
+      </div>
+      <h3 className="mt-3 font-black text-base">{title}</h3>
+      <p className="mt-1 text-[13px] text-white/65 leading-relaxed">{desc}</p>
+    </div>
+  )
+}
+
+function FeatureCard({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
+  return (
+    <div
+      className="rounded-2xl border border-white/10 bg-[#0a0c14]/45 p-5 transition-all cursor-default min-h-[170px]
+                 hover:-translate-y-2 hover:scale-[1.015] hover:border-[#3080ff]/40 hover:shadow-[0_24px_64px_rgba(48,128,255,.30)]"
+    >
+      <div className="inline-flex items-center justify-center w-11 h-11 rounded-xl border border-white/12 bg-white/5 text-[#22d3ee]">
+        {icon}
+      </div>
+      <h3 className="mt-3 font-black text-base">{title}</h3>
+      <p className="mt-1 text-[13px] text-white/65 leading-relaxed">{desc}</p>
+    </div>
+  )
+}
+
+function TestimonialCard({ initials, color, name, role, quote }: {
+  initials: string; color: string; name: string; role: string; quote: string
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#0a0c14]/55 p-5 transition-all min-h-[220px] flex flex-col gap-3
+                    hover:-translate-y-1.5 hover:shadow-[0_24px_56px_rgba(34,211,238,.22)]">
+      <div className="flex items-center gap-3">
+        <div
+          className="w-11 h-11 rounded-full flex items-center justify-center font-black text-white border-2 border-white/10"
+          style={{ background: `linear-gradient(135deg, ${color}, ${color}aa)` }}
+        >
+          {initials}
+        </div>
+        <div>
+          <div className="font-black text-white text-sm">{name}</div>
+          <div className="text-xs text-white/55 font-semibold">{role}</div>
+        </div>
+      </div>
+      <p className="text-[13px] text-white/70 leading-relaxed flex-1">"{quote}"</p>
+      <div className="flex gap-0.5 text-yellow-400 text-sm">
+        <Star size={14} fill="currentColor" /><Star size={14} fill="currentColor" /><Star size={14} fill="currentColor" /><Star size={14} fill="currentColor" /><Star size={14} fill="currentColor" />
+      </div>
+    </div>
+  )
+}
+
+function FaqItem({ q, a }: { q: string; a: string }) {
+  return (
+    <details className="group rounded-2xl border border-white/10 bg-white/[.03] open:bg-white/[.05] transition-colors">
+      <summary className="cursor-pointer list-none flex items-center justify-between gap-3 px-4 py-4 font-bold text-white text-[14px]">
+        <span>{q}</span>
+        <ChevronDown size={18} className="text-white/55 transition-transform group-open:rotate-180" />
+      </summary>
+      <p className="px-4 pb-4 -mt-1 text-[13px] text-white/65 leading-relaxed">{a}</p>
+    </details>
+  )
+}
+
+// Small icon for the Crypto market card (lucide doesn't ship a bitcoin/coin
+// vibe that matches the others' weight — inline SVG fits the line-icon style).
+function Coin() {
+  return (
+    <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+         strokeLinecap="round" strokeLinejoin="round">
+      <circle cx={12} cy={12} r={9} />
+      <path d="M9 8h5a2.5 2.5 0 010 5H9V8zm0 5h6a2.5 2.5 0 010 5H9v-5z" />
+    </svg>
   )
 }

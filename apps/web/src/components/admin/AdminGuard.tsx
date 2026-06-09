@@ -59,7 +59,7 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
 
     // Quick local check: role must be ADMIN. Fail fast.
     if (user.role !== 'ADMIN') {
-      router.replace('/')
+      router.replace('/app')
       return
     }
 

@@ -56,7 +56,7 @@ export default function ImpersonatePage() {
       setTimeout(() => {
         // window.location.replace pra forcar reload completo — garante que
         // o auth store inicializa do zero lendo o sessionStorage novo.
-        window.location.replace('/')
+        window.location.replace('/app')
       }, 300)
     } catch (err: any) {
       setStatus('error')
