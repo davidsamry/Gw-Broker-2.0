@@ -268,8 +268,80 @@ export default function VxLandingPage() {
               </div>
             </div>
 
-            {/* Hero mockup — notebook + celular com app de trading */}
-            <DevicesShowcase />
+            {/* Hero mockup — painel de trade simulado */}
+            <aside
+              data-reveal
+              className="in floaty rounded-[26px] overflow-hidden border border-white/10 shadow-[0_18px_60px_rgba(0,0,0,.45)]"
+              style={{
+                background:
+                  'radial-gradient(420px 280px at 30% 15%, rgba(48,128,255,.22), transparent 60%),' +
+                  'radial-gradient(420px 280px at 80% 25%, rgba(34,211,238,.15), transparent 55%),' +
+                  'rgba(255,255,255,.035)',
+              }}
+            >
+              {/* Top bar mock */}
+              <div className="px-4 pt-4 pb-2 flex items-center justify-between gap-2.5">
+                <div className="flex gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-white/15" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-white/15" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-white/15" />
+                </div>
+                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-[10px] font-bold text-emerald-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 live-dot" />
+                  AO VIVO · BTC/USD
+                </span>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <MockStat label="Saldo" value="R$ 12.847,32" up />
+                  <MockStat label="Hoje" value="+R$ 384,90" up positive />
+                </div>
+                {/* Mini chart canvas-ish */}
+                <div
+                  className="relative h-32 rounded-2xl border border-white/8 overflow-hidden"
+                  style={{
+                    background:
+                      'linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.012)),' +
+                      'radial-gradient(160px 100px at 30% 70%, rgba(48,128,255,.32), transparent 60%),' +
+                      'radial-gradient(160px 100px at 75% 35%, rgba(34,211,238,.22), transparent 60%)',
+                  }}
+                >
+                  <svg viewBox="0 0 320 120" className="absolute inset-0 w-full h-full">
+                    <defs>
+                      <linearGradient id="line" x1="0" x2="1" y1="0" y2="0">
+                        <stop offset="0%" stopColor="#3080ff" />
+                        <stop offset="100%" stopColor="#22d3ee" />
+                      </linearGradient>
+                      <linearGradient id="area" x1="0" x2="0" y1="0" y2="1">
+                        <stop offset="0%" stopColor="rgba(48,128,255,.4)" />
+                        <stop offset="100%" stopColor="rgba(48,128,255,0)" />
+                      </linearGradient>
+                    </defs>
+                    <path
+                      d="M0,90 C40,60 70,80 100,55 C130,30 160,70 200,45 C240,20 270,60 320,30 L320,120 L0,120 Z"
+                      fill="url(#area)"
+                    />
+                    <path
+                      d="M0,90 C40,60 70,80 100,55 C130,30 160,70 200,45 C240,20 270,60 320,30"
+                      fill="none"
+                      stroke="url(#line)"
+                      strokeWidth={2.4}
+                    />
+                  </svg>
+                </div>
+                {/* Buy/Sell mock */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl px-3 py-2.5 text-center font-bold text-sm text-white border border-emerald-500/40 bg-emerald-500/15">
+                    <div className="text-[10px] uppercase tracking-wider text-emerald-300/80">Comprar</div>
+                    <div>62.347,80</div>
+                  </div>
+                  <div className="rounded-xl px-3 py-2.5 text-center font-bold text-sm text-white border border-rose-500/40 bg-rose-500/15">
+                    <div className="text-[10px] uppercase tracking-wider text-rose-300/80">Vender</div>
+                    <div>62.341,20</div>
+                  </div>
+                </div>
+              </div>
+            </aside>
           </div>
         </section>
 
@@ -506,279 +578,12 @@ export default function VxLandingPage() {
 // Subcomponents
 // ──────────────────────────────────────────────────────────────────────────
 
-// Notebook + celular CSS com mockups do app de trading dentro. Quando
-// houver screenshots reais do /app, basta trocar <DesktopAppMock /> por
-// <Image src="/landing/desktop-trade.png" /> dentro da .laptop-screen
-// (idem pra mobile). O frame fica intacto.
-function DevicesShowcase() {
+function MockStat({ label, value, positive = false }: { label: string; value: string; up?: boolean; positive?: boolean }) {
   return (
-    <aside data-reveal className="in floaty relative">
-      {/* Glow radial atras dos devices (mesma vibe do mock anterior) */}
-      <div
-        className="absolute -inset-8 -z-10 rounded-[40px] blur-2xl opacity-80"
-        aria-hidden
-        style={{
-          background:
-            'radial-gradient(420px 280px at 30% 15%, rgba(48,128,255,.30), transparent 60%),' +
-            'radial-gradient(420px 280px at 80% 25%, rgba(34,211,238,.20), transparent 55%)',
-        }}
-      />
-
-      {/* NOTEBOOK ─────────────────────────────────────────────────────── */}
-      <div className="relative mx-auto" style={{ maxWidth: 520 }}>
-        {/* Tela: bezel preto + camera + conteudo */}
-        <div
-          className="relative rounded-t-xl border border-zinc-700/80 shadow-[0_20px_50px_-10px_rgba(0,0,0,.55)]"
-          style={{
-            background: 'linear-gradient(180deg, #1a1d24, #0f1218)',
-            padding: '8px 8px 0',
-          }}
-        >
-          {/* Camera frontal */}
-          <div className="absolute left-1/2 -translate-x-1/2 top-[3px] w-1.5 h-1.5 rounded-full bg-zinc-900 border border-zinc-700/60" />
-          {/* Screen content */}
-          <div className="rounded-md overflow-hidden aspect-[16/10] bg-[#0e1019] border border-black/30">
-            <DesktopAppMock />
-          </div>
-        </div>
-
-        {/* Base/teclado: faixa metalica + entalhe inferior */}
-        <div
-          className="relative mx-[-22px] h-3 rounded-b-md"
-          style={{ background: 'linear-gradient(180deg, #2a2d34, #1a1d24)' }}
-        />
-        <div className="relative mx-[-32px] -mt-px">
-          <div
-            className="h-1.5 rounded-b-[18px]"
-            style={{ background: 'linear-gradient(180deg, #1a1d24, #0a0b0f)' }}
-          />
-          {/* Entalhe central (trackpad slot) */}
-          <div className="absolute left-1/2 -translate-x-1/2 top-0 w-20 h-1 rounded-b-md bg-black/60" />
-        </div>
-
-        {/* CELULAR ──────────────────────────────────────────────────────── */}
-        <div
-          className="absolute -bottom-6 -right-6 sm:-right-10 md:-right-8"
-          style={{ width: 140 }}
-        >
-          <div
-            className="relative rounded-[26px] border-[3px] border-zinc-800/95 shadow-[0_24px_50px_-10px_rgba(0,0,0,.6)]"
-            style={{
-              background: 'linear-gradient(180deg, #1f2228, #0e1117)',
-              padding: 4,
-            }}
-          >
-            {/* Notch (dynamic island vibe) */}
-            <div className="absolute left-1/2 -translate-x-1/2 top-2 w-14 h-3.5 rounded-full bg-black z-10" />
-            {/* Screen */}
-            <div className="rounded-[20px] overflow-hidden aspect-[9/19] bg-[#0e1019]">
-              <MobileAppMock />
-            </div>
-          </div>
-        </div>
-      </div>
-    </aside>
-  )
-}
-
-// Mockup do app desktop dentro do notebook. Reproduz a estrutura visual
-// do /app (sidebar fina escura + header com saldo + chart central com
-// linha gradient + painel de trade lateral com Comprar/Vender).
-function DesktopAppMock() {
-  return (
-    <div className="w-full h-full flex bg-[#0e1019] text-white">
-      {/* Sidebar fina */}
-      <div className="w-[34px] shrink-0 bg-[#0a0c14] border-r border-white/5 flex flex-col items-center gap-2 py-2">
-        <div className="w-5 h-5 rounded bg-gradient-to-br from-[#3080ff] to-[#22d3ee]" />
-        <div className="w-5 h-1 rounded bg-white/10 mt-1" />
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="w-5 h-5 rounded-md bg-white/5" />
-        ))}
-      </div>
-
-      <div className="flex-1 min-w-0 flex flex-col">
-        {/* Header */}
-        <div className="h-[26px] border-b border-white/5 bg-[#0a0c14] flex items-center justify-between px-2.5">
-          <div className="flex gap-1.5">
-            <span className="text-[8px] font-bold text-white px-1.5 py-0.5 rounded bg-white/10">BTC/USD</span>
-            <span className="text-[8px] font-bold text-white/60 px-1.5 py-0.5 rounded bg-white/5">EUR/USD</span>
-            <span className="text-[8px] font-bold text-white/60 px-1.5 py-0.5 rounded bg-white/5">SOL/USD</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[9px] font-extrabold text-emerald-400">R$ 12.847,32</span>
-            <span className="w-3 h-3 rounded-full bg-gradient-to-br from-[#3080ff] to-[#22d3ee]" />
-          </div>
-        </div>
-
-        {/* Conteudo: chart + painel direito */}
-        <div className="flex-1 flex min-h-0">
-          {/* Chart area */}
-          <div className="flex-1 relative bg-[#0e1019] overflow-hidden">
-            <svg viewBox="0 0 320 180" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="ntb-line" x1="0" x2="1" y1="0" y2="0">
-                  <stop offset="0%" stopColor="#3080ff" />
-                  <stop offset="100%" stopColor="#22d3ee" />
-                </linearGradient>
-                <linearGradient id="ntb-area" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="rgba(48,128,255,.35)" />
-                  <stop offset="100%" stopColor="rgba(48,128,255,0)" />
-                </linearGradient>
-              </defs>
-              {/* Grid leve */}
-              {[40, 80, 120, 160].map((y) => (
-                <line key={y} x1={0} x2={320} y1={y} y2={y} stroke="rgba(255,255,255,.04)" strokeWidth={1} />
-              ))}
-              {/* Candle hints (barras curtas) */}
-              {[
-                { x: 30,  h: 16, up: true  },
-                { x: 55,  h: 22, up: false },
-                { x: 80,  h: 14, up: true  },
-                { x: 105, h: 28, up: true  },
-                { x: 130, h: 18, up: false },
-                { x: 155, h: 24, up: true  },
-                { x: 180, h: 30, up: true  },
-                { x: 205, h: 20, up: false },
-                { x: 230, h: 26, up: true  },
-                { x: 255, h: 32, up: true  },
-                { x: 280, h: 22, up: false },
-              ].map((c, i) => {
-                const y = 130 - c.h
-                return (
-                  <rect
-                    key={i}
-                    x={c.x}
-                    y={y}
-                    width={6}
-                    height={c.h}
-                    rx={1}
-                    fill={c.up ? '#26a69a' : '#ef5350'}
-                    opacity={0.55}
-                  />
-                )
-              })}
-              {/* Area + linha */}
-              <path
-                d="M0,140 C30,120 60,128 90,100 C120,72 150,108 180,82 C210,56 240,90 280,60 L320,50 L320,180 L0,180 Z"
-                fill="url(#ntb-area)"
-              />
-              <path
-                d="M0,140 C30,120 60,128 90,100 C120,72 150,108 180,82 C210,56 240,90 280,60 L320,50"
-                fill="none"
-                stroke="url(#ntb-line)"
-                strokeWidth={1.6}
-              />
-              {/* Ponto atual (pulse) */}
-              <circle cx={320} cy={50} r={2.5} fill="#22d3ee">
-                <animate attributeName="r" values="2.5;4;2.5" dur="1.6s" repeatCount="indefinite" />
-              </circle>
-            </svg>
-            {/* Tag live */}
-            <div className="absolute left-1.5 top-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-[7px] font-bold text-emerald-300">
-              <span className="w-1 h-1 rounded-full bg-emerald-400 live-dot" />
-              AO VIVO
-            </div>
-          </div>
-
-          {/* Painel direito de trade */}
-          <div className="w-[78px] shrink-0 border-l border-white/5 bg-[#0a0c14] p-1.5 flex flex-col gap-1">
-            <div className="text-[7px] font-bold text-white/40 uppercase">Valor</div>
-            <div className="text-[10px] font-extrabold text-white px-1.5 py-1 rounded bg-white/5 border border-white/8">R$ 50</div>
-            <div className="text-[7px] font-bold text-white/40 uppercase mt-1">Tempo</div>
-            <div className="text-[10px] font-extrabold text-white px-1.5 py-1 rounded bg-white/5 border border-white/8">1 min</div>
-            <div className="text-[7px] font-bold text-emerald-300/90 mt-1 text-center">+92%</div>
-            <button className="mt-auto rounded font-extrabold text-[9px] text-white py-1.5" style={{ background: '#26a69a' }}>
-              COMPRAR
-            </button>
-            <button className="rounded font-extrabold text-[9px] text-white py-1.5" style={{ background: '#ef5350' }}>
-              VENDER
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Mockup mobile do app dentro do celular (vertical, condensado).
-function MobileAppMock() {
-  return (
-    <div className="w-full h-full bg-[#0e1019] text-white flex flex-col">
-      {/* Status bar fake */}
-      <div className="h-6" />
-      {/* Header com ativo */}
-      <div className="px-2 pt-1 pb-1.5 flex items-center justify-between">
-        <div>
-          <div className="text-[8px] font-bold text-white">BTC/USD</div>
-          <div className="text-[9px] font-extrabold text-emerald-400">62.347,80</div>
-        </div>
-        <div className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-[6px] font-bold text-emerald-300">
-          <span className="w-0.5 h-0.5 rounded-full bg-emerald-400 live-dot" />
-          LIVE
-        </div>
-      </div>
-      {/* Chart */}
-      <div className="flex-1 relative bg-[#0a0c14] mx-1.5 rounded-md overflow-hidden border border-white/5">
-        <svg viewBox="0 0 120 180" className="absolute inset-0 w-full h-full" preserveAspectRatio="none">
-          <defs>
-            <linearGradient id="m-line" x1="0" x2="1" y1="0" y2="0">
-              <stop offset="0%" stopColor="#3080ff" />
-              <stop offset="100%" stopColor="#22d3ee" />
-            </linearGradient>
-            <linearGradient id="m-area" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="rgba(48,128,255,.4)" />
-              <stop offset="100%" stopColor="rgba(48,128,255,0)" />
-            </linearGradient>
-          </defs>
-          {[
-            { x: 8,   h: 14, up: true  },
-            { x: 22,  h: 22, up: false },
-            { x: 36,  h: 16, up: true  },
-            { x: 50,  h: 26, up: true  },
-            { x: 64,  h: 18, up: false },
-            { x: 78,  h: 24, up: true  },
-            { x: 92,  h: 30, up: true  },
-            { x: 106, h: 22, up: true  },
-          ].map((c, i) => {
-            const y = 130 - c.h
-            return (
-              <rect key={i} x={c.x} y={y} width={4} height={c.h} rx={1}
-                    fill={c.up ? '#26a69a' : '#ef5350'} opacity={0.5} />
-            )
-          })}
-          <path
-            d="M0,140 C20,110 40,120 60,90 C80,60 100,100 120,55 L120,180 L0,180 Z"
-            fill="url(#m-area)"
-          />
-          <path
-            d="M0,140 C20,110 40,120 60,90 C80,60 100,100 120,55"
-            fill="none"
-            stroke="url(#m-line)"
-            strokeWidth={1.5}
-          />
-          <circle cx={120} cy={55} r={2} fill="#22d3ee">
-            <animate attributeName="r" values="2;3.2;2" dur="1.6s" repeatCount="indefinite" />
-          </circle>
-        </svg>
-      </div>
-      {/* Stats e CTAs */}
-      <div className="px-1.5 pt-1.5 pb-1.5 grid grid-cols-2 gap-1">
-        <div className="rounded border border-white/10 bg-white/5 px-1 py-0.5">
-          <div className="text-[5px] font-bold text-white/45 uppercase">Saldo</div>
-          <div className="text-[7px] font-extrabold text-white leading-tight">R$ 12.847</div>
-        </div>
-        <div className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1 py-0.5">
-          <div className="text-[5px] font-bold text-emerald-300/80 uppercase">Hoje</div>
-          <div className="text-[7px] font-extrabold text-emerald-400 leading-tight">+R$ 384</div>
-        </div>
-      </div>
-      <div className="px-1.5 pb-2 grid grid-cols-2 gap-1">
-        <div className="rounded text-center font-extrabold text-[7px] text-white py-1" style={{ background: '#26a69a' }}>
-          COMPRAR
-        </div>
-        <div className="rounded text-center font-extrabold text-[7px] text-white py-1" style={{ background: '#ef5350' }}>
-          VENDER
-        </div>
+    <div className="rounded-xl border border-white/8 bg-[#0e1019]/55 p-3">
+      <div className="text-[11px] font-bold text-white/55">{label}</div>
+      <div className={'mt-1 font-extrabold text-base ' + (positive ? 'text-emerald-400' : 'text-white')}>
+        {value}
       </div>
     </div>
   )
