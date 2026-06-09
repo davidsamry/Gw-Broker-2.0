@@ -16,13 +16,14 @@
 // #0e1019 (bg) + #171b27 (card). Tudo Tailwind inline pra evitar
 // poluir o globals do app.
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import {
   Zap, Shield, BarChart3, Smartphone, Wallet, Headphones,
-  TrendingUp, Globe, LineChart, Briefcase,
+  Globe, LineChart, Briefcase,
   ArrowRight, CheckCircle2, ChevronDown, Star,
+  Trophy, Medal, Award,
 } from 'lucide-react'
 
 // ── Reveal-on-scroll hook ────────────────────────────────────────────────
@@ -49,54 +50,8 @@ function useReveal() {
   }, [])
 }
 
-// Animacao de contagem dos numeros do "metrics" — 2s de duracao,
-// trigger uma unica vez quando a secao aparece.
-function useCountUp(target: number, trigger: boolean, decimals = 0) {
-  const [value, setValue] = useState(0)
-  useEffect(() => {
-    if (!trigger) return
-    const duration = 1800
-    const startedAt = performance.now()
-    let raf = 0
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - startedAt) / duration)
-      // ease-out cubic — comeca rapido, desacelera no fim
-      const eased = 1 - Math.pow(1 - t, 3)
-      setValue(target * eased)
-      if (t < 1) raf = requestAnimationFrame(tick)
-      else setValue(target)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [target, trigger])
-  return decimals === 0 ? Math.floor(value) : Number(value.toFixed(decimals))
-}
-
 export default function VxLandingPage() {
   useReveal()
-
-  // Trigger pra contagem dos numeros — aciona quando o bloco de metrics
-  // entra no viewport (uma so' vez).
-  const [metricsLive, setMetricsLive] = useState(false)
-  const metricsRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    const el = metricsRef.current
-    if (!el) return
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          setMetricsLive(true)
-          io.disconnect()
-        }
-      },
-      { threshold: 0.4 },
-    )
-    io.observe(el)
-    return () => io.disconnect()
-  }, [])
-
-  const userCount = useCountUp(15000, metricsLive)
-  const uptime    = useCountUp(99.9, metricsLive, 1)
 
   // Parallax sutil no grid de fundo — segue scroll com um leve offset.
   const [scrollY, setScrollY] = useState(0)
@@ -345,20 +300,17 @@ export default function VxLandingPage() {
           </div>
         </section>
 
-        {/* METRICS ──────────────────────────────────────────────────────── */}
-        <section
-          ref={metricsRef}
-          className="mx-auto w-full max-w-[1180px] px-5 py-10"
-        >
+        {/* AWARDS ──────────────────────────────────────────────────────── */}
+        <section className="mx-auto w-full max-w-[1180px] px-5 py-10">
           <div
             data-stagger
             data-reveal
             className="grid grid-cols-2 md:grid-cols-4 gap-3.5"
           >
-            <MetricCard num={`+${(userCount / 1000).toFixed(0)}k`} label="Traders ativos" />
-            <MetricCard num="24/7" label="Suporte humano" />
-            <MetricCard num={`${uptime.toFixed(1)}%`} label="Uptime garantido" />
-            <MetricCard num="<1s" label="Execução de ordens" />
+            <AwardCard icon={<Trophy size={20} />} title="Melhor Atendimento" issuer="Prêmio Investidores Brasil" year="2024" />
+            <AwardCard icon={<Medal  size={20} />} title="Corretora do Ano"   issuer="Investment Awards"        year="2023" />
+            <AwardCard icon={<Award  size={20} />} title="Excelência Digital" issuer="Digital Finance"          year="2024" />
+            <AwardCard icon={<Star   size={20} />} title="Top 10 Corretoras"  issuer="Ranking Nacional"         year="2024" />
           </div>
         </section>
 
@@ -589,16 +541,29 @@ function MockStat({ label, value, positive = false }: { label: string; value: st
   )
 }
 
-function MetricCard({ num, label }: { num: string; label: string }) {
+function AwardCard({
+  icon, title, issuer, year,
+}: { icon: React.ReactNode; title: string; issuer: string; year: string }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#0a0c14]/55 p-5 text-center shadow-[0_16px_46px_rgba(0,0,0,.22)]">
+    <div className="rounded-2xl border border-white/10 bg-[#0a0c14]/55 p-5 text-center shadow-[0_16px_46px_rgba(0,0,0,.22)] transition-all hover:-translate-y-1 hover:border-[#3080ff]/30">
+      {/* Icone — bg azul VX com leve gradient, mesmo idioma visual dos cards */}
+      <div
+        className="mx-auto inline-flex items-center justify-center w-11 h-11 rounded-xl text-[#3080ff] border border-[#3080ff]/30"
+        style={{
+          background:
+            'linear-gradient(135deg, rgba(48,128,255,.18), rgba(34,211,238,.10))',
+        }}
+      >
+        {icon}
+      </div>
+      <h3 className="mt-3 font-extrabold text-white text-[15px] leading-tight">{title}</h3>
+      <p className="mt-1.5 text-[12px] font-semibold text-white/55">{issuer}</p>
       <p
-        className="m-0 text-[44px] font-black tracking-tight bg-clip-text text-transparent"
+        className="mt-3 text-xl font-black tracking-tight bg-clip-text text-transparent"
         style={{ backgroundImage: 'linear-gradient(135deg, #3080ff, #22d3ee)' }}
       >
-        {num}
+        {year}
       </p>
-      <p className="mt-1 text-sm font-bold text-white/65">{label}</p>
     </div>
   )
 }
