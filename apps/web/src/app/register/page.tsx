@@ -1,10 +1,8 @@
-'use client'
+import { redirect } from 'next/navigation'
 
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-
+// Server-side 307 redirect — sem flash visual e sem hydration.
+// Mantemos /register como rota publica (links externos, anuncios)
+// que aterrissam direto na tab de cadastro do /login.
 export default function RegisterPage() {
-  const router = useRouter()
-  useEffect(() => { router.replace('/login?tab=register') }, [])
-  return null
+  redirect('/login?tab=register')
 }
