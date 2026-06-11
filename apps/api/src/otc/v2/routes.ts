@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { getCachedCandles, getCurrentPrice } from './worker.js'
+import { getOtcChanges24h } from './changes.js'
 import { otcV2Bus, type OtcV2CandleEvent, type OtcV2TickEvent } from './events.js'
 import { registerClient, unregisterClient } from './stream/registry.js'
 import { CANDLES_PER_TF, OTC_TIMEFRAMES, type OtcTimeframe } from './types.js'
@@ -54,6 +55,14 @@ export async function otcV2Routes(app: FastifyInstance) {
         close: c.close,
       })),
     })
+  })
+
+  // ── Variação 24h de todos os OTC (pro seletor de pares) ──────────────
+  // Map { assetId: pct }. Calculada dos candles tf=60, cache 60s. Antes
+  // o seletor mostrava +0.00% fixo (catálogo OTC sem fonte de variação).
+  app.get('/changes', async (_req, reply) => {
+    const changes = await getOtcChanges24h()
+    return reply.send({ changes })
   })
 
   // ── Current price (latest tick) ──────────────────────────────────────

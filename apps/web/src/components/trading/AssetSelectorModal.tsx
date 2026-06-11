@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { X, Search, Star, ChevronUp, ChevronDown } from 'lucide-react'
 import { ASSETS, DEFAULT_FAVORITES, type Asset } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
+import { api } from '@/lib/api'
 import { FlagPair } from '@/components/ui/FlagPair'
 
 interface AssetSelectorModalProps {
@@ -14,6 +15,23 @@ interface AssetSelectorModalProps {
 }
 
 type Category = 'Moedas' | 'Cripto' | 'Matérias-Primas' | 'Ações'
+
+// A variação 24h crua da engine OTC é grande demais (±20%), irreal pra
+// forex/commodities. Comprimimos pra uma faixa realista por categoria,
+// preservando o SINAL e dando variação natural (tanh, não corte seco —
+// senão todo ativo grudaria no teto). Ex: forex raw +16% → ~+0.9%.
+const CHANGE_CAP_BY_CATEGORY: Record<Category, number> = {
+  'Moedas':           1.2,  // forex: ±~1%
+  'Matérias-Primas':  3,    // commodities: ±~3%
+  'Ações':            4,    // ações: ±~4%
+  'Cripto':           6,    // crypto: ±~6%
+}
+const CHANGE_SQUASH = 12 // raw% / 12 dentro do tanh — ~±15-25% satura perto do teto
+
+function realisticChange(raw: number, category: Category): number {
+  const cap = CHANGE_CAP_BY_CATEGORY[category] ?? 3
+  return cap * Math.tanh(raw / CHANGE_SQUASH)
+}
 
 // Canonical order shown to the user when a tab has at least one asset.
 // We filter this down to "present" categories below so empty tabs don't
@@ -34,6 +52,18 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
   const [search, setSearch] = useState('')
   const [showFavOnly, setShowFavOnly] = useState(false)
   const [favorites, setFavorites] = useState<Set<string>>(new Set(DEFAULT_FAVORITES))
+
+  // Variação 24h real dos OTC (catálogo vem com change24h=0 fixo). Busca
+  // do backend ao abrir; sobrepõe por assetId no render. Falha silenciosa
+  // mantém o 0% — não quebra o seletor se a API estiver fora.
+  const [otcChanges, setOtcChanges] = useState<Record<string, number>>({})
+  useEffect(() => {
+    let alive = true
+    api.get<{ changes: Record<string, number> }>('/otc/v2/changes')
+      .then((r) => { if (alive) setOtcChanges(r.data?.changes ?? {}) })
+      .catch(() => { /* mantém 0% */ })
+    return () => { alive = false }
+  }, [])
 
   const filtered = useMemo(() => {
     // BINANCE (live crypto) gets top billing over OTC (synthesised).
@@ -171,7 +201,13 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
           filtered.map((asset, index) => {
             const isActive = asset.id === selectedAsset.id
             const isFav = favorites.has(asset.id)
-            const isUp = asset.change24h >= 0
+            // OTC usa a variação real vinda do backend (se disponível),
+            // comprimida pra faixa realista por categoria. Demais ativos
+            // usam o change24h do próprio catálogo/ticker (Binance é real).
+            const change24h = asset.type === 'OTC' && otcChanges[asset.id] !== undefined
+              ? realisticChange(otcChanges[asset.id], asset.category)
+              : asset.change24h
+            const isUp = change24h >= 0
             const prevAsset = filtered[index - 1]
             const showGroupDivider = index > 0 && asset.source !== prevAsset?.source
             const groupLabel = asset.source === 'BINANCE' ? 'BINANCE' : asset.type === 'Crypto' ? 'CRIPTO' : asset.type
@@ -213,7 +249,7 @@ export function AssetSelectorModal({ selectedAsset, assets = ASSETS, onSelect, o
                 {/* 24h change */}
                 <div className={cn('flex items-center gap-1 text-xs font-semibold', isUp ? 'text-green-400' : 'text-red-400')}>
                   {isUp ? <ChevronUp size={12} className="flex-shrink-0" /> : <ChevronDown size={12} className="flex-shrink-0" />}
-                  {isUp ? '+' : ''}{asset.change24h.toFixed(2)}%
+                  {isUp ? '+' : ''}{change24h.toFixed(2)}%
                 </div>
 
                 {/* Payout */}
