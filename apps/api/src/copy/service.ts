@@ -81,6 +81,15 @@ export interface MyTraderRow {
   pricePaid:      number
   opsGenerated:   number
   accumulated:    number   // soma dos pnl das ops copiadas (display)
+  operations:     CopyOpRow[]  // histórico das ops do trader (display)
+}
+
+export interface CopyOpRow {
+  id:        string
+  result:    string   // 'WIN' | 'LOSS'
+  amount:    number
+  pnl:       number
+  createdAt: Date
 }
 
 // "Meus Traders" — assinaturas ativas + resumo das ops geradas.
@@ -104,6 +113,22 @@ export async function listMyTraders(userId: string): Promise<MyTraderRow[]> {
   })
   const aggMap = new Map(agg.map((a) => [a.traderId, a]))
 
+  // Histórico das ops (display) — busca todas as ops dos traders do user
+  // numa query e agrupa por traderId. Limite alto (50) cobre vários ciclos.
+  const allOps = await prisma.copyTradeOperation.findMany({
+    where:   { userId, traderId: { in: traderIds } },
+    orderBy: { createdAt: 'desc' },
+    take:    traderIds.length * 50,
+  })
+  const opsByTrader = new Map<string, CopyOpRow[]>()
+  for (const o of allOps) {
+    const list = opsByTrader.get(o.traderId) ?? []
+    if (list.length < 50) {
+      list.push({ id: o.id, result: o.result, amount: Number(o.amount), pnl: Number(o.pnl), createdAt: o.createdAt })
+    }
+    opsByTrader.set(o.traderId, list)
+  }
+
   return subs.map((s) => {
     const t = traderMap.get(s.traderId)
     const a = aggMap.get(s.traderId)
@@ -119,6 +144,7 @@ export async function listMyTraders(userId: string): Promise<MyTraderRow[]> {
       pricePaid:      Number(s.pricePaid),
       opsGenerated:   a?._count._all ?? 0,
       accumulated:    a?._sum.pnl ? Number(a._sum.pnl) : 0,
+      operations:     opsByTrader.get(s.traderId) ?? [],
     }
   })
 }

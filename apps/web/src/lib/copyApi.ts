@@ -19,6 +19,14 @@ export interface CopyTrader {
   copied:        boolean
 }
 
+export interface CopyOp {
+  id:        string
+  result:    'WIN' | 'LOSS'
+  amount:    number
+  pnl:       number
+  createdAt: string
+}
+
 export interface MyCopyTrader {
   subscriptionId: string
   traderId:       string
@@ -31,6 +39,7 @@ export interface MyCopyTrader {
   pricePaid:      number
   opsGenerated:   number
   accumulated:    number
+  operations:     CopyOp[]
 }
 
 export async function fetchCopyTraders(): Promise<{ traders: CopyTrader[]; enabled: boolean }> {

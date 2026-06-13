@@ -9,7 +9,7 @@
 // backend) — nunca tocam saldo/rollover.
 
 import { useEffect, useState, useCallback } from 'react'
-import { X, Search, Users, Loader2, Crown, ArrowRight, CheckCircle2, Wallet } from 'lucide-react'
+import { X, Search, Users, Loader2, Crown, ArrowRight, CheckCircle2, Wallet, ArrowUp, ArrowDown } from 'lucide-react'
 import {
   fetchCopyTraders, fetchMyCopyTraders, copyTrader, cancelCopyTrader,
   type CopyTrader, type MyCopyTrader,
@@ -327,6 +327,34 @@ function MyTraderCard({ t, busy, onCancel }: { t: MyCopyTrader; busy: boolean; o
           </div>
         </div>
       </div>
+
+      {/* Histórico das operações copiadas */}
+      {t.operations.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[9px] text-[#8b8f9a] uppercase tracking-wide mb-1.5">Histórico de operações</div>
+          <div className="rounded-lg bg-[#0e1019]/60 divide-y divide-[#1e2235] max-h-44 overflow-y-auto">
+            {t.operations.map((op) => {
+              const win = op.result === 'WIN'
+              const time = new Date(op.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+              return (
+                <div key={op.id} className="flex items-center gap-2 px-2.5 py-1.5">
+                  <span className={cn(
+                    'w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0',
+                    win ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400',
+                  )}>
+                    {win ? <ArrowUp size={9} strokeWidth={3} /> : <ArrowDown size={9} strokeWidth={3} />}
+                  </span>
+                  <span className="text-[11px] text-white flex-1">{win ? 'Ganho' : 'Perda'}</span>
+                  <span className="text-[10px] font-mono text-[#8b8f9a]">{time}</span>
+                  <span className={cn('text-[11px] font-bold w-20 text-right', win ? 'text-emerald-400' : 'text-red-400')}>
+                    {win ? '+' : ''}R$ {brl(op.pnl)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       <button
         onClick={onCancel}
