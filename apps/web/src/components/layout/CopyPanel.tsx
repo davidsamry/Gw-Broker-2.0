@@ -11,7 +11,7 @@
 // histórico sem o usuário recarregar. NÃO contam rollover/ranking.
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { X, Search, Users, Loader2, Crown, ArrowRight, CheckCircle2, Wallet, ArrowUp, ArrowDown, Clock } from 'lucide-react'
+import { X, Search, Users, Loader2, Crown, ArrowRight, CheckCircle2, Wallet, ArrowUp, ArrowDown } from 'lucide-react'
 import {
   fetchCopyTraders, fetchMyCopyTraders, copyTrader, cancelCopyTrader,
   type CopyTrader, type MyCopyTrader,
@@ -315,17 +315,6 @@ function TraderCard({ trader: t, busy, onCopy }: { trader: CopyTrader; busy: boo
   )
 }
 
-// Rótulo "em ~X min" / "às HH:MM" pra próxima operação agendada.
-function nextOpLabel(iso: string): string {
-  const ms = new Date(iso).getTime() - Date.now()
-  if (ms <= 60_000) return 'em instantes'
-  const min = Math.round(ms / 60_000)
-  if (min < 60) return `em ~${min} min`
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return `em ~${h}h${m ? ` ${m}min` : ''}`
-}
-
 // ── Card de "Meus Traders" ──────────────────────────────────────────────────
 function MyTraderCard({ t, busy, onCancel }: { t: MyCopyTrader; busy: boolean; onCancel: () => void }) {
   const accColor = t.accumulated >= 0 ? 'text-emerald-400' : 'text-red-400'
@@ -390,13 +379,11 @@ function MyTraderCard({ t, busy, onCancel }: { t: MyCopyTrader; busy: boolean; o
         </div>
       )}
 
-      {/* Próxima operação agendada (enquanto houver ops pendentes) */}
-      {t.nextOpAt && (
-        <div className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-[#8b8f9a]">
-          <Clock size={10} className="text-[#3080ff]" />
-          {t.operations.length === 0 ? 'Primeira operação' : 'Próxima operação'} {nextOpLabel(t.nextOpAt)}
-        </div>
-      )}
+      {/* Status fixo — conta conectada ao trader */}
+      <div className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-[#8b8f9a]">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+        Sua conta está conectada ao trader.
+      </div>
 
       <button
         onClick={onCancel}
