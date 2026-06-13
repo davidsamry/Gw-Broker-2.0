@@ -24,7 +24,7 @@ export interface CopyOp {
   result:    'WIN' | 'LOSS'
   amount:    number
   pnl:       number
-  createdAt: string
+  settledAt: string   // quando a op apareceu/liquidou
 }
 
 export interface MyCopyTrader {
@@ -37,9 +37,10 @@ export interface MyCopyTrader {
   paid:           boolean
   activatedAt:    string
   pricePaid:      number
-  opsGenerated:   number
-  accumulated:    number
-  operations:     CopyOp[]
+  opsGenerated:   number          // ops já liquidadas
+  accumulated:    number          // soma do pnl das liquidadas
+  nextOpAt:       string | null   // quando cai a próxima op (ou null)
+  operations:     CopyOp[]        // histórico das liquidadas
 }
 
 export async function fetchCopyTraders(): Promise<{ traders: CopyTrader[]; enabled: boolean }> {

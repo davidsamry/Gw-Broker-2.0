@@ -5,11 +5,13 @@
 //
 // Lógica financeira é toda no backend (/copy/*). Aqui: lista, decide o modal
 // pelo erro retornado (NO_BALANCE / INSUFFICIENT_BALANCE) e dispara o
-// depósito via onDeposit. Operações copiadas são display-only (geradas no
-// backend) — nunca tocam saldo/rollover.
+// depósito via onDeposit. As operações copiadas são liquidadas no tempo pelo
+// copyWorker (1ª em 1min, demais a cada 30min) e MEXEM no saldo REAL — por
+// isso há um poll leve enquanto houver op pendente, pra refletir saldo e
+// histórico sem o usuário recarregar. NÃO contam rollover/ranking.
 
-import { useEffect, useState, useCallback } from 'react'
-import { X, Search, Users, Loader2, Crown, ArrowRight, CheckCircle2, Wallet, ArrowUp, ArrowDown } from 'lucide-react'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { X, Search, Users, Loader2, Crown, ArrowRight, CheckCircle2, Wallet, ArrowUp, ArrowDown, Clock } from 'lucide-react'
 import {
   fetchCopyTraders, fetchMyCopyTraders, copyTrader, cancelCopyTrader,
   type CopyTrader, type MyCopyTrader,
@@ -64,6 +66,27 @@ export function CopyPanel({ onClose, onDeposit, onCopied }: CopyPanelProps) {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // Poll leve enquanto houver op pendente: o copyWorker liquida em background
+  // (mexe no saldo REAL), então sem isto o saldo do header e o histórico
+  // ficariam parados até um reload. Refaz só "Meus Traders" + saldo (sem o
+  // spinner). Para sozinho quando todas liquidam (nextOpAt some). onCopied via
+  // ref pra não recriar o intervalo a cada render.
+  const onCopiedRef = useRef(onCopied)
+  onCopiedRef.current = onCopied
+  const hasPending = mine.some((m) => m.nextOpAt)
+  useEffect(() => {
+    if (!hasPending) return
+    const id = setInterval(() => {
+      void (async () => {
+        try {
+          setMine(await fetchMyCopyTraders())
+          onCopiedRef.current?.()   // refresh do saldo no header
+        } catch { /* noop */ }
+      })()
+    }, 30_000)
+    return () => clearInterval(id)
+  }, [hasPending])
 
   async function handleCopy(t: CopyTrader) {
     if (busyId || t.copied) return
@@ -292,6 +315,17 @@ function TraderCard({ trader: t, busy, onCopy }: { trader: CopyTrader; busy: boo
   )
 }
 
+// Rótulo "em ~X min" / "às HH:MM" pra próxima operação agendada.
+function nextOpLabel(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now()
+  if (ms <= 60_000) return 'em instantes'
+  const min = Math.round(ms / 60_000)
+  if (min < 60) return `em ~${min} min`
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return `em ~${h}h${m ? ` ${m}min` : ''}`
+}
+
 // ── Card de "Meus Traders" ──────────────────────────────────────────────────
 function MyTraderCard({ t, busy, onCancel }: { t: MyCopyTrader; busy: boolean; onCancel: () => void }) {
   const accColor = t.accumulated >= 0 ? 'text-emerald-400' : 'text-red-400'
@@ -323,19 +357,19 @@ function MyTraderCard({ t, busy, onCancel }: { t: MyCopyTrader; busy: boolean; o
         <div className="rounded-lg bg-[#0e1019]/60 py-1.5">
           <div className="text-[9px] text-[#8b8f9a] uppercase">Resultado</div>
           <div className={cn('text-sm font-extrabold', accColor)}>
-            {t.accumulated >= 0 ? '+' : ''}R$ {brl(t.accumulated)}
+            {t.accumulated >= 0 ? '+' : '-'}R$ {brl(Math.abs(t.accumulated))}
           </div>
         </div>
       </div>
 
-      {/* Histórico das operações copiadas */}
+      {/* Histórico das operações copiadas (só as que já apareceram/liquidaram) */}
       {t.operations.length > 0 && (
         <div className="mt-3">
           <div className="text-[9px] text-[#8b8f9a] uppercase tracking-wide mb-1.5">Histórico de operações</div>
           <div className="rounded-lg bg-[#0e1019]/60 divide-y divide-[#1e2235] max-h-44 overflow-y-auto">
             {t.operations.map((op) => {
               const win = op.result === 'WIN'
-              const time = new Date(op.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+              const time = new Date(op.settledAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
               return (
                 <div key={op.id} className="flex items-center gap-2 px-2.5 py-1.5">
                   <span className={cn(
@@ -347,12 +381,20 @@ function MyTraderCard({ t, busy, onCancel }: { t: MyCopyTrader; busy: boolean; o
                   <span className="text-[11px] text-white flex-1">{win ? 'Ganho' : 'Perda'}</span>
                   <span className="text-[10px] font-mono text-[#8b8f9a]">{time}</span>
                   <span className={cn('text-[11px] font-bold w-20 text-right', win ? 'text-emerald-400' : 'text-red-400')}>
-                    {win ? '+' : ''}R$ {brl(op.pnl)}
+                    {win ? '+' : '-'}R$ {brl(Math.abs(op.pnl))}
                   </span>
                 </div>
               )
             })}
           </div>
+        </div>
+      )}
+
+      {/* Próxima operação agendada (enquanto houver ops pendentes) */}
+      {t.nextOpAt && (
+        <div className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-[#8b8f9a]">
+          <Clock size={10} className="text-[#3080ff]" />
+          {t.operations.length === 0 ? 'Primeira operação' : 'Próxima operação'} {nextOpLabel(t.nextOpAt)}
         </div>
       )}
 

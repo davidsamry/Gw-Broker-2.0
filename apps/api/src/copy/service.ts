@@ -3,16 +3,20 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 
 // ── Copy Trading — módulo isolado ──────────────────────────────────────────
-// As "operações copiadas" (copy_trade_operations) são SÓ display: nunca
-// mexem em saldo, nunca viram ordem real, nunca contam rollover/ranking
-// (essas leem a tabela `operations`, que aqui NÃO é tocada).
+// As "operações copiadas" (copy_trade_operations) NÃO contam rollover/ranking
+// (essas leem a tabela `operations`, que aqui NÃO é tocada) — mas a partir de
+// 2026-06-13 elas MEXEM no saldo REAL: cada uma é agendada (1ª em 1min, demais
+// a cada 30min) e o copyWorker a liquida na hora, creditando (WIN) ou debitando
+// (LOSS) 10% da banca + lançando COPY_RESULT no extrato.
 //
 // Erros lançados como Error('CODE') — o route handler mapeia pra HTTP.
 
 const OPS_PER_CYCLE = 5
 const OPS_LOSS      = 3
-const OPS_WIN       = 2          // OPS_PER_CYCLE - OPS_LOSS
-const COPY_PAYOUT   = 0.85       // payout fictício p/ o pnl de display dos WIN
+const OPS_WIN       = 2                  // OPS_PER_CYCLE - OPS_LOSS
+const OP_FRACTION   = 0.10               // valor de cada op = 10% da banca (no momento da cópia)
+const FIRST_OP_DELAY_MS = 60_000         // 1ª op cai em 1 min (e é sempre WIN)
+const OP_INTERVAL_MS    = 30 * 60_000    // demais ops a cada 30 min
 
 export interface CopyTraderRow {
   id:            string
@@ -79,9 +83,10 @@ export interface MyTraderRow {
   paid:           boolean
   activatedAt:    Date
   pricePaid:      number
-  opsGenerated:   number
-  accumulated:    number   // soma dos pnl das ops copiadas (display)
-  operations:     CopyOpRow[]  // histórico das ops do trader (display)
+  opsGenerated:   number       // ops JÁ liquidadas (que apareceram)
+  accumulated:    number       // soma dos pnl das ops liquidadas
+  nextOpAt:       Date | null  // quando cai a próxima op pendente (ou null)
+  operations:     CopyOpRow[]  // histórico das ops liquidadas
 }
 
 export interface CopyOpRow {
@@ -89,7 +94,7 @@ export interface CopyOpRow {
   result:    string   // 'WIN' | 'LOSS'
   amount:    number
   pnl:       number
-  createdAt: Date
+  settledAt: Date     // quando a op apareceu/liquidou
 }
 
 // "Meus Traders" — assinaturas ativas + resumo das ops geradas.
@@ -104,30 +109,39 @@ export async function listMyTraders(userId: string): Promise<MyTraderRow[]> {
   const traders = await prisma.copyTrader.findMany({ where: { id: { in: traderIds } } })
   const traderMap = new Map(traders.map((t) => [t.id, t]))
 
-  // Agrega ops por trader (count + soma pnl) numa query só.
+  // Agrega só as ops JÁ liquidadas (count + soma pnl). Ops PENDING ainda não
+  // "apareceram" pro usuário, então não entram no resumo nem no histórico.
   const agg = await prisma.copyTradeOperation.groupBy({
     by:      ['traderId'],
-    where:   { userId, traderId: { in: traderIds } },
+    where:   { userId, traderId: { in: traderIds }, status: 'SETTLED' },
     _count:  { _all: true },
     _sum:    { pnl: true },
   })
   const aggMap = new Map(agg.map((a) => [a.traderId, a]))
 
-  // Histórico das ops (display) — busca todas as ops dos traders do user
-  // numa query e agrupa por traderId. Limite alto (50) cobre vários ciclos.
-  const allOps = await prisma.copyTradeOperation.findMany({
-    where:   { userId, traderId: { in: traderIds } },
-    orderBy: { createdAt: 'desc' },
+  // Histórico das ops liquidadas — ordenado por settledAt desc, agrupado por
+  // trader. Limite alto (50) cobre vários ciclos.
+  const settledOps = await prisma.copyTradeOperation.findMany({
+    where:   { userId, traderId: { in: traderIds }, status: 'SETTLED' },
+    orderBy: { settledAt: 'desc' },
     take:    traderIds.length * 50,
   })
   const opsByTrader = new Map<string, CopyOpRow[]>()
-  for (const o of allOps) {
+  for (const o of settledOps) {
     const list = opsByTrader.get(o.traderId) ?? []
     if (list.length < 50) {
-      list.push({ id: o.id, result: o.result, amount: Number(o.amount), pnl: Number(o.pnl), createdAt: o.createdAt })
+      list.push({ id: o.id, result: o.result, amount: Number(o.amount), pnl: Number(o.pnl), settledAt: o.settledAt ?? o.createdAt })
     }
     opsByTrader.set(o.traderId, list)
   }
+
+  // Próxima op pendente por trader (pra UI mostrar "próxima operação em ...").
+  const pending = await prisma.copyTradeOperation.groupBy({
+    by:     ['traderId'],
+    where:  { userId, traderId: { in: traderIds }, status: 'PENDING' },
+    _min:   { scheduledAt: true },
+  })
+  const nextMap = new Map(pending.map((p) => [p.traderId, p._min.scheduledAt ?? null]))
 
   return subs.map((s) => {
     const t = traderMap.get(s.traderId)
@@ -144,38 +158,43 @@ export async function listMyTraders(userId: string): Promise<MyTraderRow[]> {
       pricePaid:      Number(s.pricePaid),
       opsGenerated:   a?._count._all ?? 0,
       accumulated:    a?._sum.pnl ? Number(a._sum.pnl) : 0,
+      nextOpAt:       nextMap.get(s.traderId) ?? null,
       operations:     opsByTrader.get(s.traderId) ?? [],
     }
   })
 }
 
-// Gera as 5 operações copiadas (3 LOSS + 2 WIN, embaralhadas). Display-only.
-async function generateCopyOps(userId: string, traderId: string): Promise<void> {
-  const results: Array<'WIN' | 'LOSS'> = [
-    ...Array<'LOSS'>(OPS_LOSS).fill('LOSS'),
-    ...Array<'WIN'>(OPS_WIN).fill('WIN'),
-  ]
-  // Fisher-Yates shuffle pra ordem imprevisível.
-  for (let i = results.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[results[i], results[j]] = [results[j], results[i]]
-  }
+// Agenda as 5 operações copiadas. A 1ª é SEMPRE WIN e cai em 1 min; as outras
+// 4 (3 LOSS + 1 WIN) caem a cada 30 min, em ordem aleatória — total mantém
+// 3 LOSS + 2 WIN. Cada op vale 10% da `bankroll` (saldo no momento da cópia),
+// FIXO. Aqui só CRIA as ops PENDING; quem mexe no saldo é o copyWorker quando
+// cada uma vence (status PENDING → SETTLED).
+async function generateCopyOps(userId: string, traderId: string, bankroll: number): Promise<void> {
+  const opAmount = Math.max(0, Math.round(bankroll * OP_FRACTION * 100) / 100)
 
-  const rows = results.map((result) => {
-    const stake = Math.round((20 + Math.random() * 80) * 100) / 100 // 20..100
-    const pnl = result === 'WIN'
-      ? Math.round(stake * COPY_PAYOUT * 100) / 100
-      : -stake
-    return {
-      id:        randomUUID(),
-      userId,
-      traderId,
-      result,
-      amount:    new Prisma.Decimal(stake),
-      pnl:       new Prisma.Decimal(pnl),
-      // isCopyTrade default true
-    }
-  })
+  // 1ª sempre WIN. Restante = 3 LOSS + 1 WIN, embaralhado.
+  const rest: Array<'WIN' | 'LOSS'> = [
+    ...Array<'LOSS'>(OPS_LOSS).fill('LOSS'),
+    ...Array<'WIN'>(OPS_WIN - 1).fill('WIN'),
+  ]
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[rest[i], rest[j]] = [rest[j], rest[i]]
+  }
+  const results: Array<'WIN' | 'LOSS'> = ['WIN', ...rest]
+
+  const now = Date.now()
+  const rows = results.map((result, i) => ({
+    id:          randomUUID(),
+    userId,
+    traderId,
+    result,
+    amount:      new Prisma.Decimal(opAmount),
+    pnl:         new Prisma.Decimal(0),  // setado no settle
+    status:      'PENDING',
+    scheduledAt: new Date(now + FIRST_OP_DELAY_MS + i * OP_INTERVAL_MS),
+    // isCopyTrade default true
+  }))
 
   await prisma.copyTradeOperation.createMany({ data: rows })
 }
@@ -250,10 +269,11 @@ export async function copyTrader(userId: string, traderId: string): Promise<Copy
     })
   }
 
-  // Gera as 5 ops de display (fora do caminho financeiro). Falha aqui não
-  // desfaz a assinatura — pior caso o usuário copia sem ops geradas (raro).
+  // Agenda as 5 ops (1ª WIN em 1min, demais a cada 30min). O valor de cada uma
+  // é 10% da banca = saldo no momento da cópia (antes da compra, se paga).
+  // Falha aqui não desfaz a assinatura — pior caso copia sem ops agendadas.
   try {
-    await generateCopyOps(userId, traderId)
+    await generateCopyOps(userId, traderId, balance)
   } catch (err) {
     console.error('[copy] generateCopyOps falhou (non-fatal)', { userId, traderId, err })
   }
@@ -266,11 +286,18 @@ export async function copyTrader(userId: string, traderId: string): Promise<Copy
   }
 }
 
-// Cancela a cópia (status CANCELLED). Sem refund.
+// Cancela a cópia (status CANCELLED). Sem refund. Também cancela as ops ainda
+// PENDING desse trader pro copyWorker parar de liquidá-las (as já SETTLED
+// permanecem no histórico e no saldo).
 export async function cancelCopy(userId: string, traderId: string): Promise<void> {
   const res = await prisma.userCopyTrader.updateMany({
     where: { userId, traderId, status: 'ACTIVE' },
     data:  { status: 'CANCELLED' },
   })
   if (res.count === 0) throw new Error('NOT_COPYING')
+
+  await prisma.copyTradeOperation.updateMany({
+    where: { userId, traderId, status: 'PENDING' },
+    data:  { status: 'CANCELLED' },
+  })
 }

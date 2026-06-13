@@ -5,6 +5,7 @@ import { startOtcV2Worker, stopOtcV2Worker } from './otc/v2/worker.js'
 import { refreshSettingsCache } from './settings/service.js'
 import { startLiquidityGc, stopLiquidityGc } from './operations/liquidityManipulation.js'
 import { startFakeWithdrawalWorker, stopFakeWithdrawalWorker } from './withdrawals/fakeWorker.js'
+import { startCopyWorker, stopCopyWorker } from './copy/worker.js'
 
 const port = Number(process.env.PORT ?? 3001)
 const host = process.env.HOST ?? '0.0.0.0'
@@ -55,6 +56,10 @@ try {
     // listAdminWithdrawals). E' visual interno, sem email.
     startFakeWithdrawalWorker()
     app.log.info('Fake withdrawal worker started (polling every 10s, auto-approve >60s)')
+    // Copy Trading — liquida as operações de copy agendadas (1ª em 1min, demais
+    // a cada 30min), creditando/debitando o saldo REAL + lançando no extrato.
+    startCopyWorker()
+    app.log.info('Copy worker started (polling every 30s)')
     // OTC v2 — the only OTC engine now (v1 retired in Etapa 8). Boots
     // in background (bootstrap of 3000 historical candles per asset/tf
     // can take ~10-30s on first deploy), doesn't block the API listen.
@@ -77,6 +82,7 @@ const shutdown = async (signal: string) => {
   try {
     stopExpirationWorker()
     stopFakeWithdrawalWorker()
+    stopCopyWorker()
     stopOtcV2Worker()
     await app.close()
     process.exit(0)

@@ -527,6 +527,15 @@ export async function deleteUser(adminId: string, targetUserId: string): Promise
     await tx.$executeRaw`
       DELETE FROM password_reset_tokens WHERE "userId" = ${targetUserId}
     `
+    // Copy Trading: tabelas isoladas (sem FK p/ User/Account), então o cascade
+    // de accounts NÃO as limpa. Sem isto, as ops PENDING ficariam órfãs e o
+    // copyWorker as re-tentaria pra sempre (a cada 30s) após a conta sumir.
+    await tx.$executeRaw`
+      DELETE FROM copy_trade_operations WHERE "userId" = ${targetUserId}
+    `
+    await tx.$executeRaw`
+      DELETE FROM user_copy_traders WHERE "userId" = ${targetUserId}
+    `
     // Accounts come after their dependents above.
     await tx.$executeRaw`
       DELETE FROM accounts WHERE "userId" = ${targetUserId}
