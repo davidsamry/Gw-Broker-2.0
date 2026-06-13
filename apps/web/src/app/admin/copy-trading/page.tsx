@@ -149,6 +149,82 @@ export default function AdminCopyTradingPage() {
         </div>
       )}
 
+      {/* ── Assinaturas & Compras (controle) — no topo ── */}
+      <div className="mb-8">
+        <div className="flex items-center gap-2 mb-3">
+          <Users size={18} className="text-[#3080ff]" />
+          <h2 className="text-base font-bold text-white">Assinaturas & Compras</h2>
+        </div>
+
+        {summary && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <Stat label="Assinaturas" value={`${summary.total}`} hint={`${summary.active} ativas · ${summary.cancelled} canceladas`} />
+            <Stat label="Compras pagas" value={`${summary.paid}`} hint={`${summary.free} grátis`} />
+            <Stat label="Receita (compras)" value={`R$ ${brl(summary.revenue)}`} hint="acesso a copys pagos" valueClass="text-emerald-400" />
+            <Stat
+              label="Resultado dos usuários"
+              value={`${summary.netUserPnl >= 0 ? '+' : '-'}R$ ${brl(Math.abs(summary.netUserPnl))}`}
+              hint={summary.netUserPnl <= 0 ? 'casa lucrou' : 'casa pagou'}
+              valueClass={summary.netUserPnl >= 0 ? 'text-red-400' : 'text-emerald-400'}
+            />
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded-xl border border-[#252a3a]">
+          <table className="w-full text-xs whitespace-nowrap">
+            <thead className="bg-[#171b27] text-[#8b8f9a]">
+              <tr>
+                <th className="text-left  px-3 py-2 font-medium">Usuário</th>
+                <th className="text-left  px-3 py-2 font-medium">Trader</th>
+                <th className="text-left  px-3 py-2 font-medium">Tipo</th>
+                <th className="text-left  px-3 py-2 font-medium">Status</th>
+                <th className="text-right px-3 py-2 font-medium">Ops</th>
+                <th className="text-right px-3 py-2 font-medium">Resultado</th>
+                <th className="text-left  px-3 py-2 font-medium">Data</th>
+              </tr>
+            </thead>
+            <tbody>
+              {subs.map((s) => (
+                <tr key={s.id} className="border-t border-[#252a3a]">
+                  <td className="px-3 py-2">
+                    <div className="text-white">{s.userName}</div>
+                    <div className="text-[10px] text-[#8b8f9a]">{s.userEmail}</div>
+                  </td>
+                  <td className="px-3 py-2 text-white">{s.traderName}</td>
+                  <td className="px-3 py-2">
+                    <span className={cn(
+                      'text-[10px] font-bold px-1.5 py-px rounded',
+                      s.paid ? 'bg-amber-500/15 text-amber-400' : 'bg-emerald-500/15 text-emerald-400',
+                    )}>
+                      {s.paid ? `PAGO R$ ${brl(s.pricePaid)}` : 'GRÁTIS'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    <span className={cn('text-[10px] font-bold', s.status === 'ACTIVE' ? 'text-emerald-400' : 'text-[#8b8f9a]')}>
+                      {s.status === 'ACTIVE' ? 'Ativo' : 'Cancelado'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right text-white">{s.settledOps}</td>
+                  <td className={cn('px-3 py-2 text-right font-bold', s.settledPnl >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                    {s.settledPnl >= 0 ? '+' : '-'}R$ {brl(Math.abs(s.settledPnl))}
+                  </td>
+                  <td className="px-3 py-2 text-[#8b8f9a]">{fmtDate(s.activatedAt)}</td>
+                </tr>
+              ))}
+              {subs.length === 0 && (
+                <tr><td colSpan={7} className="px-3 py-6 text-center text-[#8b8f9a]">Nenhuma assinatura ainda.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Catálogo de traders ── */}
+      <div className="flex items-center gap-2 mb-3">
+        <Copy size={18} className="text-[#3080ff]" />
+        <h2 className="text-base font-bold text-white">Traders</h2>
+      </div>
+
       <div className="space-y-3">
         {traders.map((t) => {
           const editing = editId === t.id
@@ -256,76 +332,6 @@ export default function AdminCopyTradingPage() {
             </div>
           )
         })}
-      </div>
-
-      {/* ── Assinaturas & Compras (controle) ── */}
-      <div className="mt-8">
-        <div className="flex items-center gap-2 mb-3">
-          <Users size={18} className="text-[#3080ff]" />
-          <h2 className="text-base font-bold text-white">Assinaturas & Compras</h2>
-        </div>
-
-        {summary && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <Stat label="Assinaturas" value={`${summary.total}`} hint={`${summary.active} ativas · ${summary.cancelled} canceladas`} />
-            <Stat label="Compras pagas" value={`${summary.paid}`} hint={`${summary.free} grátis`} />
-            <Stat label="Receita (compras)" value={`R$ ${brl(summary.revenue)}`} hint="acesso a copys pagos" valueClass="text-emerald-400" />
-            <Stat
-              label="Resultado dos usuários"
-              value={`${summary.netUserPnl >= 0 ? '+' : '-'}R$ ${brl(Math.abs(summary.netUserPnl))}`}
-              hint={summary.netUserPnl <= 0 ? 'casa lucrou' : 'casa pagou'}
-              valueClass={summary.netUserPnl >= 0 ? 'text-red-400' : 'text-emerald-400'}
-            />
-          </div>
-        )}
-
-        <div className="overflow-x-auto rounded-xl border border-[#252a3a]">
-          <table className="w-full text-xs whitespace-nowrap">
-            <thead className="bg-[#171b27] text-[#8b8f9a]">
-              <tr>
-                <th className="text-left  px-3 py-2 font-medium">Usuário</th>
-                <th className="text-left  px-3 py-2 font-medium">Trader</th>
-                <th className="text-left  px-3 py-2 font-medium">Tipo</th>
-                <th className="text-left  px-3 py-2 font-medium">Status</th>
-                <th className="text-right px-3 py-2 font-medium">Ops</th>
-                <th className="text-right px-3 py-2 font-medium">Resultado</th>
-                <th className="text-left  px-3 py-2 font-medium">Data</th>
-              </tr>
-            </thead>
-            <tbody>
-              {subs.map((s) => (
-                <tr key={s.id} className="border-t border-[#252a3a]">
-                  <td className="px-3 py-2">
-                    <div className="text-white">{s.userName}</div>
-                    <div className="text-[10px] text-[#8b8f9a]">{s.userEmail}</div>
-                  </td>
-                  <td className="px-3 py-2 text-white">{s.traderName}</td>
-                  <td className="px-3 py-2">
-                    <span className={cn(
-                      'text-[10px] font-bold px-1.5 py-px rounded',
-                      s.paid ? 'bg-amber-500/15 text-amber-400' : 'bg-emerald-500/15 text-emerald-400',
-                    )}>
-                      {s.paid ? `PAGO R$ ${brl(s.pricePaid)}` : 'GRÁTIS'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={cn('text-[10px] font-bold', s.status === 'ACTIVE' ? 'text-emerald-400' : 'text-[#8b8f9a]')}>
-                      {s.status === 'ACTIVE' ? 'Ativo' : 'Cancelado'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right text-white">{s.settledOps}</td>
-                  <td className={cn('px-3 py-2 text-right font-bold', s.settledPnl >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                    {s.settledPnl >= 0 ? '+' : '-'}R$ {brl(Math.abs(s.settledPnl))}
-                  </td>
-                  <td className="px-3 py-2 text-[#8b8f9a]">{fmtDate(s.activatedAt)}</td>
-                </tr>
-              ))}
-              {subs.length === 0 && (
-                <tr><td colSpan={7} className="px-3 py-6 text-center text-[#8b8f9a]">Nenhuma assinatura ainda.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
       </div>
     </div>
   )
