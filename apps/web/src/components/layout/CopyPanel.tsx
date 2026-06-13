@@ -262,7 +262,7 @@ function TraderCard({ trader: t, busy, onCopy }: { trader: CopyTrader; busy: boo
             )}
           </div>
           <div className="flex items-center gap-1 text-[10px] text-[#8b8f9a] mt-0.5">
-            <Users size={10} /> Copiadores: <b className="text-white">{t.copiers}/100</b>
+            <Users size={10} /> Copiadores: <b className="text-white">{t.copiers.toLocaleString('pt-BR')}</b>
           </div>
         </div>
       </div>
