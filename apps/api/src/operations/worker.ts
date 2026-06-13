@@ -279,28 +279,25 @@ async function resolveOperation(op: {
         }),
       ])
 
-      // ── Auto-liquidez: trigger ao atingir N% sobre a banca ──────────
-      // Após CADA WIN em conta REAL, verifica se o saldo cresceu acima
-      // de bankrollBaseline × (1 + autoLiquidityProfitPct / 100). Se sim
-      // E o user ainda NÃO tem liquidityMode ligado E não é isFake →
-      // flipa liquidityMode=true + canTradeCrypto=false.
+      // ── Auto-liquidez: 2 gatilhos (OR) ──────────────────────────────
+      // Após CADA WIN em conta REAL (user comum, sem liquidityMode), ativa
+      // liquidityMode=true + canTradeCrypto=false se QUALQUER um bater:
+      //   1. LUCRO   — saldo >= bankrollBaseline × (1 + autoLiquidityProfitPct/100)
+      //   2. ROLLOVER — rolloverProgress >= rolloverRequired × (autoLiquidityRolloverPct/100)
+      //                 (pega o user MESMO sem atingir o lucro — regra nova)
       //
-      // Skipa:
-      //   - isFake true (conta fake — admin disse pra não mexer)
-      //   - liquidityMode já true (sem flip duplicado)
-      //   - bankrollBaseline === 0 (sem depósito ainda; guard anti-Infinity)
-      //   - autoLiquidityProfitPct === 0 (função desligada globalmente)
-      //   - account.type !== 'REAL' (DEMO não dispara)
+      // Skipa: isFake true · liquidityMode já true · account.type != REAL.
+      // Cada gatilho tem seu próprio guard (baseline>0 / rolloverRequired>0).
+      // Setar a % correspondente como 0 desliga aquele gatilho.
       //
-      // Wrapped em try/catch — qualquer falha NUNCA desfaz o credit do
-      // WIN. O pior caso é a trigger "atrasar" pra próxima op.
-      //
-      // Re-aciona se admin desligar manualmente e o saldo continuar
-      // acima do threshold (decisão do produto — sem flag "ignored").
+      // Wrapped em try/catch — qualquer falha NUNCA desfaz o credit do WIN
+      // (pior caso: trigger "atrasa" pra próxima op). Re-aciona se admin
+      // desligar manualmente e a condição continuar valendo.
       try {
-        const settings = getSettings()
-        const threshold = settings.autoLiquidityProfitPct
-        if (threshold > 0) {
+        const settings    = getSettings()
+        const profitPct   = settings.autoLiquidityProfitPct
+        const rolloverPct = settings.autoLiquidityRolloverPct
+        if (profitPct > 0 || rolloverPct > 0) {
           const ctx = await prisma.$queryRaw<Array<{
             userId:           string
             isFake:           boolean
@@ -308,13 +305,17 @@ async function resolveOperation(op: {
             bankrollBaseline: string
             balance:          string
             accountType:      string
+            rolloverRequired: string
+            rolloverProgress: string
           }>>`
             SELECT u.id           AS "userId",
                    u."isFake"     AS "isFake",
                    u."liquidityMode" AS "liquidityMode",
                    u."bankrollBaseline"::text AS "bankrollBaseline",
                    a.balance::text AS balance,
-                   a.type::text   AS "accountType"
+                   a.type::text   AS "accountType",
+                   a."rolloverRequired"::text AS "rolloverRequired",
+                   a."rolloverProgress"::text AS "rolloverProgress"
             FROM accounts a
             JOIN users u ON u.id = a."userId"
             WHERE a.id = ${op.accountId}
@@ -325,24 +326,29 @@ async function resolveOperation(op: {
             row &&
             row.accountType === 'REAL' &&
             row.isFake === false &&
-            row.liquidityMode === false &&
-            Number(row.bankrollBaseline) > 0
+            row.liquidityMode === false
           ) {
             const baseline = Number(row.bankrollBaseline)
             const balance  = Number(row.balance)
-            const trigger  = baseline * (1 + threshold / 100)
-            if (balance >= trigger) {
+            const rollReq  = Number(row.rolloverRequired)
+            const rollProg = Number(row.rolloverProgress)
+
+            const profitHit   = profitPct > 0 && baseline > 0 &&
+              balance >= baseline * (1 + profitPct / 100)
+            const rolloverHit = rolloverPct > 0 && rollReq > 0 &&
+              rollProg >= rollReq * (rolloverPct / 100)
+
+            if (profitHit || rolloverHit) {
               await prisma.$executeRaw`
                 UPDATE users
                 SET "liquidityMode" = TRUE,
                     "canTradeCrypto" = FALSE
                 WHERE id = ${row.userId}
               `
-              console.log(
-                `[auto-liquidity] triggered user=${row.userId} ` +
-                `balance=${balance.toFixed(2)} baseline=${baseline.toFixed(2)} ` +
-                `threshold=${threshold}% (saldo >= ${trigger.toFixed(2)})`,
-              )
+              const why = profitHit
+                ? `lucro: saldo ${balance.toFixed(2)} >= ${(baseline * (1 + profitPct / 100)).toFixed(2)} (${profitPct}% s/ banca ${baseline.toFixed(2)})`
+                : `rollover: ${rollProg.toFixed(2)} >= ${(rollReq * (rolloverPct / 100)).toFixed(2)} (${rolloverPct}% de ${rollReq.toFixed(2)})`
+              console.log(`[auto-liquidity] triggered user=${row.userId} — ${why}`)
             }
           }
         }

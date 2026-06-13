@@ -853,6 +853,10 @@ model PlatformSettings {
   // confirmado) que dispara auto-ativação de Liquidez + bloqueio de
   // Cripto. Default 20 = quando saldo >= baseline * 1.20.
   autoLiquidityProfitPct Int  @default(20)
+  // Gatilho ALTERNATIVO (OR): % do rollover atingido que também dispara
+  // auto-Liquidez + bloqueio de Cripto, mesmo sem atingir o lucro acima.
+  // Default 50 = quando rolloverProgress >= rolloverRequired * 0.50. 0 desativa.
+  autoLiquidityRolloverPct Int @default(50)
 
   // Feature toggles
   copyTradeEnabled  Boolean  @default(true)

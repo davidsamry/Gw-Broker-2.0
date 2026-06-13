@@ -26,6 +26,7 @@ interface PlatformSettings {
   copyTradeEnabled:       boolean
   safeModeEnabled:        boolean
   autoLiquidityProfitPct: number
+  autoLiquidityRolloverPct: number
 }
 
 interface Response { settings: PlatformSettings }
@@ -174,12 +175,19 @@ export default function AdminConfiguracoesPage() {
           </Card>
 
           {/* Auto-Liquidez — agora pareado com Copy Trade abaixo (grid 2-col) */}
-          <Card title="Auto-Liquidez" icon={<BarChart2 size={14} className="text-amber-400" />} desc="Ativa Liquidez + bloqueia Cripto automaticamente quando o usuário atinge X% de lucro sobre o saldo do último depósito">
+          <Card title="Auto-Liquidez" icon={<BarChart2 size={14} className="text-amber-400" />} desc="Ativa Liquidez + bloqueia Cripto automaticamente. Dispara por LUCRO sobre o último depósito OU por % do rollover atingido (o que vier primeiro).">
             <Number
               label="% de lucro para acionar (0 = desativado)"
               value={form.autoLiquidityProfitPct}
               onChange={(v) => patch('autoLiquidityProfitPct', Math.round(v))}
               hint="Ex: 20 = quando saldo REAL >= 1,20x do saldo do último depósito. Conta DEMO e usuários Fake são ignorados. Admin pode desligar manualmente no painel do usuário (sistema re-aciona no próximo WIN se condição continuar)."
+              integer
+            />
+            <Number
+              label="% do rollover para acionar (0 = desativado)"
+              value={form.autoLiquidityRolloverPct}
+              onChange={(v) => patch('autoLiquidityRolloverPct', Math.round(v))}
+              hint="Ex: 50 = ativa quando o usuário atinge 50% do rollover exigido, MESMO sem atingir o % de lucro acima. Só conta REAL, usuários comuns (não-fake)."
               integer
             />
           </Card>

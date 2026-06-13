@@ -21,6 +21,9 @@ const updateSchema = z.object({
   // dispara auto-ativação de Liquidez + bloqueio de Cripto. 0 desativa
   // a função; 100 pra exigir 2× o saldo inicial; cap conservador 1000%.
   autoLiquidityProfitPct: z.number().int().min(0).max(1000).optional(),
+  // % do rollover atingido que também dispara auto-Liquidez (OR com o lucro).
+  // 0 desativa; cap 100 (não faz sentido exigir > 100% do rollover).
+  autoLiquidityRolloverPct: z.number().int().min(0).max(100).optional(),
 }).refine(
   (v) => Object.values(v).some((x) => x !== undefined),
   { message: 'Envie pelo menos um campo.' },
