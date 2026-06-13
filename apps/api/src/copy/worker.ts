@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { prisma } from '../prisma.js'
+import { restartDueCycles } from './service.js'
 
 // ── Copy worker — liquida as operações de copy agendadas ────────────────────
 //
@@ -116,6 +117,9 @@ async function tick() {
   try {
     const n = await settleDueCopyOps()
     if (n > 0) console.log(`[copy-worker] liquidadas ${n} operação(ões) de copy`)
+    // Reinicia ciclos vencidos (novo ciclo 24h após o anterior terminar).
+    const r = await restartDueCycles()
+    if (r > 0) console.log(`[copy-worker] reiniciados ${r} ciclo(s) de copy`)
   } catch (err) {
     console.error('[copy-worker] tick falhou', err)
   } finally {

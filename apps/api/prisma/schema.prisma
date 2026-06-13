@@ -1052,17 +1052,19 @@ model CopyTrader {
 
 // Assinatura do usuário a um trader (1 ativa por par user+trader).
 model UserCopyTrader {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   userId      String
   traderId    String
-  activatedAt DateTime @default(now())
-  pricePaid   Decimal  @default(0) @db.Decimal(18, 2)  // 0 se gratuito
-  status      String   @default("ACTIVE")              // ACTIVE | CANCELLED
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  activatedAt DateTime  @default(now())
+  pricePaid   Decimal   @default(0) @db.Decimal(18, 2)  // 0 se gratuito
+  status      String    @default("ACTIVE")              // ACTIVE | CANCELLED
+  nextCycleAt DateTime?                                 // quando o copyWorker reinicia o ciclo (24h após o anterior)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([userId, status])
   @@index([traderId])
+  @@index([status, nextCycleAt])
   @@map("user_copy_traders")
 }
 

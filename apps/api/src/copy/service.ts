@@ -14,9 +14,17 @@ import { prisma } from '../prisma.js'
 const OPS_PER_CYCLE = 5
 const OPS_LOSS      = 3
 const OPS_WIN       = 2                  // OPS_PER_CYCLE - OPS_LOSS
-const OP_FRACTION   = 0.10               // valor de cada op = 10% da banca (no momento da cópia)
+const OP_FRACTION   = 0.10               // valor de cada op = 10% da banca (no início do ciclo)
 const FIRST_OP_DELAY_MS = 60_000         // 1ª op cai em 1 min (e é sempre WIN)
 const OP_INTERVAL_MS    = 30 * 60_000    // demais ops a cada 30 min
+const CYCLE_SPAN_MS     = FIRST_OP_DELAY_MS + (OPS_PER_CYCLE - 1) * OP_INTERVAL_MS  // ~121min (1ª + 4×30min)
+const RESTART_DELAY_MS  = 24 * 60 * 60 * 1000   // ciclo recorrente: novo ciclo 24h DEPOIS do anterior terminar
+
+// Quando o próximo ciclo deve começar, a partir de `fromMs` (início do ciclo
+// atual): fim do ciclo (CYCLE_SPAN) + 24h.
+function nextCycleAtFrom(fromMs: number): Date {
+  return new Date(fromMs + CYCLE_SPAN_MS + RESTART_DELAY_MS)
+}
 
 export interface CopyTraderRow {
   id:            string
@@ -274,6 +282,12 @@ export async function copyTrader(userId: string, traderId: string): Promise<Copy
   // Falha aqui não desfaz a assinatura — pior caso copia sem ops agendadas.
   try {
     await generateCopyOps(userId, traderId, balance)
+    // Agenda o reinício automático: novo ciclo 24h depois deste terminar.
+    // O copyWorker dispara quando nextCycleAt vence.
+    await prisma.userCopyTrader.update({
+      where: { id: subId },
+      data:  { nextCycleAt: nextCycleAtFrom(Date.now()) },
+    })
   } catch (err) {
     console.error('[copy] generateCopyOps falhou (non-fatal)', { userId, traderId, err })
   }
@@ -300,4 +314,47 @@ export async function cancelCopy(userId: string, traderId: string): Promise<void
     where: { userId, traderId, status: 'PENDING' },
     data:  { status: 'CANCELLED' },
   })
+}
+
+// Reinício recorrente: pra cada assinatura ACTIVE cujo nextCycleAt já venceu
+// (24h após o ciclo anterior terminar), gera um NOVO ciclo de 5 ops (1ª WIN),
+// com valor = 10% do saldo REAL ATUAL. Chamado pelo copyWorker a cada tick.
+//
+// Claim atômico: o UPDATE zera nextCycleAt e RETORNA as linhas pegas — duas
+// instâncias do worker não geram o mesmo ciclo 2x (a 2ª pega 0 linhas).
+export async function restartDueCycles(): Promise<number> {
+  const claimed = await prisma.$queryRaw<Array<{ id: string; userId: string; traderId: string }>>`
+    UPDATE user_copy_traders
+       SET "nextCycleAt" = NULL, "updatedAt" = NOW()
+     WHERE status = 'ACTIVE' AND "nextCycleAt" IS NOT NULL AND "nextCycleAt" <= NOW()
+    RETURNING id, "userId", "traderId"
+  `
+  let started = 0
+  for (const sub of claimed) {
+    try {
+      const account = await prisma.account.findFirst({
+        where:  { userId: sub.userId, type: 'REAL' },
+        select: { balance: true },
+      })
+      const balance = account ? Number(account.balance) : 0
+      // Sem saldo → não gera ops (evita ciclo de R$0); só reagenda pra tentar
+      // de novo. Com saldo → novo ciclo com 10% do saldo atual.
+      if (balance > 0) {
+        await generateCopyOps(sub.userId, sub.traderId, balance)
+        started++
+      }
+      await prisma.userCopyTrader.update({
+        where: { id: sub.id },
+        data:  { nextCycleAt: nextCycleAtFrom(Date.now()) },
+      })
+    } catch (err) {
+      console.error('[copy] restartDueCycles falhou p/ assinatura', { subId: sub.id, err })
+      // reagenda pra ~1h pra não perder a assinatura
+      await prisma.userCopyTrader.update({
+        where: { id: sub.id },
+        data:  { nextCycleAt: new Date(Date.now() + 3_600_000) },
+      }).catch(() => {})
+    }
+  }
+  return started
 }
