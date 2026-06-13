@@ -122,6 +122,7 @@ const TRANSACTION_TYPE_LABEL: Record<TransactionType, string> = {
   TRADE_WIN:   'Lucro de operação',
   TRADE_LOSS:  'Operação',
   BONUS:       'Bônus',
+  COPY_PURCHASE: 'Compra de Copy Trader',
 }
 
 function formatDateTimeBR(iso: string) {

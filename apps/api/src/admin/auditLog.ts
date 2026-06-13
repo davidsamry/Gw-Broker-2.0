@@ -45,6 +45,7 @@ export type AuditResourceType =
   | 'BONUS_CODE'
   | 'RANKING_PRIZE'
   | 'TICKET'
+  | 'COPY_TRADER'
 
 export interface RecordAdminActionInput {
   resourceType: AuditResourceType

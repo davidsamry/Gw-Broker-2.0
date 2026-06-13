@@ -38,6 +38,9 @@ enum TransactionType {
   // direction (+ credit / - debit). The `description` field carries the
   // admin id + reason for audit.
   ADJUSTMENT
+  // Compra de acesso a um Copy Trader pago (amount negativo). A descricao
+  // carrega "Compra de Copy Trader - <nome>".
+  COPY_PURCHASE
 }
 
 enum KycStatus {
@@ -1008,4 +1011,69 @@ model WebhookConfig {
   updatedAt DateTime @updatedAt
 
   @@map("webhook_configs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COPY TRADING — módulo 100% isolado. NÃO se relaciona com operations,
+// rollover, ranking, metas ou estatísticas (essas leem `operations`). As
+// "operações copiadas" vivem em copy_trade_operations e são só display:
+// não mexem em saldo, não viram ordem real, não contam rollover.
+//
+// Sem @relation com User/Account de propósito — guarda userId/accountId como
+// String + FK no SQL. Mantém o módulo desacoplado dos models existentes.
+
+// Catálogo de traders (admin edita os 8). Tudo que aparece no card vem daqui.
+model CopyTrader {
+  id            String   @id @default(cuid())
+  name          String
+  countryCode   String   @default("br")          // ISO alpha-2 p/ bandeira
+  avatarUrl     String?                            // opcional
+  vip           Boolean  @default(false)
+  paid          Boolean  @default(false)           // tipo: false=Gratuito, true=Pago
+  accessPrice   Decimal  @default(0) @db.Decimal(18, 2)  // valor_acesso (se pago)
+  weeklyGainPct Decimal  @default(0) @db.Decimal(6, 2)   // ganho_semanal %
+  copiers       Int      @default(0)               // copiadores (display)
+  copiedTrades  Int      @default(0)               // operacoes_copiadas (display)
+  commissionPct Int      @default(0)               // comissao %
+  profitPct     Int      @default(0)               // lucro_percentual (barra verde)
+  lossPct       Int      @default(0)               // perda_percentual (barra vermelha)
+  active        Boolean  @default(true)
+  displayOrder  Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([active, displayOrder])
+  @@map("copy_traders")
+}
+
+// Assinatura do usuário a um trader (1 ativa por par user+trader).
+model UserCopyTrader {
+  id          String   @id @default(cuid())
+  userId      String
+  traderId    String
+  activatedAt DateTime @default(now())
+  pricePaid   Decimal  @default(0) @db.Decimal(18, 2)  // 0 se gratuito
+  status      String   @default("ACTIVE")              // ACTIVE | CANCELLED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([traderId])
+  @@map("user_copy_traders")
+}
+
+// Operações copiadas — APENAS display. is_copy_trade sempre true. Nunca
+// tocam saldo/rollover/ranking. Geradas 3 LOSS + 2 WIN por ciclo de cópia.
+model CopyTradeOperation {
+  id          String   @id @default(cuid())
+  userId      String
+  traderId    String
+  result      String                                  // 'WIN' | 'LOSS'
+  amount      Decimal  @default(0) @db.Decimal(18, 2) // stake fictício (display)
+  pnl         Decimal  @default(0) @db.Decimal(18, 2) // resultado p/ acumulado
+  isCopyTrade Boolean  @default(true) @map("is_copy_trade")
+  createdAt   DateTime @default(now())
+
+  @@index([userId, traderId])
+  @@map("copy_trade_operations")
 }

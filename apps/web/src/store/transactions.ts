@@ -4,6 +4,7 @@ import { api } from '@/lib/api'
 export type TransactionType =
   | 'DEMO_CREDIT' | 'DEPOSIT' | 'WITHDRAWAL'
   | 'TRADE_WIN'   | 'TRADE_LOSS' | 'BONUS'
+  | 'COPY_PURCHASE'
 
 export interface ApiTransaction {
   id:          string

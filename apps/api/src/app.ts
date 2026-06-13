@@ -18,6 +18,7 @@ import { otcV2Routes } from './otc/v2/routes.js'
 import { bonusRoutes } from './bonuses/routes.js'
 import { rankingRoutes } from './ranking/routes.js'
 import { botRoutes } from './bot/routes.js'
+import { copyRoutes } from './copy/routes.js'
 import { publicRoutes } from './public/routes.js'
 import { metricsRoute } from './metrics/route.js'
 import { httpRequestDurationSeconds } from './metrics/registry.js'
@@ -190,6 +191,7 @@ export async function buildApp() {
   await app.register(otcV2Routes,        { prefix: '/otc/v2'   })
   await app.register(bonusRoutes,        { prefix: '/bonuses'  })
   await app.register(rankingRoutes,      { prefix: '/ranking'  })
+  await app.register(copyRoutes,         { prefix: '/copy'     })
   // Bot API — public REST surface for external bots & automations.
   // Auth is JWT with `kind: 'bot'` claim so web tokens can't be reused.
   await app.register(botRoutes,          { prefix: '/bot/v1'   })

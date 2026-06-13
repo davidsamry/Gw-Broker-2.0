@@ -1,0 +1,62 @@
+import { api } from './api'
+
+// Espelha apps/api/src/copy/service.ts (CopyTraderRow / MyTraderRow).
+export interface CopyTrader {
+  id:            string
+  name:          string
+  countryCode:   string
+  avatarUrl:     string | null
+  vip:           boolean
+  paid:          boolean
+  accessPrice:   number
+  weeklyGainPct: number
+  copiers:       number
+  copiedTrades:  number
+  commissionPct: number
+  profitPct:     number
+  lossPct:       number
+  active:        boolean
+  copied:        boolean
+}
+
+export interface MyCopyTrader {
+  subscriptionId: string
+  traderId:       string
+  name:           string
+  countryCode:    string
+  avatarUrl:      string | null
+  vip:            boolean
+  paid:           boolean
+  activatedAt:    string
+  pricePaid:      number
+  opsGenerated:   number
+  accumulated:    number
+}
+
+export async function fetchCopyTraders(): Promise<{ traders: CopyTrader[]; enabled: boolean }> {
+  const { data } = await api.get<{ traders: CopyTrader[]; enabled: boolean }>('/copy/traders')
+  return data
+}
+
+export async function fetchMyCopyTraders(): Promise<MyCopyTrader[]> {
+  const { data } = await api.get<{ traders: MyCopyTrader[] }>('/copy/my')
+  return data.traders
+}
+
+export interface CopyResult {
+  subscriptionId: string
+  paid:           boolean
+  pricePaid:      number
+  opsGenerated:   number
+}
+
+// POST copiar. Lança o erro do axios (com response.data.error) pro caller
+// decidir qual modal abrir (NO_BALANCE / INSUFFICIENT_BALANCE / etc).
+export async function copyTrader(traderId: string): Promise<CopyResult> {
+  const { data } = await api.post<{ result: CopyResult }>(`/copy/${traderId}/copy`)
+  return data.result
+}
+
+export async function cancelCopyTrader(traderId: string): Promise<void> {
+  await api.post(`/copy/${traderId}/cancel`)
+}

@@ -22,6 +22,7 @@ import { ContaPage } from '@/components/conta/ContaPage'
 import { HistoricoPanel } from '@/components/layout/HistoricoPanel'
 import { RankingPanel } from '@/components/layout/RankingPanel'
 import { BonusPanel } from '@/components/layout/BonusPanel'
+import { CopyPanel } from '@/components/layout/CopyPanel'
 import { ConfiguracoesPanel, type TradeSettings } from '@/components/layout/ConfiguracoesPanel'
 import { DepositoModal } from '@/components/deposito/DepositoModal'
 import { UsdtDepositoModal } from '@/components/deposito/UsdtDepositoModal'
@@ -464,7 +465,22 @@ export default function TradingPage() {
         </div>
       )
     }
-    if (sidebarTab === 'COPY')      return <ComingSoon title="Copy Trading" message="Em breve você poderá copiar automaticamente as melhores operações de traders profissionais." onClose={() => setSidebarTab('TRADE')} />
+    if (sidebarTab === 'COPY') {
+      const copyEl = (
+        <CopyPanel
+          onClose={() => setSidebarTab('TRADE')}
+          onDeposit={() => setDepositoOpen(true)}
+          onCopied={() => { void authStore.refreshAccounts() }}
+        />
+      )
+      if (isMobile) return copyEl
+      return (
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          {copyEl}
+          <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
+        </div>
+      )
+    }
 
     // TRADE (default)
     return (
