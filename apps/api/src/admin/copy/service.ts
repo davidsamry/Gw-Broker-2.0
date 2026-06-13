@@ -59,6 +59,93 @@ export async function listAdminTraders(): Promise<AdminCopyTraderRow[]> {
   return traders.map((t) => toRow(t, aggMap.get(t.id) ?? 0))
 }
 
+// ── Assinaturas & compras (controle) ────────────────────────────────────────
+export interface AdminCopySubRow {
+  id:          string
+  userId:      string
+  userName:    string
+  userEmail:   string
+  traderId:    string
+  traderName:  string
+  paid:        boolean
+  pricePaid:   number        // quanto pagou pra copiar (0 se grátis)
+  status:      string        // ACTIVE | CANCELLED
+  activatedAt: Date
+  nextCycleAt: Date | null
+  settledOps:  number        // operações já liquidadas
+  settledPnl:  number        // resultado acumulado (negativo = usuário perdeu)
+}
+
+export interface AdminCopySubsResult {
+  subscriptions: AdminCopySubRow[]
+  summary: {
+    total:      number
+    active:     number
+    cancelled:  number
+    paid:       number
+    free:       number
+    revenue:    number   // soma do pricePaid (receita das compras de copys pagos)
+    netUserPnl: number   // soma do pnl das ops liquidadas (negativo = casa lucrou)
+  }
+}
+
+// Lista as assinaturas (compras pagas + grátis) com dados do usuário, do trader
+// e o resultado acumulado das operações liquidadas. Pra admin ter controle.
+export async function listAdminSubscriptions(): Promise<AdminCopySubsResult> {
+  const rows = await prisma.$queryRaw<Array<any>>`
+    SELECT
+      s.id, s."userId", u.name AS user_name, u.email AS user_email,
+      s."traderId", ct.name AS trader_name, ct.paid,
+      s."pricePaid", s.status, s."activatedAt", s."nextCycleAt",
+      COALESCE(agg.settled_count, 0) AS settled_count,
+      COALESCE(agg.settled_pnl,   0) AS settled_pnl
+    FROM user_copy_traders s
+    JOIN users u         ON u.id  = s."userId"
+    JOIN copy_traders ct ON ct.id = s."traderId"
+    LEFT JOIN (
+      SELECT "userId", "traderId",
+             COUNT(*) FILTER (WHERE status = 'SETTLED') AS settled_count,
+             SUM(pnl) FILTER (WHERE status = 'SETTLED') AS settled_pnl
+        FROM copy_trade_operations
+       GROUP BY "userId", "traderId"
+    ) agg ON agg."userId" = s."userId" AND agg."traderId" = s."traderId"
+    ORDER BY s."activatedAt" DESC
+    LIMIT 500
+  `
+  const subscriptions: AdminCopySubRow[] = rows.map((r) => ({
+    id:          r.id,
+    userId:      r.userId,
+    userName:    r.user_name,
+    userEmail:   r.user_email,
+    traderId:    r.traderId,
+    traderName:  r.trader_name,
+    paid:        r.paid,
+    pricePaid:   Number(r.pricePaid),
+    status:      r.status,
+    activatedAt: r.activatedAt,
+    nextCycleAt: r.nextCycleAt ?? null,
+    settledOps:  Number(r.settled_count),
+    settledPnl:  Number(r.settled_pnl),
+  }))
+  // netUserPnl: somar das linhas duplicaria (a agregação é por user+trader e o
+  // mesmo par aparece em várias assinaturas após copiar→cancelar→copiar). Soma
+  // direto da tabela de operações liquidadas → líquido real (negativo = casa lucrou).
+  const netAgg = await prisma.copyTradeOperation.aggregate({
+    where: { status: 'SETTLED' },
+    _sum:  { pnl: true },
+  })
+  const summary = {
+    total:      subscriptions.length,
+    active:     subscriptions.filter((s) => s.status === 'ACTIVE').length,
+    cancelled:  subscriptions.filter((s) => s.status === 'CANCELLED').length,
+    paid:       subscriptions.filter((s) => s.paid).length,
+    free:       subscriptions.filter((s) => !s.paid).length,
+    revenue:    subscriptions.reduce((a, s) => a + s.pricePaid, 0),
+    netUserPnl: netAgg._sum.pnl ? Number(netAgg._sum.pnl) : 0,
+  }
+  return { subscriptions, summary }
+}
+
 export interface UpdateTraderInput {
   name?:          string
   countryCode?:   string

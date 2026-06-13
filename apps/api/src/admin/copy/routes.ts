@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { listAdminTraders, updateTrader } from './service.js'
+import { listAdminTraders, updateTrader, listAdminSubscriptions } from './service.js'
 import { recordAdminAction } from '../auditLog.js'
 
 const updateSchema = z.object({
@@ -28,6 +28,17 @@ export async function copyAdminRoutes(app: FastifyInstance) {
     try {
       const traders = await listAdminTraders()
       return reply.send({ traders })
+    } catch (err) {
+      app.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Assinaturas + compras (controle): quem copiou, pago/grátis, status, resultado.
+  app.get('/subscriptions', async (_req, reply) => {
+    try {
+      const data = await listAdminSubscriptions()
+      return reply.send(data)
     } catch (err) {
       app.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
