@@ -1,6 +1,5 @@
-import { randomUUID } from 'node:crypto'
 import { prisma } from '../prisma.js'
-import { restartDueCycles } from './service.js'
+import { restartDueCycles, settleCopyOp } from './service.js'
 
 // ── Copy worker — liquida as operações de copy agendadas ────────────────────
 //
@@ -39,54 +38,8 @@ interface DueOp {
   traderName: string
 }
 
-// Liquida UMA op atomicamente. Veja o comentário do header.
-async function settleOne(op: DueOp): Promise<void> {
-  const isWin = op.result === 'WIN'
-  const desc  = `Copy Trade - ${op.traderName} (${isWin ? 'Ganho' : 'Perda'})`
-  const txId  = randomUUID()
-
-  // 1) `locked` TRAVA a linha da conta REAL (FOR UPDATE) — serializa settles
-  //    concorrentes da MESMA conta (2 réplicas do worker, ops vencidas juntas):
-  //    o 2º settle só roda após o 1º commitar e aí lê o saldo já atualizado.
-  // 2) `op` (único UPDATE na op — não pode tocar a mesma linha 2x na query) seta
-  //    status+settledAt+pnl. pnl = WIN ? +amount : -LEAST(amount, saldo TRAVADO)
-  //    → o cap usa o saldo real corrente, nunca um snapshot obsoleto.
-  // 3) `upd_bal` soma o pnl com GREATEST(0,...) (cinto-e-suspensório p/ nunca
-  //    esbarrar no CHECK balance>=0) e o extrato recebe COPY_RESULT.
-  // accounts e copy_trade_operations são modificadas UMA vez cada → atômico.
-  await prisma.$executeRaw`
-    WITH locked AS (
-      SELECT a.id, a.balance
-        FROM accounts a
-        JOIN copy_trade_operations o ON o."userId" = a."userId"
-       WHERE o.id = ${op.id} AND a.type = 'REAL'
-       FOR UPDATE OF a
-    ),
-    op AS (
-      UPDATE copy_trade_operations o
-         SET status      = 'SETTLED',
-             "settledAt" = NOW(),
-             pnl         = CASE WHEN o.result = 'WIN' THEN o.amount
-                                ELSE -LEAST(o.amount, l.balance) END
-        FROM locked l
-       WHERE o.id = ${op.id}
-         AND o.status = 'PENDING'
-      RETURNING o.id, l.id AS account_id, o.pnl
-    ),
-    upd_bal AS (
-      UPDATE accounts a
-         SET balance = GREATEST(0, a.balance + op.pnl)
-        FROM op
-       WHERE a.id = op.account_id
-      RETURNING a.id
-    )
-    INSERT INTO transactions (id, "accountId", type, amount, description, "createdAt")
-    SELECT ${txId}, op.account_id, 'COPY_RESULT'::"TransactionType", op.pnl, ${desc}, NOW()
-      FROM op
-  `
-}
-
-// Pega as ops vencidas (com assinatura ativa) e liquida uma a uma.
+// Pega as ops vencidas (com assinatura ativa) e liquida uma a uma via
+// settleCopyOp (a mesma função usada pelo cancelCopy — fonte única).
 export async function settleDueCopyOps(): Promise<number> {
   const due = await prisma.$queryRaw<DueOp[]>`
     SELECT o.id, o."userId", o."traderId", o.result, ct.name AS "traderName"
@@ -102,7 +55,7 @@ export async function settleDueCopyOps(): Promise<number> {
   let settled = 0
   for (const op of due) {
     try {
-      await settleOne(op)
+      await settleCopyOp(op.id, op.result, op.traderName)
       settled++
     } catch (err) {
       console.error('[copy-worker] settle falhou', { opId: op.id, err })

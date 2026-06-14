@@ -300,20 +300,76 @@ export async function copyTrader(userId: string, traderId: string): Promise<Copy
   }
 }
 
-// Cancela a cópia (status CANCELLED). Sem refund. Também cancela as ops ainda
-// PENDING desse trader pro copyWorker parar de liquidá-las (as já SETTLED
-// permanecem no histórico e no saldo).
+// Liquida UMA operação de copy ATOMICAMENTE: aplica o pnl no saldo da conta
+// REAL (WIN credita +amount; LOSS debita -LEAST(amount, saldo) — nunca negativo,
+// respeita o CHECK balance>=0), marca SETTLED e lança COPY_RESULT no extrato.
+// TRAVA a conta (FOR UPDATE) pra serializar settles concorrentes da mesma conta.
+// Usado pelo copyWorker (no horário agendado) E pelo cancelCopy (fecha o ciclo
+// na hora). Idempotente: só age em op status='PENDING'.
+export async function settleCopyOp(opId: string, result: string, traderName: string): Promise<void> {
+  const isWin = result === 'WIN'
+  const desc  = `Copy Trade - ${traderName} (${isWin ? 'Ganho' : 'Perda'})`
+  const txId  = randomUUID()
+  await prisma.$executeRaw`
+    WITH locked AS (
+      SELECT a.id, a.balance
+        FROM accounts a
+        JOIN copy_trade_operations o ON o."userId" = a."userId"
+       WHERE o.id = ${opId} AND a.type = 'REAL'
+       FOR UPDATE OF a
+    ),
+    op AS (
+      UPDATE copy_trade_operations o
+         SET status      = 'SETTLED',
+             "settledAt" = NOW(),
+             pnl         = CASE WHEN o.result = 'WIN' THEN o.amount
+                                ELSE -LEAST(o.amount, l.balance) END
+        FROM locked l
+       WHERE o.id = ${opId}
+         AND o.status = 'PENDING'
+      RETURNING o.id, l.id AS account_id, o.pnl
+    ),
+    upd_bal AS (
+      UPDATE accounts a
+         SET balance = GREATEST(0, a.balance + op.pnl)
+        FROM op
+       WHERE a.id = op.account_id
+      RETURNING a.id
+    )
+    INSERT INTO transactions (id, "accountId", type, amount, description, "createdAt")
+    SELECT ${txId}, op.account_id, 'COPY_RESULT'::"TransactionType", op.pnl, ${desc}, NOW()
+      FROM op
+  `
+}
+
+// Cancela a cópia. Sem refund. ANTI-EXPLOIT (2026-06-14): liquida AGORA as
+// operações ainda PENDING do ciclo atual (aplica ganhos E PERDAS restantes no
+// saldo) em vez de descartá-las. Sem isso, o usuário copiava, embolsava a 1ª
+// vitória garantida (+10%) e cancelava antes das perdas — fugindo do líquido
+// -10% do ciclo e virando uma impressora de dinheiro. Agora cancelar = fechar
+// o ciclo com o resultado completo aplicado.
 export async function cancelCopy(userId: string, traderId: string): Promise<void> {
   const res = await prisma.userCopyTrader.updateMany({
     where: { userId, traderId, status: 'ACTIVE' },
-    data:  { status: 'CANCELLED' },
+    data:  { status: 'CANCELLED', nextCycleAt: null },
   })
   if (res.count === 0) throw new Error('NOT_COPYING')
 
-  await prisma.copyTradeOperation.updateMany({
-    where: { userId, traderId, status: 'PENDING' },
-    data:  { status: 'CANCELLED' },
+  // Liquida as pendentes do ciclo (ganhos + perdas restantes). Não pode escapar.
+  const trader = await prisma.copyTrader.findUnique({ where: { id: traderId }, select: { name: true } })
+  const traderName = trader?.name ?? '—'
+  const pending = await prisma.copyTradeOperation.findMany({
+    where:   { userId, traderId, status: 'PENDING' },
+    orderBy: { scheduledAt: 'asc' },
+    select:  { id: true, result: true },
   })
+  for (const op of pending) {
+    try {
+      await settleCopyOp(op.id, op.result, traderName)
+    } catch (err) {
+      console.error('[copy] settle-on-cancel falhou', { opId: op.id, err })
+    }
+  }
 }
 
 // Reinício recorrente: pra cada assinatura ACTIVE cujo nextCycleAt já venceu
