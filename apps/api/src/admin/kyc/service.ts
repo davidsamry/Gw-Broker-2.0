@@ -103,7 +103,12 @@ export async function listKycSubmissions(params: ListKycParams): Promise<ListKyc
   }
 }
 
-/** Approve a submission: flip KycSubmission + User.kycStatus to APPROVED. */
+/** Approve a submission: flip KycSubmission + User.kycStatus to APPROVED.
+ *  Ao aprovar, LIMPA as imagens (base64) das colunas documentFront/Back/Selfie
+ *  — o admin arquiva os documentos externamente, então não precisamos guardar
+ *  os ~2-3MB de base64 no Postgres (evita inchar o banco/backups). O registro
+ *  da aprovação (status, reviewedAt/By, submittedAt) permanece p/ auditoria.
+ *  Colunas são NOT NULL → setamos '' (não NULL). */
 export async function approveKyc(adminId: string, submissionId: string) {
   const result = await prisma.$transaction(async (tx) => {
     const updated = await tx.$executeRaw`
@@ -111,7 +116,10 @@ export async function approveKyc(adminId: string, submissionId: string) {
       SET status = 'APPROVED'::"KycStatus",
           reason = NULL,
           "reviewedAt" = NOW(),
-          "reviewedBy" = ${adminId}
+          "reviewedBy" = ${adminId},
+          "documentFrontUrl" = '',
+          "documentBackUrl"  = '',
+          "selfieUrl"        = ''
       WHERE id = ${submissionId}
         AND status = 'SUBMITTED'::"KycStatus"
     `
