@@ -1072,8 +1072,8 @@ model UserCopyTrader {
   @@map("user_copy_traders")
 }
 
-// Operações copiadas. Geradas 3 LOSS + 2 WIN por ciclo de cópia (1ª sempre
-// WIN). NÃO são instantâneas: cada uma tem um scheduledAt (1ª em 1min, demais
+// Operações copiadas. Geradas 3 LOSS + 2 WIN por ciclo de cópia (ordem
+// aleatória). NÃO são instantâneas: cada uma tem um scheduledAt (1ª em 1min, demais
 // a cada 30min) e fica PENDING até o copyWorker liquidar. Ao liquidar, MEXE no
 // saldo REAL (WIN credita +amount, LOSS debita -amount) e lança COPY_RESULT no
 // extrato. NÃO contam rollover/ranking (essas leem a tabela `operations`).

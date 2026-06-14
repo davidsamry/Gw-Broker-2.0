@@ -172,24 +172,34 @@ export async function listMyTraders(userId: string): Promise<MyTraderRow[]> {
   })
 }
 
-// Agenda as 5 operações copiadas. A 1ª é SEMPRE WIN e cai em 1 min; as outras
-// 4 (3 LOSS + 1 WIN) caem a cada 30 min, em ordem aleatória — total mantém
-// 3 LOSS + 2 WIN. Cada op vale 10% da `bankroll` (saldo no momento da cópia),
-// FIXO. Aqui só CRIA as ops PENDING; quem mexe no saldo é o copyWorker quando
-// cada uma vence (status PENDING → SETTLED).
-async function generateCopyOps(userId: string, traderId: string, bankroll: number): Promise<void> {
+// Agenda 1 ciclo de 5 operações: 3 LOSS + 2 WIN em ordem 100% ALEATÓRIA (sem
+// 1ª garantida — pode começar com win OU loss). 1ª op em 1min, demais a cada
+// 30min. Cada op vale 10% da `bankroll` (saldo no momento), FIXO.
+//
+// 1 CICLO POR DIA: se já houve um ciclo desse (user, trader) nas últimas 24h
+// (mesmo que o usuário tenha cancelado e recopiado), NÃO gera outro — retorna
+// false. O próximo só vem pelo ciclo recorrente (restartDueCycles, 24h).
+//
+// Só CRIA as ops PENDING; quem mexe no saldo é o copyWorker quando cada uma
+// vence (PENDING → SETTLED).
+async function generateCopyOps(userId: string, traderId: string, bankroll: number): Promise<boolean> {
+  const recent = await prisma.copyTradeOperation.findFirst({
+    where:  { userId, traderId, createdAt: { gt: new Date(Date.now() - RESTART_DELAY_MS) } },
+    select: { id: true },
+  })
+  if (recent) return false   // já teve ciclo hoje — 1 por dia
+
   const opAmount = Math.max(0, Math.round(bankroll * OP_FRACTION * 100) / 100)
 
-  // 1ª sempre WIN. Restante = 3 LOSS + 1 WIN, embaralhado.
-  const rest: Array<'WIN' | 'LOSS'> = [
+  // 3 LOSS + 2 WIN, embaralhados (Fisher-Yates) — ordem imprevisível.
+  const results: Array<'WIN' | 'LOSS'> = [
     ...Array<'LOSS'>(OPS_LOSS).fill('LOSS'),
-    ...Array<'WIN'>(OPS_WIN - 1).fill('WIN'),
+    ...Array<'WIN'>(OPS_WIN).fill('WIN'),
   ]
-  for (let i = rest.length - 1; i > 0; i--) {
+  for (let i = results.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
-    ;[rest[i], rest[j]] = [rest[j], rest[i]]
+    ;[results[i], results[j]] = [results[j], results[i]]
   }
-  const results: Array<'WIN' | 'LOSS'> = ['WIN', ...rest]
 
   const now = Date.now()
   const rows = results.map((result, i) => ({
@@ -205,6 +215,7 @@ async function generateCopyOps(userId: string, traderId: string, bankroll: numbe
   }))
 
   await prisma.copyTradeOperation.createMany({ data: rows })
+  return true
 }
 
 export interface CopyResult {
@@ -277,16 +288,20 @@ export async function copyTrader(userId: string, traderId: string): Promise<Copy
     })
   }
 
-  // Agenda as 5 ops (1ª WIN em 1min, demais a cada 30min). O valor de cada uma
-  // é 10% da banca = saldo no momento da cópia (antes da compra, se paga).
-  // Falha aqui não desfaz a assinatura — pior caso copia sem ops agendadas.
+  // Gera o ciclo (1 por dia — não gera se já houve um nas últimas 24h, ex.:
+  // cancelou e recopiou). Valor = 10% da banca no momento. Falha aqui não
+  // desfaz a assinatura — pior caso copia sem ops agendadas.
   try {
     await generateCopyOps(userId, traderId, balance)
-    // Agenda o reinício automático: novo ciclo 24h depois deste terminar.
-    // O copyWorker dispara quando nextCycleAt vence.
+    // Agenda o próximo ciclo 24h após o INÍCIO do ciclo de hoje (gerado agora,
+    // ou um anterior do mesmo dia se recopiou) — não empurra a data ao recopiar.
+    const lastOp = await prisma.copyTradeOperation.findFirst({
+      where: { userId, traderId }, orderBy: { createdAt: 'desc' }, select: { createdAt: true },
+    })
+    const base = lastOp?.createdAt?.getTime() ?? Date.now()
     await prisma.userCopyTrader.update({
       where: { id: subId },
-      data:  { nextCycleAt: nextCycleAtFrom(Date.now()) },
+      data:  { nextCycleAt: new Date(base + CYCLE_SPAN_MS + RESTART_DELAY_MS) },
     })
   } catch (err) {
     console.error('[copy] generateCopyOps falhou (non-fatal)', { userId, traderId, err })
@@ -361,8 +376,9 @@ export async function cancelCopy(userId: string, traderId: string): Promise<void
 }
 
 // Reinício recorrente: pra cada assinatura ACTIVE cujo nextCycleAt já venceu
-// (24h após o ciclo anterior terminar), gera um NOVO ciclo de 5 ops (1ª WIN),
-// com valor = 10% do saldo REAL ATUAL. Chamado pelo copyWorker a cada tick.
+// (24h após o ciclo anterior terminar), gera um NOVO ciclo de 5 ops (3 LOSS +
+// 2 WIN, ordem aleatória), valor = 10% do saldo REAL ATUAL. O generateCopyOps
+// tem trava de 1/dia, então não duplica. Chamado pelo copyWorker a cada tick.
 //
 // Claim atômico: o UPDATE zera nextCycleAt e RETORNA as linhas pegas — duas
 // instâncias do worker não geram o mesmo ciclo 2x (a 2ª pega 0 linhas).
@@ -384,8 +400,8 @@ export async function restartDueCycles(): Promise<number> {
       // Sem saldo → não gera ops (evita ciclo de R$0); só reagenda pra tentar
       // de novo. Com saldo → novo ciclo com 10% do saldo atual.
       if (balance > 0) {
-        await generateCopyOps(sub.userId, sub.traderId, balance)
-        started++
+        const gen = await generateCopyOps(sub.userId, sub.traderId, balance)
+        if (gen) started++
       }
       await prisma.userCopyTrader.update({
         where: { id: sub.id },
