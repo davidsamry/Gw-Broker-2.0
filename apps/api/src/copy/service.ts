@@ -342,34 +342,22 @@ export async function settleCopyOp(opId: string, result: string, traderName: str
   `
 }
 
-// Cancela a cópia. Sem refund. ANTI-EXPLOIT (2026-06-14): liquida AGORA as
-// operações ainda PENDING do ciclo atual (aplica ganhos E PERDAS restantes no
-// saldo) em vez de descartá-las. Sem isso, o usuário copiava, embolsava a 1ª
-// vitória garantida (+10%) e cancelava antes das perdas — fugindo do líquido
-// -10% do ciclo e virando uma impressora de dinheiro. Agora cancelar = fechar
-// o ciclo com o resultado completo aplicado.
+// Cancela a cópia. Sem refund. ANTI-EXPLOIT (2026-06-14): NÃO descarta as
+// operações PENDING do ciclo — deixa-as PENDING pro copyWorker liquidar nos
+// horários agendados (a cada 30min). Assim as perdas restantes vêm NATURALMENTE
+// (sem despejar tudo de uma vez) e NÃO dá pra fugir delas. Sem isso, o usuário
+// copiava, embolsava a 1ª vitória garantida (+10%) e cancelava antes das perdas
+// — virando impressora de dinheiro (ver igorcastro +R$1.579).
+//
+// Cancelar só impede NOVOS ciclos: status CANCELLED + nextCycleAt=null faz o
+// restartDueCycles ignorar; e o settleDueCopyOps liquida a op MESMO com a
+// assinatura cancelada (não filtra mais por status ACTIVE).
 export async function cancelCopy(userId: string, traderId: string): Promise<void> {
   const res = await prisma.userCopyTrader.updateMany({
     where: { userId, traderId, status: 'ACTIVE' },
     data:  { status: 'CANCELLED', nextCycleAt: null },
   })
   if (res.count === 0) throw new Error('NOT_COPYING')
-
-  // Liquida as pendentes do ciclo (ganhos + perdas restantes). Não pode escapar.
-  const trader = await prisma.copyTrader.findUnique({ where: { id: traderId }, select: { name: true } })
-  const traderName = trader?.name ?? '—'
-  const pending = await prisma.copyTradeOperation.findMany({
-    where:   { userId, traderId, status: 'PENDING' },
-    orderBy: { scheduledAt: 'asc' },
-    select:  { id: true, result: true },
-  })
-  for (const op of pending) {
-    try {
-      await settleCopyOp(op.id, op.result, traderName)
-    } catch (err) {
-      console.error('[copy] settle-on-cancel falhou', { opId: op.id, err })
-    }
-  }
 }
 
 // Reinício recorrente: pra cada assinatura ACTIVE cujo nextCycleAt já venceu

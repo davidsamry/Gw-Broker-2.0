@@ -32,20 +32,19 @@ let intervalId: ReturnType<typeof setInterval> | null = null
 
 interface DueOp {
   id:         string
-  userId:     string
-  traderId:   string
   result:     string
   traderName: string
 }
 
-// Pega as ops vencidas (com assinatura ativa) e liquida uma a uma via
-// settleCopyOp (a mesma função usada pelo cancelCopy — fonte única).
+// Liquida TODA op vencida (PENDING, scheduledAt <= now) via settleCopyOp —
+// INDEPENDENTE do status da assinatura. Assim, se o usuário CANCELAR, as
+// operações restantes do ciclo ainda liquidam nos horários agendados (perdas
+// garantidas, sem despejar tudo de uma vez). Cancelar só barra NOVOS ciclos
+// (restartDueCycles, que exige status ACTIVE).
 export async function settleDueCopyOps(): Promise<number> {
   const due = await prisma.$queryRaw<DueOp[]>`
-    SELECT o.id, o."userId", o."traderId", o.result, ct.name AS "traderName"
+    SELECT o.id, o.result, ct.name AS "traderName"
       FROM copy_trade_operations o
-      JOIN user_copy_traders s
-        ON s."userId" = o."userId" AND s."traderId" = o."traderId" AND s.status = 'ACTIVE'
       JOIN copy_traders ct ON ct.id = o."traderId"
      WHERE o.status = 'PENDING'
        AND o."scheduledAt" <= NOW()
