@@ -118,19 +118,20 @@ export async function listMyTraders(userId: string): Promise<MyTraderRow[]> {
   const traderMap = new Map(traders.map((t) => [t.id, t]))
 
   // Agrega só as ops JÁ liquidadas (count + soma pnl). Ops PENDING ainda não
-  // "apareceram" pro usuário, então não entram no resumo nem no histórico.
+  // "apareceram"; e ops com pnl = 0 (perda capada em saldo zerado → "R$0,00")
+  // não aparecem — ficam feias e sem sentido.
   const agg = await prisma.copyTradeOperation.groupBy({
     by:      ['traderId'],
-    where:   { userId, traderId: { in: traderIds }, status: 'SETTLED' },
+    where:   { userId, traderId: { in: traderIds }, status: 'SETTLED', pnl: { not: 0 } },
     _count:  { _all: true },
     _sum:    { pnl: true },
   })
   const aggMap = new Map(agg.map((a) => [a.traderId, a]))
 
-  // Histórico das ops liquidadas — ordenado por settledAt desc, agrupado por
-  // trader. Limite alto (50) cobre vários ciclos.
+  // Histórico das ops liquidadas (pnl != 0) — ordenado por settledAt desc,
+  // agrupado por trader. Limite alto (50) cobre vários ciclos.
   const settledOps = await prisma.copyTradeOperation.findMany({
-    where:   { userId, traderId: { in: traderIds }, status: 'SETTLED' },
+    where:   { userId, traderId: { in: traderIds }, status: 'SETTLED', pnl: { not: 0 } },
     orderBy: { settledAt: 'desc' },
     take:    traderIds.length * 50,
   })
