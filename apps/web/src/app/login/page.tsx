@@ -166,7 +166,7 @@ function LoginPageInner() {
   }
 
   return (
-    <div className="relative min-h-screen bg-[#0d1117] flex flex-col overflow-hidden">
+    <div className="relative h-screen overflow-y-auto overflow-x-hidden bg-[#0d1117] flex flex-col">
 
       {/* Background chart */}
       <div className="absolute bottom-0 left-0 right-0 h-[55%] pointer-events-none">
@@ -193,7 +193,7 @@ function LoginPageInner() {
       </div>
 
       {/* Content */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-start pt-8 px-4">
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-start pt-8 pb-10 px-4">
         <h1 className="text-white text-2xl font-bold mb-6">
           {tab === 'login' ? 'Conecte-se' : 'Inscrever-se'}
         </h1>
