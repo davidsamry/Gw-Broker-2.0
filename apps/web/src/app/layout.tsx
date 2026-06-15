@@ -18,9 +18,13 @@ export const metadata: Metadata = {
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // suppressHydrationWarning em <html>/<body>: extensões de navegador (ColorZilla,
+  // gerenciadores de senha, etc.) injetam atributos (ex.: cz-shortcut-listen) antes
+  // do React hidratar, gerando um falso "hydration mismatch". Suprime SÓ o mismatch
+  // de atributos desses 2 elementos (1 nível), sem esconder mismatches reais nos filhos.
   return (
-    <html lang="pt-BR" className="h-full">
-      <body className={`${inter.className} h-full overflow-hidden`}>
+    <html lang="pt-BR" className="h-full" suppressHydrationWarning>
+      <body className={`${inter.className} h-full overflow-hidden`} suppressHydrationWarning>
         {/* Anti-DevTools deterrent — no-op until admin toggles
             safeModeEnabled in /admin/configuracoes. Self-skips on /admin/*. */}
         <SafeMode />
