@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
+  deleteAdminMessage,
   getAdminTicketDetail,
   listAdminTickets,
   replyAsAdmin,
@@ -72,6 +73,19 @@ export async function ticketsAdminRoutes(app: FastifyInstance) {
       return reply.send({ ok: true, messageId })
     } catch (err: any) {
       if (err.message === 'TICKET_NOT_FOUND') return reply.status(404).send({ error: 'TICKET_NOT_FOUND' })
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Excluir uma mensagem (só do admin) do ticket.
+  app.delete('/:id/messages/:messageId', async (req, reply) => {
+    const { id, messageId } = req.params as { id: string; messageId: string }
+    try {
+      await deleteAdminMessage(id, messageId)
+      return reply.send({ ok: true })
+    } catch (err: any) {
+      if (err.message === 'MESSAGE_NOT_FOUND') return reply.status(404).send({ error: 'MESSAGE_NOT_FOUND' })
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }

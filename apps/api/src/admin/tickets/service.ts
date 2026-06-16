@@ -233,6 +233,16 @@ export async function replyAsAdmin(adminId: string, ticketId: string, body: stri
   return rows[0].id
 }
 
+// Apaga uma mensagem do ADMIN do ticket. NÃO permite apagar mensagem do
+// usuário (isAdmin=false) — só as respostas enviadas pela equipe.
+export async function deleteAdminMessage(ticketId: string, messageId: string) {
+  const result = await prisma.$executeRaw`
+    DELETE FROM ticket_messages
+    WHERE id = ${messageId} AND "ticketId" = ${ticketId} AND "isAdmin" = TRUE
+  `
+  if (result === 0) throw new Error('MESSAGE_NOT_FOUND')
+}
+
 export async function updateTicketStatus(ticketId: string, status: TicketStatus) {
   const result = await prisma.$executeRaw`
     UPDATE tickets

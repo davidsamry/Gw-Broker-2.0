@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
   MessageSquare, RefreshCw, Search, X, Send, User as UserIcon, Shield,
-  Paperclip, ImageOff,
+  Paperclip, ImageOff, Trash2, Zap,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -93,6 +93,31 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'IN_PROGRESS', label: 'Em andamento' },
   { value: 'RESOLVED',    label: 'Resolvido'    },
   { value: 'CLOSED',      label: 'Fechado'      },
+]
+
+// Respostas rápidas (modelos prontos) — admin clica e preenche a caixa de
+// resposta, podendo editar antes de enviar. Adicionar/editar livremente aqui.
+const QUICK_REPLIES: { title: string; body: string }[] = [
+  {
+    title: 'Bônus / Rollover (saque bloqueado)',
+    body: 'Após análise da sua conta, identificamos que há um bônus ativo vinculado ao seu cadastro. Conforme os termos aceitos no momento da inscrição, é necessário cumprir o rollover correspondente a 10 vezes o valor do bônus recebido para que a função de saque seja liberada.\n\nEnquanto essa exigência não for concluída, não será possível realizar saques da conta. Após atingir a movimentação necessária, a solicitação de saque poderá ser efetuada normalmente.\n\nAgradecemos a compreensão.',
+  },
+  {
+    title: 'Saque em análise',
+    body: 'Olá! Sua solicitação de saque foi recebida e está em análise pela nossa equipe. O processamento pode levar até 24 horas úteis. Assim que for concluído, você será notificado. Agradecemos a paciência.',
+  },
+  {
+    title: 'Verificação (KYC) pendente',
+    body: 'Para liberar essa função, é necessário concluir a verificação de identidade. Acesse Minha Conta → Verificação e envie os documentos solicitados (documento frente e verso + selfie). Após a aprovação, o recurso será liberado automaticamente.',
+  },
+  {
+    title: 'Depósito confirmado',
+    body: 'Seu depósito foi confirmado e o valor já está disponível no seu saldo. Bons negócios! Qualquer dúvida, estamos à disposição.',
+  },
+  {
+    title: 'Encerramento (resolvido)',
+    body: 'Ficamos felizes em ajudar! Como a sua solicitação foi atendida, estamos encerrando este atendimento. Se precisar de qualquer outra coisa, é só abrir um novo ticket. Tenha um ótimo dia!',
+  },
 ]
 
 function formatDateTime(iso: string) {
@@ -307,6 +332,8 @@ function TicketDrawer({
   const [attachment, setAttachment]   = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [busy, setBusy]       = useState(false)
+  const [showTemplates, setShowTemplates] = useState(false)
+  const [deletingId, setDeletingId]       = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -340,6 +367,21 @@ function TicketDrawer({
       setError('Falha ao enviar resposta.')
     } finally {
       setSending(false)
+    }
+  }
+
+  async function deleteMessage(messageId: string) {
+    if (deletingId) return
+    if (!window.confirm('Excluir esta mensagem? Essa ação não pode ser desfeita.')) return
+    setDeletingId(messageId)
+    try {
+      await api.delete(`/admin/tickets/${ticketId}/messages/${messageId}`)
+      // Remove localmente (sem recarregar o thread inteiro).
+      setDetail((prev) => prev ? { ...prev, messages: prev.messages.filter((m) => m.id !== messageId) } : prev)
+    } catch {
+      setError('Falha ao excluir a mensagem.')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -475,7 +517,20 @@ function TicketDrawer({
                   {m.authorName}
                   {m.isAdmin && <span className="ml-1.5 text-[10px] text-emerald-400">admin</span>}
                 </span>
-                <span className="text-[10px] text-[#8b8f9a] ml-auto">{formatDateTime(m.createdAt)}</span>
+                <div className="flex items-center gap-2 ml-auto">
+                  <span className="text-[10px] text-[#8b8f9a]">{formatDateTime(m.createdAt)}</span>
+                  {m.isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => deleteMessage(m.id)}
+                      disabled={deletingId === m.id}
+                      title="Excluir mensagem"
+                      className="text-[#8b8f9a] hover:text-red-400 transition-colors disabled:opacity-40"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
               </div>
               {m.body && (
                 <p className="text-sm text-[#dadce5] whitespace-pre-wrap break-words">{m.body}</p>
@@ -511,6 +566,32 @@ function TicketDrawer({
               </button>
             </div>
           )}
+          {/* Respostas rápidas (modelos prontos) */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowTemplates((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-[11px] text-[#8b8f9a] hover:text-emerald-400 transition-colors"
+            >
+              <Zap size={12} /> Respostas rápidas
+            </button>
+            {showTemplates && (
+              <div className="absolute bottom-full mb-2 left-0 w-full max-h-64 overflow-y-auto bg-[#1a1f2e] border border-[#2a2e3b] rounded-lg shadow-xl z-10">
+                {QUICK_REPLIES.map((q) => (
+                  <button
+                    key={q.title}
+                    type="button"
+                    onClick={() => { setReply(q.body); setShowTemplates(false) }}
+                    className="block w-full text-left px-3 py-2 hover:bg-white/5 transition-colors border-b border-[#2a2e3b] last:border-b-0"
+                  >
+                    <div className="text-xs font-medium text-white">{q.title}</div>
+                    <div className="text-[10px] text-[#8b8f9a] truncate mt-0.5">{q.body}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="flex gap-2">
             <label className="flex items-center justify-center w-10 h-10 rounded-lg bg-[#1a1f2e] border border-[#2a2e3b] text-[#8b8f9a] hover:text-white hover:border-emerald-500/40 cursor-pointer transition-colors flex-shrink-0">
               <Paperclip size={15} />
