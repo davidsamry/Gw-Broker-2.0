@@ -254,16 +254,25 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
     }
   }, [realAccount?.rolloverRequired])
 
-  // Handler: PATCH /admin/users/:id { rolloverRequired }
+  // Handler: POST /admin/users/:id/bonus { accountId, rolloverRequired }
+  // (o rollover fica na tabela accounts, nao no User — por isso o endpoint
+  // dedicado de bonus/rollover, que exige o accountId da conta REAL.)
   async function saveRollover() {
     const value = parseFloat(rolloverDraft)
     if (!isFinite(value) || value < 0) {
       alert('Rollover invalido — informe um numero >= 0')
       return
     }
+    if (!realAccount?.id) {
+      alert('Conta REAL nao encontrada para este usuario.')
+      return
+    }
     setSavingRollover(true)
     try {
-      await api.patch(`/admin/users/${userId}`, { rolloverRequired: value })
+      await api.post(`/admin/users/${userId}/bonus`, {
+        accountId:        realAccount.id,
+        rolloverRequired: value,
+      })
       // Re-busca summary pra refletir o valor novo
       const sres = await api.get<UserSummary>(`/admin/users/${userId}`)
       setSummary(sres.data)
