@@ -515,7 +515,6 @@ function TicketDrawer({
                 }
                 <span className="text-xs font-medium text-white">
                   {m.authorName}
-                  {m.isAdmin && <span className="ml-1.5 text-[10px] text-emerald-400">admin</span>}
                 </span>
                 <div className="flex items-center gap-2 ml-auto">
                   <span className="text-[10px] text-[#8b8f9a]">{formatDateTime(m.createdAt)}</span>
