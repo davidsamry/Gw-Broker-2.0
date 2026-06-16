@@ -1047,6 +1047,9 @@ model CopyTrader {
   lossPct       Int      @default(0)               // perda_percentual (barra vermelha)
   active        Boolean  @default(true)
   displayOrder  Int      @default(0)
+  // Crescimento "orgânico" diário: o copyWorker soma +5..7 em copiers e
+  // copiedTrades a cada 24h (veracidade). lastGrowthAt = último incremento.
+  lastGrowthAt  DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

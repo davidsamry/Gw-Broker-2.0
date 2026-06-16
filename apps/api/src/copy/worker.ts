@@ -1,5 +1,5 @@
 import { prisma } from '../prisma.js'
-import { restartDueCycles, settleCopyOp } from './service.js'
+import { restartDueCycles, settleCopyOp, growTradersDaily } from './service.js'
 
 // ── Copy worker — liquida as operações de copy agendadas ────────────────────
 //
@@ -72,6 +72,9 @@ async function tick() {
     // Reinicia ciclos vencidos (novo ciclo 24h após o anterior terminar).
     const r = await restartDueCycles()
     if (r > 0) console.log(`[copy-worker] reiniciados ${r} ciclo(s) de copy`)
+    // Crescimento "orgânico" diário: +5..7 copiadores e negociações por trader.
+    const g = await growTradersDaily()
+    if (g > 0) console.log(`[copy-worker] crescimento diário aplicado em ${g} trader(s)`)
   } catch (err) {
     console.error('[copy-worker] tick falhou', err)
   } finally {

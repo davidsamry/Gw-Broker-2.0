@@ -173,6 +173,37 @@ export async function listMyTraders(userId: string): Promise<MyTraderRow[]> {
   })
 }
 
+// Crescimento "orgânico" diário dos traders: +5..7 copiadores e +5..7
+// negociações (copiedTrades) por trader ativo, 1x a cada 24h — dá veracidade
+// (os números sobem sozinhos). O updateMany com guard de lastGrowthAt funciona
+// como claim atômico (2 workers não incrementam 2x). Chamado pelo copyWorker.
+const GROWTH_MIN = 5
+const GROWTH_MAX = 7
+function randGrowth(): number {
+  return GROWTH_MIN + Math.floor(Math.random() * (GROWTH_MAX - GROWTH_MIN + 1)) // 5..7
+}
+
+export async function growTradersDaily(): Promise<number> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000)
+  const due = await prisma.copyTrader.findMany({
+    where:  { active: true, OR: [{ lastGrowthAt: null }, { lastGrowthAt: { lte: cutoff } }] },
+    select: { id: true },
+  })
+  let grown = 0
+  for (const t of due) {
+    const res = await prisma.copyTrader.updateMany({
+      where: { id: t.id, active: true, OR: [{ lastGrowthAt: null }, { lastGrowthAt: { lte: cutoff } }] },
+      data:  {
+        copiers:      { increment: randGrowth() },
+        copiedTrades: { increment: randGrowth() },
+        lastGrowthAt: new Date(),
+      },
+    })
+    if (res.count > 0) grown++
+  }
+  return grown
+}
+
 // Agenda 1 ciclo de 5 operações: 3 LOSS + 2 WIN em ordem 100% ALEATÓRIA (sem
 // 1ª garantida — pode começar com win OU loss). 1ª op em 1min, demais a cada
 // 30min. Cada op vale 10% da `bankroll` (saldo no momento), FIXO.
