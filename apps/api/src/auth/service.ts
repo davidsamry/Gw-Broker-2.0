@@ -125,6 +125,31 @@ export async function loginUser(input: LoginInput) {
 }
 
 /**
+ * Registra/atualiza o IP de acesso de um login bem-sucedido. Atômico via
+ * ON CONFLICT: 1 linha por (userId, ip) — incrementa o count, atualiza o
+ * lastSeenAt e guarda o userAgent mais recente. Mantém a tabela pequena
+ * (1 row por IP distinto) — é o que o painel admin exibe.
+ *
+ * Best-effort: o caller DEVE chamar fire-and-forget (void + catch). Uma
+ * falha aqui NUNCA pode impedir o login.
+ */
+export async function recordLoginHistory(
+  userId: string,
+  meta: { ip?: string | null; userAgent?: string | null },
+): Promise<void> {
+  const ip = (meta.ip ?? 'unknown').slice(0, 100)
+  const ua = meta.userAgent ? meta.userAgent.slice(0, 400) : null
+  await prisma.$executeRaw`
+    INSERT INTO login_history ("id", "userId", "ip", "userAgent", "count", "firstSeenAt", "lastSeenAt")
+    VALUES (${randomUUID()}, ${userId}, ${ip}, ${ua}, 1, NOW(), NOW())
+    ON CONFLICT ("userId", "ip")
+    DO UPDATE SET "lastSeenAt" = NOW(),
+                  "count"      = login_history."count" + 1,
+                  "userAgent"  = EXCLUDED."userAgent"
+  `
+}
+
+/**
  * Step-up authentication pro admin. Chamado depois do login normal:
  * recebe o code 2FA e, se valido, retorna o "marker" pro caller (route
  * handler) usar quando re-emitir o JWT com claim adminAuth=true.

@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   X, ArrowUp, ArrowDown, ExternalLink, Trash2, Loader2,
-  TrendingDown, TrendingUp, DollarSign,
+  TrendingDown, TrendingUp, DollarSign, Globe,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -51,6 +51,14 @@ interface UserSummary {
     type:        string         // DEPOSIT, WITHDRAWAL, BUY, PROFIT, etc.
     amount:      string
     accountType: 'REAL' | 'DEMO'
+  }>
+  // Histórico de IPs de acesso (1 por IP distinto, ordenado por último acesso).
+  loginHistory?: Array<{
+    ip:          string
+    userAgent:   string | null
+    count:       number
+    firstSeenAt: string
+    lastSeenAt:  string
   }>
 }
 
@@ -392,6 +400,54 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
                   </div>
                   <div className="text-[10px] text-[#8b8f9a]">
                     Progresso: <span className="text-white font-semibold">R$ {fmtBRL(rolloverProg)}</span> / R$ {fmtBRL(rolloverReq)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Histórico de acesso (IP) — detecta conta compartilhada /
+                  multi-acesso. 1 linha por IP distinto, do mais recente. */}
+              <div className="mb-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <Globe size={14} className="text-blue-400" />
+                  <h3 className="text-sm font-bold text-white">Histórico de Acesso (IP)</h3>
+                  {summary?.loginHistory && summary.loginHistory.length > 0 && (
+                    <span className="text-[10px] text-[#8b8f9a]">
+                      {summary.loginHistory.length} IP{summary.loginHistory.length > 1 ? 's' : ''} distinto{summary.loginHistory.length > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+                <div className="bg-[#13161f] border border-[#1f232e] rounded-xl overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-[#1f232e] text-[10px] text-[#8b8f9a] font-bold uppercase tracking-wide">
+                          <th className="text-left  px-3 py-3">IP</th>
+                          <th className="text-left  px-3 py-3">Dispositivo</th>
+                          <th className="text-right px-3 py-3">Acessos</th>
+                          <th className="text-left  px-3 py-3">Último acesso</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {!summary?.loginHistory || summary.loginHistory.length === 0 ? (
+                          <tr><td colSpan={4} className="py-6 text-center text-[#8b8f9a]">
+                            Nenhum acesso registrado ainda.
+                          </td></tr>
+                        ) : (
+                          summary.loginHistory.map((h) => (
+                            <tr key={h.ip} className="border-b border-[#1f232e]/40 hover:bg-white/[0.02]">
+                              <td className="px-3 py-2.5 text-white font-mono">{h.ip}</td>
+                              <td className="px-3 py-2.5 text-[#8b8f9a] max-w-[260px] truncate" title={h.userAgent ?? ''}>
+                                {h.userAgent ?? '—'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-white font-semibold">{h.count}</td>
+                              <td className="px-3 py-2.5 text-[#8b8f9a] font-mono whitespace-nowrap">
+                                {formatDate(h.lastSeenAt)} {formatTime(h.lastSeenAt)}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </div>

@@ -164,7 +164,7 @@ export async function getUserDetail(userId: string) {
   const user = userRows[0]
   if (!user) throw new Error('USER_NOT_FOUND')
 
-  const [accounts, operations, transactions, withdrawals] = await Promise.all([
+  const [accounts, operations, transactions, withdrawals, loginHistory] = await Promise.all([
     prisma.$queryRaw<Array<{ id: string; type: string; balance: any; bonusBalance: any; rolloverRequired: any; rolloverProgress: any; currency: string; createdAt: Date }>>`
       SELECT id, type::text AS type, balance,
              "bonusBalance", "rolloverRequired", "rolloverProgress",
@@ -194,6 +194,13 @@ export async function getUserDetail(userId: string) {
       WHERE a."userId" = ${userId}
       ORDER BY w."createdAt" DESC LIMIT 50
     `,
+    prisma.$queryRaw<Array<{ ip: string; userAgent: string | null; count: number; firstSeenAt: Date; lastSeenAt: Date }>>`
+      SELECT ip, "userAgent", count, "firstSeenAt", "lastSeenAt"
+      FROM login_history
+      WHERE "userId" = ${userId}
+      ORDER BY "lastSeenAt" DESC
+      LIMIT 30
+    `,
   ])
 
   // Stringify Decimals.
@@ -220,6 +227,13 @@ export async function getUserDetail(userId: string) {
     })),
     transactions: transactions.map((t) => ({ ...t, amount: decimalToString(t.amount) })),
     withdrawals: withdrawals.map((w) => ({ ...w, amount: decimalToString(w.amount) })),
+    loginHistory: loginHistory.map((l) => ({
+      ip:          l.ip,
+      userAgent:   l.userAgent,
+      count:       Number(l.count),
+      firstSeenAt: l.firstSeenAt,
+      lastSeenAt:  l.lastSeenAt,
+    })),
   }
 }
 

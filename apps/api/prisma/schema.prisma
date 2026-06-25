@@ -234,6 +234,8 @@ model User {
   // Meta Conversions API attribution data captured at register time.
   // 1-to-1 (one row per user) — see UserTracking model below.
   tracking            UserTracking?
+  // Histórico de IPs de acesso (1 linha por IP distinto) — ver LoginHistory.
+  loginHistory        LoginHistory[]
 
   @@map("users")
 }
@@ -982,6 +984,27 @@ model UserTracking {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   @@map("user_tracking")
+}
+
+// Histórico de IPs de acesso (login). 1 linha por (userId, ip) — o login faz
+// upsert atômico (ON CONFLICT) que incrementa count + atualiza lastSeenAt e o
+// userAgent mais recente. Mantém a tabela pequena (1 row por IP distinto) e é
+// exatamente o que o painel admin exibe pra detectar conta compartilhada /
+// multi-acesso. ip é NOT NULL ('unknown' quando o proxy não envia) por causa
+// do unique composto.
+model LoginHistory {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip          String
+  userAgent   String?
+  count       Int      @default(1)
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@unique([userId, ip])
+  @@index([userId, lastSeenAt])
+  @@map("login_history")
 }
 
 model MetaEventLog {

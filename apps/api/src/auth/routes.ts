@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { loginSchema, registerSchema, updateProfileSchema, twoFactorCodeSchema, kycSubmitSchema, changePasswordSchema } from './schema.js'
-import { changeUserPassword, getKycSubmission, getUserById, loginUser, registerUser, submitKyc, updateUserProfile, verifyAdminStepUp } from './service.js'
+import { changeUserPassword, getKycSubmission, getUserById, loginUser, recordLoginHistory, registerUser, submitKyc, updateUserProfile, verifyAdminStepUp } from './service.js'
 import {
   TRUST_COOKIE_NAME,
   TRUST_COOKIE_MAX_AGE_SEC,
@@ -87,6 +87,12 @@ export async function authRoutes(app: FastifyInstance) {
     try {
       const user  = await loginUser(parsed.data)
       const token = await issueTokens(app, reply, user.id)
+      // Registra o IP de acesso (best-effort, fire-and-forget). x-forwarded-for
+      // respeitado pro reverse proxy do EasyPanel. NUNCA bloqueia o login.
+      const xfwd = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+      const ip   = xfwd || req.ip || null
+      const ua   = (req.headers['user-agent'] as string | undefined) ?? null
+      void recordLoginHistory(user.id, { ip, userAgent: ua }).catch((e) => req.log.error(e))
       return reply.send({ token, user })
     } catch (err: any) {
       if (err.message === 'INVALID_CREDENTIALS') {
