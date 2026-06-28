@@ -164,7 +164,7 @@ export async function getUserDetail(userId: string) {
   const user = userRows[0]
   if (!user) throw new Error('USER_NOT_FOUND')
 
-  const [accounts, operations, transactions, withdrawals, loginHistory] = await Promise.all([
+  const [accounts, operations, transactions, withdrawals, loginHistory, kpiAgg] = await Promise.all([
     prisma.$queryRaw<Array<{ id: string; type: string; balance: any; bonusBalance: any; rolloverRequired: any; rolloverProgress: any; currency: string; createdAt: Date }>>`
       SELECT id, type::text AS type, balance,
              "bonusBalance", "rolloverRequired", "rolloverProgress",
@@ -201,6 +201,19 @@ export async function getUserDetail(userId: string) {
       ORDER BY "lastSeenAt" DESC
       LIMIT 30
     `,
+    // KPIs agregados sobre TODAS as ops/transações REAL (sem o LIMIT 50 das
+    // listas acima). É daqui que o card tira Total Ganho/Perdido/Depositado —
+    // somar as listas truncadas dava números errados (ex.: depósito antigo
+    // fora das 50 últimas transações → "Depositado R$ 0").
+    prisma.$queryRaw<Array<{ totalGanho: any; totalPerdido: any; totalDepositado: any }>>`
+      SELECT
+        COALESCE((SELECT SUM(o.profit) FROM operations o JOIN accounts a ON a.id = o."accountId"
+                  WHERE a."userId" = ${userId} AND a.type = 'REAL' AND o.status = 'WON'), 0)  AS "totalGanho",
+        COALESCE((SELECT SUM(o.amount) FROM operations o JOIN accounts a ON a.id = o."accountId"
+                  WHERE a."userId" = ${userId} AND a.type = 'REAL' AND o.status = 'LOST'), 0) AS "totalPerdido",
+        COALESCE((SELECT SUM(t.amount) FROM transactions t JOIN accounts a ON a.id = t."accountId"
+                  WHERE a."userId" = ${userId} AND a.type = 'REAL' AND t.type = 'DEPOSIT'), 0) AS "totalDepositado"
+    `,
   ])
 
   // Stringify Decimals.
@@ -234,6 +247,13 @@ export async function getUserDetail(userId: string) {
       firstSeenAt: l.firstSeenAt,
       lastSeenAt:  l.lastSeenAt,
     })),
+    // Totais lifetime (sobre TODAS as ops/transações) — o frontend usa estes
+    // em vez de somar as listas truncadas em 50.
+    kpis: {
+      totalGanho:      decimalToString(kpiAgg[0]?.totalGanho ?? 0),
+      totalPerdido:    decimalToString(kpiAgg[0]?.totalPerdido ?? 0),
+      totalDepositado: decimalToString(kpiAgg[0]?.totalDepositado ?? 0),
+    },
   }
 }
 

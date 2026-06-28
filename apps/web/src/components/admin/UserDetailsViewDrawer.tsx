@@ -60,6 +60,13 @@ interface UserSummary {
     firstSeenAt: string
     lastSeenAt:  string
   }>
+  // Totais lifetime calculados no backend (sobre TODAS as ops/transações,
+  // sem o LIMIT 50 das listas acima). Fonte da verdade dos KPIs do card.
+  kpis?: {
+    totalGanho:      string
+    totalPerdido:    string
+    totalDepositado: string
+  }
 }
 
 interface OperationRow {
@@ -239,18 +246,14 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
   const bonusBal        = parseFloat(realAccount?.bonusBalance ?? '0')
   const rolloverReq     = parseFloat(realAccount?.rolloverRequired ?? '0')
   const rolloverProg    = parseFloat(realAccount?.rolloverProgress ?? '0')
-  // 2026-06-01: filtra accountType === 'REAL' em tudo — DEMO e' treino do
-  // user, nao deve contar nos KPIs reais. Backend retorna o accountType
-  // junto pra essa filtragem no frontend.
-  const totalGanho     = (summary?.operations ?? [])
-    .filter(o => o.accountType === 'REAL' && o.status === 'WON')
-    .reduce((sum, o) => sum + parseFloat(o.profit ?? '0'), 0)
-  const totalPerdido   = (summary?.operations ?? [])
-    .filter(o => o.accountType === 'REAL' && o.status === 'LOST')
-    .reduce((sum, o) => sum + parseFloat(o.amount), 0)
-  const totalDepositado = (summary?.transactions ?? [])
-    .filter(t => t.accountType === 'REAL' && t.type === 'DEPOSIT')
-    .reduce((sum, t) => sum + parseFloat(t.amount), 0)
+  // KPIs lifetime vêm do backend (summary.kpis) — somados sobre TODAS as
+  // ops/transações REAL. NÃO reduzir as listas operations/transactions aqui:
+  // elas vêm truncadas em 50, o que dava Total Ganho/Perdido subestimados e,
+  // pior, "Depositado R$ 0" quando o depósito caía fora das 50 últimas
+  // transações — inflando o Lucro Líquido pra positivo indevidamente.
+  const totalGanho      = parseFloat(summary?.kpis?.totalGanho ?? '0')
+  const totalPerdido    = parseFloat(summary?.kpis?.totalPerdido ?? '0')
+  const totalDepositado = parseFloat(summary?.kpis?.totalDepositado ?? '0')
   // Lucro liquido = saldo atual (balance principal) - total depositado.
   // Bonus NAO entra na conta (e' dinheiro da plataforma com rollover).
   const lucroLiquido = saldoOpera - totalDepositado
