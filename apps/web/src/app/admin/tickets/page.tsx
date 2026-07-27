@@ -142,6 +142,7 @@ export default function AdminTicketsPage() {
   const [status, setStatus] = useState<StatusFilter>('ALL')
 
   const [openId, setOpenId] = useState<string | null>(null)
+  const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -159,6 +160,36 @@ export default function AdminTicketsPage() {
   }, [debouncedSearch, status])
 
   useEffect(() => { load() }, [load])
+
+  // Exclui o ticket inteiro (com confirmação). Remove a linha localmente e
+  // ajusta os contadores do header sem recarregar a lista.
+  async function handleDeleteTicket(t: TicketRow) {
+    if (deletingTicketId) return
+    if (!window.confirm(`Excluir o ticket "${t.subject}" de ${t.userName}?\n\nTodas as mensagens serão apagadas. Essa ação não pode ser desfeita.`)) return
+    setDeletingTicketId(t.id)
+    try {
+      await api.delete(`/admin/tickets/${t.id}`)
+      setData((prev) => {
+        if (!prev) return prev
+        const counts = { ...prev.counts }
+        counts.total = Math.max(0, counts.total - 1)
+        if      (t.status === 'OPEN')        counts.open       = Math.max(0, counts.open - 1)
+        else if (t.status === 'IN_PROGRESS') counts.inProgress = Math.max(0, counts.inProgress - 1)
+        else if (t.status === 'RESOLVED')    counts.resolved   = Math.max(0, counts.resolved - 1)
+        else if (t.status === 'CLOSED')      counts.closed     = Math.max(0, counts.closed - 1)
+        return {
+          ...prev,
+          tickets: prev.tickets.filter((x) => x.id !== t.id),
+          total:   Math.max(0, prev.total - 1),
+          counts,
+        }
+      })
+    } catch {
+      setError('Falha ao excluir o ticket.')
+    } finally {
+      setDeletingTicketId(null)
+    }
+  }
 
   // Used by drawer to push updates back into the list without re-fetching.
   function patchTicket(id: string, patch: Partial<TicketRow>) {
@@ -285,14 +316,24 @@ export default function AdminTicketsPage() {
                   <td className="px-4 py-3 text-[#c3c6cf] whitespace-nowrap">
                     {formatDateTime(t.createdAt)}
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => setOpenId(t.id)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a1f2e] border border-[#2a2e3b] hover:border-emerald-500/40 text-xs font-medium text-white transition-colors"
-                    >
-                      <MessageSquare size={12} />
-                      Ver
-                    </button>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => setOpenId(t.id)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1a1f2e] border border-[#2a2e3b] hover:border-emerald-500/40 text-xs font-medium text-white transition-colors"
+                      >
+                        <MessageSquare size={12} />
+                        Ver
+                      </button>
+                      <button
+                        onClick={() => handleDeleteTicket(t)}
+                        disabled={deletingTicketId === t.id}
+                        title="Excluir ticket"
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[#1a1f2e] border border-[#2a2e3b] text-[#8b8f9a] hover:text-red-400 hover:border-red-500/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Trash2 size={13} className={cn(deletingTicketId === t.id && 'animate-pulse')} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -243,6 +243,18 @@ export async function deleteAdminMessage(ticketId: string, messageId: string) {
   if (result === 0) throw new Error('MESSAGE_NOT_FOUND')
 }
 
+// Exclui o ticket INTEIRO (todas as mensagens + o ticket). Hard delete —
+// usado pelo admin pra limpar tickets resolvidos/spam. Apaga as mensagens
+// primeiro (evita depender de ON DELETE CASCADE) e depois o ticket, tudo
+// numa transação. Lança TICKET_NOT_FOUND se o ticket não existir.
+export async function deleteTicket(ticketId: string) {
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`DELETE FROM ticket_messages WHERE "ticketId" = ${ticketId}`
+    const result = await tx.$executeRaw`DELETE FROM tickets WHERE id = ${ticketId}`
+    if (result === 0) throw new Error('TICKET_NOT_FOUND')
+  })
+}
+
 export async function updateTicketStatus(ticketId: string, status: TicketStatus) {
   const result = await prisma.$executeRaw`
     UPDATE tickets

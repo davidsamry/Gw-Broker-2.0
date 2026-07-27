@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
   deleteAdminMessage,
+  deleteTicket,
   getAdminTicketDetail,
   listAdminTickets,
   replyAsAdmin,
@@ -9,6 +10,7 @@ import {
   updateTicketStatus,
 } from './service.js'
 import { ticketAttachmentSchema, TICKET_BODY_LIMIT } from '../../tickets/schema.js'
+import { recordAdminAction } from '../auditLog.js'
 
 const listQuerySchema = z.object({
   page:     z.coerce.number().int().min(1).optional(),
@@ -86,6 +88,26 @@ export async function ticketsAdminRoutes(app: FastifyInstance) {
       return reply.send({ ok: true })
     } catch (err: any) {
       if (err.message === 'MESSAGE_NOT_FOUND') return reply.status(404).send({ error: 'MESSAGE_NOT_FOUND' })
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Excluir o ticket inteiro (mensagens + ticket). Hard delete.
+  app.delete('/:id', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    try {
+      await deleteTicket(id)
+      void recordAdminAction(req, {
+        resourceType: 'TICKET',
+        resourceId:   id,
+        action:       'DELETE',
+        before:       null,
+        after:        null,
+      })
+      return reply.send({ ok: true })
+    } catch (err: any) {
+      if (err.message === 'TICKET_NOT_FOUND') return reply.status(404).send({ error: 'TICKET_NOT_FOUND' })
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }
