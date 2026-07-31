@@ -90,6 +90,9 @@ export const updateProfileSchema = z.object({
   phone:     z.string().max(30).trim().optional(),
   country:   z.string().max(60).trim().optional(),
   address:   z.string().max(200).trim().optional(),
+  city:      z.string().max(80).trim().optional(),
+  state:     z.string().max(80).trim().optional(),
+  zip:       z.string().max(20).trim().optional(),
 })
 
 export type RegisterInput       = z.infer<typeof registerSchema>

@@ -303,6 +303,9 @@ export async function updateUserProfile(userId: string, input: UpdateProfileInpu
   if (input.phone     !== undefined) data.phone     = input.phone     || null
   if (input.country   !== undefined) data.country   = input.country   || null
   if (input.address   !== undefined) data.address   = input.address   || null
+  if (input.city      !== undefined) data.city      = input.city      || null
+  if (input.state     !== undefined) data.state     = input.state     || null
+  if (input.zip       !== undefined) data.zip       = input.zip       || null
 
   try {
     const user = await prisma.user.update({

@@ -48,6 +48,9 @@ export interface User {
   phone?:            string | null
   country?:          string | null
   address?:          string | null
+  city?:             string | null
+  state?:            string | null
+  zip?:              string | null
   updatedAt?:        string         // used to re-sync MinhaContaTab local state
   // Per-user market gates (admin /admin/usuarios). Backend enforces;
   // frontend uses these to hide trade buttons + show "Mercado Fechado".

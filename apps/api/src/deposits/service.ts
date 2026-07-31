@@ -480,6 +480,7 @@ export async function confirmDepositById(depositId: string) {
     const lookup = await prisma.$queryRaw<Array<{
       userId: string; email: string; name: string | null; lastName: string | null;
       phone: string | null; country: string | null;
+      city: string | null; state: string | null; zip: string | null;
       amount: string; paid_count: bigint;
     }>>`
       SELECT
@@ -489,6 +490,9 @@ export async function confirmDepositById(depositId: string) {
         u."lastName",
         u.phone,
         u.country,
+        u.city,
+        u.state,
+        u.zip,
         d.amount::text AS amount,
         (
           SELECT COUNT(*)::bigint
@@ -516,6 +520,9 @@ export async function confirmDepositById(depositId: string) {
         lastName: row.lastName,
         phone:    row.phone,
         country:  row.country,
+        city:     row.city,
+        state:    row.state,
+        zip:      row.zip,
       }
       const { sendFirstDepositWebhook, sendSubsequentDepositWebhook } =
         await import('../webhooks/service.js')

@@ -176,6 +176,11 @@ model User {
   phone        String?
   country      String?
   address      String?
+  // Endereço granular — coletado no perfil (Minha Conta). Usado pra enriquecer
+  // os webhooks de tracking (advanced matching: city/state/zip). Opcionais.
+  city         String?
+  state        String?
+  zip          String?
   kycStatus    KycStatus  @default(PENDING)
   role         UserRole   @default(USER)
   // ── Two-factor authentication (TOTP / Google Authenticator) ──

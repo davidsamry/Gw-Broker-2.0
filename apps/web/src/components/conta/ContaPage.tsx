@@ -1027,6 +1027,10 @@ function MinhaContaTab() {
   const [email,     setEmail]     = useState(user?.email     ?? '')
   const [country,   setCountry]   = useState(user?.country   ?? 'Brasil')
   const [address,   setAddress]   = useState(user?.address   ?? '')
+  const [phone,     setPhone]     = useState(user?.phone     ?? '')
+  const [city,      setCity]      = useState(user?.city      ?? '')
+  const [uf,        setUf]        = useState(user?.state     ?? '')
+  const [zip,       setZip]       = useState(user?.zip       ?? '')
   const [saving,    setSaving]    = useState(false)
   const [savedAt,   setSavedAt]   = useState<number | null>(null)
   const [error,     setError]     = useState('')
@@ -1132,6 +1136,10 @@ function MinhaContaTab() {
     setEmail    (user.email     ?? '')
     setCountry  (user.country   ?? 'Brasil')
     setAddress  (user.address   ?? '')
+    setPhone    (user.phone     ?? '')
+    setCity     (user.city      ?? '')
+    setUf       (user.state     ?? '')
+    setZip      (user.zip       ?? '')
   }, [user?.id, user?.updatedAt])
 
   if (!user) {
@@ -1158,6 +1166,10 @@ function MinhaContaTab() {
         cpf:       cpf.trim(),
         country:   country.trim(),
         address:   address.trim(),
+        phone:     phone.trim(),
+        city:      city.trim(),
+        state:     uf.trim(),
+        zip:       zip.trim(),
       })
       // Push updated user into authStore so the rest of the app sees fresh data.
       if (data?.user) {
@@ -1362,8 +1374,14 @@ function MinhaContaTab() {
             <FloatingInput label="Data de nascimento"  value={birthDate} onChange={setBirthDate} type="date" />
             <FloatingInput label="CPF"                 value={cpf}       onChange={setCpf}       placeholder="000.000.000-00" />
             <FloatingInput label="Email"               value={email}     onChange={setEmail} placeholder="seu@email.com" />
+            <FloatingInput label="Telefone"            value={phone}     onChange={setPhone}     placeholder="(11) 99999-9999" />
             <FloatingInput label="País"                value={country}   onChange={setCountry} />
-            <FloatingInput label="Endereço"            value={address}   onChange={setAddress}   placeholder="Rua, número, cidade" />
+            <FloatingInput label="Endereço"            value={address}   onChange={setAddress}   placeholder="Rua, número, bairro" />
+            <div className="grid grid-cols-2 gap-3">
+              <FloatingInput label="Cidade"            value={city}      onChange={setCity}      placeholder="Sua cidade" />
+              <FloatingInput label="Estado (UF)"       value={uf}        onChange={setUf}        placeholder="SP" />
+            </div>
+            <FloatingInput label="CEP"                 value={zip}       onChange={setZip}       placeholder="00000-000" />
           </div>
 
           {error && (
