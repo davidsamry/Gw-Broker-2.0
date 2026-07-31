@@ -5,6 +5,11 @@ import { z } from 'zod'
 // validate the checksum so typos (000.000.000-00 style) are rejected.
 export const registerSchema = z.object({
   name:     z.string().min(2).max(80).trim(),
+  // Coletados no cadastro (enriquecem os webhooks de tracking). lastName e
+  // phone opcionais no schema pra não quebrar clients antigos; o form pede.
+  lastName: z.string().max(80).trim().optional(),
+  phone:    z.string().max(30).trim().optional(),
+  country:  z.string().max(60).trim().optional(),
   email:    z.string().email().toLowerCase().trim(),
   password: z.string().min(6).max(72),
   cpf:      z.string()

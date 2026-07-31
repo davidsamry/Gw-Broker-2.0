@@ -108,7 +108,7 @@ interface AuthState {
   login:              (email: string, password: string, code?: string) => Promise<void>
   /** CPF is required as of 2026-05-26 — 11 raw digits (no mask). Caller
    *  is responsible for stripping `.` and `-` before invocation. */
-  register:           (name: string, email: string, password: string, cpf: string) => Promise<void>
+  register:           (name: string, email: string, password: string, cpf: string, extra?: { lastName?: string; phone?: string; country?: string }) => Promise<void>
   logout:             () => Promise<void>
   init:               () => Promise<void>
   setIsDemo:          (v: boolean) => void
@@ -200,7 +200,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ user: data.user, token: data.token })
   },
 
-  register: async (name, email, password, cpf) => {
+  register: async (name, email, password, cpf, extra) => {
     // Attach Meta attribution captured from the landing page / current
     // URL (fbp/fbc cookies + utm_* query params). Backend persists it in
     // user_tracking and uses it on the CompleteRegistration Conversions
@@ -211,7 +211,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const { captureMetaTracking } = await import('@/lib/metaTracking')
       tracking = captureMetaTracking() as Record<string, unknown>
     } catch { /* swallow — attribution is best-effort */ }
-    const { data } = await api.post('/auth/register', { name, email, password, cpf, tracking })
+    const { data } = await api.post('/auth/register', {
+      name, email, password, cpf, tracking,
+      lastName: extra?.lastName,
+      phone:    extra?.phone,
+      country:  extra?.country,
+    })
     localStorage.setItem('token', data.token)
     saveUserCache(data.user)
     set({ user: data.user, token: data.token })

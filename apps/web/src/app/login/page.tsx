@@ -11,11 +11,6 @@ const COUNTRIES = [
   'Argentina', 'Chile', 'Colômbia', 'México', 'Peru',
 ]
 
-// Only BRL accepted at this stage of the rollout. Other currencies were
-// listed during early mocks but the deposit (PIX) + payout pipelines are
-// BRL-only. Add entries here when those rails support new currencies.
-const CURRENCIES = ['BRL']
-
 // Next.js 16 prerender bailout — any client component reading from
 // useSearchParams() must live inside a <Suspense> boundary, otherwise
 // the static export fails. We wrap the real implementation here.
@@ -50,10 +45,12 @@ function LoginPageInner() {
   const [twoFA,    setTwoFA]    = useState(false)
   const [code,     setCode]     = useState('')
 
-  // Register — defaults to Brasil + BRL since that's the primary market.
-  // User can change both before submitting if registering from elsewhere.
+  // Register — defaults to Brasil since that's the primary market.
+  // User can change the country before submitting if registering from elsewhere.
   const [country,    setCountry]    = useState('Brasil')
-  const [currency,   setCurrency]   = useState('BRL')
+  const [rName,      setRName]      = useState('')
+  const [rLastName,  setRLastName]  = useState('')
+  const [rPhone,     setRPhone]     = useState('')
   const [rEmail,     setREmail]     = useState('')
   const [rPassword,  setRPassword]  = useState('')
   const [showRPass,  setShowRPass]  = useState(false)
@@ -131,15 +128,19 @@ function LoginPageInner() {
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+    if (!rName.trim())     { setError('Informe seu nome.'); return }
+    if (!rLastName.trim()) { setError('Informe seu sobrenome.'); return }
     if (!terms18) { setError('Confirme que você tem 18 anos ou mais.'); return }
     if (rPassword.length < 8) { setError('A senha deve ter pelo menos 8 caracteres.'); return }
     const cpfDigits = cpf.replace(/\D/g, '')
     if (cpfDigits.length !== 11) { setError('CPF inválido — preencha os 11 dígitos.'); return }
     setLoading(true)
     try {
-      // Use email prefix as name since we don't ask for name
-      const name = rEmail.split('@')[0]
-      await register(name, rEmail, rPassword, cpfDigits)
+      await register(rName.trim(), rEmail, rPassword, cpfDigits, {
+        lastName: rLastName.trim(),
+        phone:    rPhone.trim() || undefined,
+        country:  country.trim() || undefined,
+      })
       router.replace('/app')
     } catch (err: any) {
       const code = err.response?.data?.error
@@ -319,20 +320,11 @@ function LoginPageInner() {
                   )}
                 </div>
 
-                {/* Currency */}
-                <div className="relative">
-                  <span className="absolute -top-2.5 left-3 px-1 text-[10px] text-[#8b8f9a] bg-[#161b27] z-10">Moeda</span>
-                  <select
-                    value={currency}
-                    onChange={e => setCurrency(e.target.value)}
-                    className="w-full bg-transparent border border-[#2a2e4a] rounded-lg px-3 py-3 text-white text-sm outline-none appearance-none cursor-pointer"
-                  >
-                    {CURRENCIES.map(c => <option key={c} value={c} className="bg-[#1e2535]">{c}</option>)}
-                  </select>
-                  <svg className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b8f9a" strokeWidth="2">
-                    <path d="M6 9l6 6 6-6"/>
-                  </svg>
-                </div>
+                {/* Nome + Sobrenome + Telefone — coletados no cadastro
+                    (enriquecem os webhooks de tracking / advanced matching). */}
+                <FloatingInput label="Nome"      type="text" value={rName}     onChange={setRName}     required />
+                <FloatingInput label="Sobrenome" type="text" value={rLastName} onChange={setRLastName} required />
+                <FloatingInput label="Telefone"  type="tel"  value={rPhone}    onChange={setRPhone}    inputMode="tel" />
 
                 {/* CPF — placed FIRST among credential fields. KYC-anchor
                     of the account; the live mask shows BR-resident users

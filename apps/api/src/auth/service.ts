@@ -25,6 +25,9 @@ export async function registerUser(input: RegisterInput, requestMeta?: {
   const user = await prisma.user.create({
     data: {
       name:     input.name,
+      lastName: input.lastName || null,
+      phone:    input.phone   || null,
+      country:  input.country || null,
       email:    input.email,
       password: hash,
       cpf:      input.cpf,
