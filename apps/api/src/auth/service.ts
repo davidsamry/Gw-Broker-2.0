@@ -59,7 +59,17 @@ export async function registerUser(input: RegisterInput, requestMeta?: {
   // toggles + URL configurable via /admin/webhooks. Like the email above,
   // never blocks the registration flow — service swallows all errors.
   void import('../webhooks/service.js').then(({ sendRegistrationWebhook }) => {
-    sendRegistrationWebhook(user.email)
+    // Envia o máximo de identidade disponível no cadastro (email, nome,
+    // external_id). phone/country/lastName geralmente ainda nulos aqui —
+    // são omitidos automaticamente e chegam nos webhooks de depósito.
+    sendRegistrationWebhook({
+      id:       user.id,
+      email:    user.email,
+      name:     user.name,
+      lastName: (user as any).lastName ?? null,
+      phone:    (user as any).phone ?? null,
+      country:  (user as any).country ?? null,
+    })
   }).catch(() => { /* dynamic import only fails on bundler weirdness */ })
 
   // Meta Conversions API — save attribution + fire CompleteRegistration.

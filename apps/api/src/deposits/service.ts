@@ -478,10 +478,17 @@ export async function confirmDepositById(depositId: string) {
   // webhook still fires even if the email block above threw early.
   try {
     const lookup = await prisma.$queryRaw<Array<{
-      email: string; amount: string; paid_count: bigint;
+      userId: string; email: string; name: string | null; lastName: string | null;
+      phone: string | null; country: string | null;
+      amount: string; paid_count: bigint;
     }>>`
       SELECT
+        u.id AS "userId",
         u.email,
+        u.name,
+        u."lastName",
+        u.phone,
+        u.country,
         d.amount::text AS amount,
         (
           SELECT COUNT(*)::bigint
@@ -500,10 +507,20 @@ export async function confirmDepositById(depositId: string) {
     if (row) {
       const isFirst = Number(row.paid_count) === 1
       const value   = Number(row.amount)
+      // Envia o máximo de identidade disponível (email, phone, nome,
+      // external_id, country). Campos vazios são omitidos pelo sender.
+      const userData = {
+        id:       row.userId,
+        email:    row.email,
+        name:     row.name,
+        lastName: row.lastName,
+        phone:    row.phone,
+        country:  row.country,
+      }
       const { sendFirstDepositWebhook, sendSubsequentDepositWebhook } =
         await import('../webhooks/service.js')
-      if (isFirst) sendFirstDepositWebhook(row.email, value)
-      else         sendSubsequentDepositWebhook(row.email, value)
+      if (isFirst) sendFirstDepositWebhook(userData, value)
+      else         sendSubsequentDepositWebhook(userData, value)
     }
   } catch (err) {
     console.error(`[deposits] webhook dispatch failed for deposit=${depositId}`, err)

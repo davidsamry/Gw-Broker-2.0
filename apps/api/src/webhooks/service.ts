@@ -143,35 +143,89 @@ async function sendWebhook(key: WebhookKey, payload: Record<string, unknown>): P
   console.error(`[webhook] ${key} failed after ${MAX_ATTEMPTS} attempts url=${url}`)
 }
 
-// ── Convenience wrappers per event — same shape the TrackFlow spec
-//    documents (value/event_name/email for deposits, event_name/email
-//    for the registration variant). Callers don't construct payloads
-//    by hand; one wrapper per business flow.
+// ── Convenience wrappers per event ────────────────────────────────────────
+//
+// Enviamos o MÁXIMO de dados de identidade disponíveis — quanto mais campos
+// de matching (email, phone, nome, external_id, localização), maior a nota
+// de correspondência no TrackFlow/Meta (advanced matching). Campos ausentes
+// (null/vazio) são OMITIDOS do payload — não adianta mandar chave vazia.
+//
+// city/state/zip: a plataforma ainda NÃO coleta esses campos (só `country` e
+// um `address` livre). Estão previstos na interface abaixo e entram no payload
+// automaticamente assim que passarmos a coletá-los. Enquanto isso, ficam de fora.
+
+export interface WebhookUserData {
+  id:        string          // → external_id
+  email:     string
+  name?:     string | null   // nome (pode conter nome completo)
+  lastName?: string | null   // sobrenome (se separado)
+  phone?:    string | null
+  country?:  string | null
+  city?:     string | null   // ainda não coletado
+  state?:    string | null   // ainda não coletado
+  zip?:      string | null   // ainda não coletado
+}
+
+// Deriva first/last/full a partir de name + lastName. Se lastName vier vazio
+// mas name tiver espaços (nome completo num campo só), divide: 1º token =
+// first_name, resto = last_name.
+function splitName(name?: string | null, lastName?: string | null): {
+  first_name?: string; last_name?: string; full_name?: string
+} {
+  const n  = (name ?? '').trim().replace(/\s+/g, ' ')
+  const ln = (lastName ?? '').trim().replace(/\s+/g, ' ')
+  if (ln) {
+    return { first_name: n || undefined, last_name: ln, full_name: [n, ln].filter(Boolean).join(' ') || undefined }
+  }
+  if (!n) return {}
+  const parts = n.split(' ')
+  if (parts.length === 1) return { first_name: parts[0], full_name: parts[0] }
+  return { first_name: parts[0], last_name: parts.slice(1).join(' '), full_name: n }
+}
+
+// Monta os campos de identidade, omitindo tudo que estiver vazio/null.
+function buildIdentityFields(u: WebhookUserData): Record<string, unknown> {
+  const fields: Record<string, unknown> = {
+    email:       u.email,
+    external_id: u.id,
+  }
+  Object.assign(fields, splitName(u.name, u.lastName))
+  const put = (key: string, val?: string | null) => {
+    const v = (val ?? '').trim()
+    if (v) fields[key] = v
+  }
+  put('phone',   u.phone)
+  put('country', u.country)
+  put('city',    u.city)
+  put('state',   u.state)
+  put('zip',     u.zip)
+  return fields
+}
 
 /** Registration — fired from auth/service.ts after a new user is created. */
-export function sendRegistrationWebhook(email: string): void {
+export function sendRegistrationWebhook(user: WebhookUserData): void {
   sendWebhookAsync('REGISTRATION', {
     event_name: 'Registration',
-    email,
+    ...buildIdentityFields(user),
   })
 }
 
 /** First deposit — fired from deposits/service.ts when the very first
  *  deposit for a user is confirmed. Payload matches TrackFlow's FTD spec. */
-export function sendFirstDepositWebhook(email: string, value: number): void {
+export function sendFirstDepositWebhook(user: WebhookUserData, value: number): void {
   sendWebhookAsync('FIRST_DEPOSIT', {
-    value,
     event_name: 'FirstDeposit',
-    email,
+    value,
+    ...buildIdentityFields(user),
   })
 }
 
 /** Subsequent deposit — fired from the same confirm flow when the user
  *  already has at least one previous confirmed deposit. */
-export function sendSubsequentDepositWebhook(email: string, value: number): void {
+export function sendSubsequentDepositWebhook(user: WebhookUserData, value: number): void {
   sendWebhookAsync('SUBSEQUENT_DEPOSIT', {
-    value,
     event_name: 'Deposit',
-    email,
+    value,
+    ...buildIdentityFields(user),
   })
 }

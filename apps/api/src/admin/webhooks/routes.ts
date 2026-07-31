@@ -66,15 +66,26 @@ export async function webhooksAdminRoutes(app: FastifyInstance) {
     if (!cfg)                                return reply.status(404).send({ error: 'NOT_FOUND' })
     if (!cfg.url || cfg.url.trim() === '')   return reply.status(400).send({ error: 'URL_EMPTY' })
 
-    // Sample payload matching the TrackFlow spec for each key. Admin
-    // recognises this came from the test button via the obviously-fake
-    // email; production payloads always use the real user email.
+    // Sample payload — MESMA forma que a produção envia (máximo de campos de
+    // identidade pra advanced matching). Admin reconhece que veio do teste
+    // pelo email/external_id obviamente falsos; produção usa os dados reais.
+    // city/state/zip ficam de fora aqui porque a produção também não os
+    // envia ainda (a plataforma não coleta esses campos).
+    const sampleUser = {
+      email:       'test@vx-global.com',
+      phone:       '+5511999999999',
+      first_name:  'Teste',
+      last_name:   'VX Global',
+      full_name:   'Teste VX Global',
+      external_id: 'test-user-id-0001',
+      country:     'Brasil',
+    }
     const samplePayload =
       cfg.key === 'REGISTRATION'
-        ? { event_name: 'Registration',  email: 'test@vx-global.com' }
+        ? { event_name: 'Registration',  ...sampleUser }
         : cfg.key === 'FIRST_DEPOSIT'
-          ? { value: 100.00, event_name: 'FirstDeposit', email: 'test@vx-global.com' }
-          : { value: 250.00, event_name: 'Deposit',      email: 'test@vx-global.com' }
+          ? { event_name: 'FirstDeposit', value: 100.00, ...sampleUser }
+          : { event_name: 'Deposit',      value: 250.00, ...sampleUser }
 
     const startedAt = Date.now()
     try {
