@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   ArrowUpFromLine, DollarSign, CheckCircle2, Receipt, RefreshCw, Search, XCircle,
-  Clock, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Check,
+  Clock, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Check, Zap,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { KpiCard } from '@/components/admin/KpiCard'
@@ -343,12 +343,22 @@ function Pager({ children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonEleme
   )
 }
 
+// Respostas rápidas (modelos prontos) — admin clica e preenche o campo de
+// motivo, podendo editar antes de confirmar. Mesmo padrão de /admin/tickets.
+const QUICK_REPLIES: { title: string; body: string }[] = [
+  {
+    title: 'Rollover pendente',
+    body: 'Conforme os termos aceitos no momento da inscrição, é necessário cumprir o rollover correspondente ao valor depositado para que a função de saque seja liberada.\n\nEnquanto essa exigência não for concluída, não será possível realizar saques da conta. Após atingir a movimentação necessária, a solicitação de saque poderá ser efetuada normalmente.',
+  },
+]
+
 function RejectModal({
   withdrawal, onClose, onDone,
 }: { withdrawal: WithdrawalRow; onClose: () => void; onDone: () => void }) {
   const [reason, setReason] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showTemplates, setShowTemplates] = useState(false)
 
   async function submit() {
     if (reason.trim().length < 3) { setError('Motivo precisa ter pelo menos 3 caracteres.'); return }
@@ -377,7 +387,33 @@ function RejectModal({
             <strong>{withdrawal.userName || withdrawal.userEmail}</strong>.
           </p>
           <div>
-            <label className="text-[10px] font-medium text-[#8b8f9a] mb-1 block">Motivo (visível ao usuário no histórico)</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[10px] font-medium text-[#8b8f9a] block">Motivo (visível ao usuário no histórico)</label>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowTemplates((v) => !v)}
+                  className="inline-flex items-center gap-1.5 text-[11px] text-[#8b8f9a] hover:text-red-400 transition-colors"
+                >
+                  <Zap size={12} /> Respostas rápidas
+                </button>
+                {showTemplates && (
+                  <div className="absolute top-full right-0 mt-1 w-72 max-h-64 overflow-y-auto bg-[#1a1e2a] border border-[#1f232e] rounded-lg shadow-xl z-10">
+                    {QUICK_REPLIES.map((q) => (
+                      <button
+                        key={q.title}
+                        type="button"
+                        onClick={() => { setReason(q.body); setShowTemplates(false) }}
+                        className="block w-full text-left px-3 py-2 hover:bg-white/5 transition-colors border-b border-[#1f232e] last:border-b-0"
+                      >
+                        <div className="text-xs font-medium text-white">{q.title}</div>
+                        <div className="text-[10px] text-[#8b8f9a] truncate mt-0.5">{q.body}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
             <textarea
               autoFocus
               value={reason}
