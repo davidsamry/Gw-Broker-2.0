@@ -15,6 +15,8 @@ export interface TrackingPayload {
   fbp?:         string | null
   fbc?:         string | null
   fbclid?:      string | null
+  // click_id vindo no link do bot (?sck=...). Vira external_id no postback.
+  sck?:         string | null
   utmSource?:   string | null
   utmMedium?:   string | null
   utmCampaign?: string | null
@@ -56,8 +58,10 @@ export function captureMetaTracking(): TrackingPayload {
 
   const url    = new URL(window.location.href)
   const fbclid = url.searchParams.get('fbclid')
-  const fbp    = readCookie('_fbp') || stored.fbp || null
-  let   fbc    = readCookie('_fbc') || stored.fbc || null
+  // fbp/fbc podem vir NO LINK do bot (?fbp=...&fbc=...) — prioridade sobre o
+  // cookie, pois o bot preenche com o valor exato usado no clique.
+  const fbp    = url.searchParams.get('fbp') || readCookie('_fbp') || stored.fbp || null
+  let   fbc    = url.searchParams.get('fbc') || readCookie('_fbc') || stored.fbc || null
   // Synthesise fbc from fbclid if cookie absent. Format MUST match what
   // Pixel JS writes — Meta's de-dupe / attribution treats them the same.
   if (!fbc && fbclid) {
@@ -68,6 +72,8 @@ export function captureMetaTracking(): TrackingPayload {
     fbp,
     fbc,
     fbclid:      fbclid || stored.fbclid || null,
+    // click_id do bot — external_id do postback. Sobrevive à navegação.
+    sck:         url.searchParams.get('sck') || stored.sck || null,
     utmSource:   url.searchParams.get('utm_source')   || stored.utmSource   || null,
     utmMedium:   url.searchParams.get('utm_medium')   || stored.utmMedium   || null,
     utmCampaign: url.searchParams.get('utm_campaign') || stored.utmCampaign || null,

@@ -481,7 +481,7 @@ export async function confirmDepositById(depositId: string) {
       userId: string; email: string; name: string | null; lastName: string | null;
       phone: string | null; country: string | null;
       city: string | null; state: string | null; zip: string | null;
-      fbp: string | null; fbc: string | null; ip: string | null; userAgent: string | null;
+      fbp: string | null; fbc: string | null; sck: string | null; ip: string | null; userAgent: string | null;
       amount: string; paid_count: bigint;
     }>>`
       SELECT
@@ -496,6 +496,7 @@ export async function confirmDepositById(depositId: string) {
         u.zip,
         ut.fbp,
         ut.fbc,
+        ut.sck,
         ut.ip,
         ut."userAgent",
         d.amount::text AS amount,
@@ -522,6 +523,7 @@ export async function confirmDepositById(depositId: string) {
       // (fbp/fbc/ip/userAgent da user_tracking). Vazios são omitidos.
       const userData = {
         id:        row.userId,
+        sck:       row.sck,
         email:     row.email,
         name:      row.name,
         lastName:  row.lastName,

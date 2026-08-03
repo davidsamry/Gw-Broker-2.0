@@ -67,13 +67,15 @@ export async function registerUser(input: RegisterInput, requestMeta?: {
     // são omitidos automaticamente e chegam nos webhooks de depósito.
     sendRegistrationWebhook({
       id:        user.id,
+      // click_id do link do bot → vira o external_id do postback (fallback: id).
+      sck:       input.tracking?.sck ?? null,
       email:     user.email,
       name:      user.name,
       lastName:  (user as any).lastName ?? null,
       phone:     (user as any).phone ?? null,
       country:   (user as any).country ?? null,
-      // Sinais de navegador/clique (Meta CAPI): fbp/fbc dos cookies enviados
-      // pelo client, ip/userAgent do request. Melhoram muito o matching.
+      // Sinais de navegador/clique (Meta CAPI): fbp/fbc do link/cookies,
+      // ip/userAgent do request. Melhoram muito o matching.
       fbp:       input.tracking?.fbp ?? null,
       fbc:       input.tracking?.fbc ?? null,
       ip:        requestMeta?.ip ?? null,

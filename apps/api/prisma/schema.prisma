@@ -979,6 +979,9 @@ model UserTracking {
   fbp         String?
   fbc         String?
   fbclid      String?
+  // click_id (param `sck` da URL do bot). Usado como external_id nos
+  // postbacks pro TrackFlow — é o que casa o evento com o clique do anúncio.
+  sck         String?
   utmSource   String?
   utmMedium   String?
   utmCampaign String?

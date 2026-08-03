@@ -8,6 +8,7 @@ export interface TrackingFields {
   fbp?:         string | null
   fbc?:         string | null
   fbclid?:      string | null
+  sck?:         string | null
   utmSource?:   string | null
   utmMedium?:   string | null
   utmCampaign?: string | null
@@ -32,12 +33,12 @@ export async function saveUserTracking(userId: string, t: TrackingFields): Promi
 
   await prisma.$executeRaw`
     INSERT INTO user_tracking
-      (id, "userId", fbp, fbc, fbclid,
+      (id, "userId", fbp, fbc, fbclid, sck,
        "utmSource", "utmMedium", "utmCampaign", "utmContent", "utmTerm",
        ip, "userAgent", "createdAt", "updatedAt")
     VALUES (
       gen_random_uuid()::text, ${userId},
-      ${t.fbp ?? null}, ${fbc}, ${t.fbclid ?? null},
+      ${t.fbp ?? null}, ${fbc}, ${t.fbclid ?? null}, ${t.sck ?? null},
       ${t.utmSource ?? null}, ${t.utmMedium ?? null}, ${t.utmCampaign ?? null},
       ${t.utmContent ?? null}, ${t.utmTerm ?? null},
       ${t.ip ?? null}, ${t.userAgent ?? null},
@@ -47,6 +48,7 @@ export async function saveUserTracking(userId: string, t: TrackingFields): Promi
       fbp          = COALESCE(EXCLUDED.fbp,          user_tracking.fbp),
       fbc          = COALESCE(EXCLUDED.fbc,          user_tracking.fbc),
       fbclid       = COALESCE(EXCLUDED.fbclid,       user_tracking.fbclid),
+      sck          = COALESCE(EXCLUDED.sck,          user_tracking.sck),
       "utmSource"  = COALESCE(EXCLUDED."utmSource",  user_tracking."utmSource"),
       "utmMedium"  = COALESCE(EXCLUDED."utmMedium",  user_tracking."utmMedium"),
       "utmCampaign"= COALESCE(EXCLUDED."utmCampaign",user_tracking."utmCampaign"),
@@ -61,6 +63,7 @@ export async function saveUserTracking(userId: string, t: TrackingFields): Promi
 export interface StoredTracking {
   fbp:         string | null
   fbc:         string | null
+  sck:         string | null
   ip:          string | null
   userAgent:   string | null
 }
@@ -68,8 +71,8 @@ export interface StoredTracking {
 /** Read back the tracking row for a user. Returns nulls if no row. */
 export async function getUserTracking(userId: string): Promise<StoredTracking> {
   const rows = await prisma.$queryRaw<Array<StoredTracking>>`
-    SELECT fbp, fbc, ip, "userAgent"
+    SELECT fbp, fbc, sck, ip, "userAgent"
     FROM user_tracking WHERE "userId" = ${userId} LIMIT 1
   `
-  return rows[0] ?? { fbp: null, fbc: null, ip: null, userAgent: null }
+  return rows[0] ?? { fbp: null, fbc: null, sck: null, ip: null, userAgent: null }
 }

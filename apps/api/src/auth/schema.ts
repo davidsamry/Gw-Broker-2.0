@@ -25,6 +25,7 @@ export const registerSchema = z.object({
     fbp:         z.string().max(200).optional().nullable(),
     fbc:         z.string().max(200).optional().nullable(),
     fbclid:      z.string().max(200).optional().nullable(),
+    sck:         z.string().max(200).optional().nullable(),
     utmSource:   z.string().max(200).optional().nullable(),
     utmMedium:   z.string().max(200).optional().nullable(),
     utmCampaign: z.string().max(200).optional().nullable(),

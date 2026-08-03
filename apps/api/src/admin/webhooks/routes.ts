@@ -77,7 +77,7 @@ export async function webhooksAdminRoutes(app: FastifyInstance) {
       first_name:         'Teste',
       last_name:          'VX Global',
       full_name:          'Teste VX Global',
-      external_id:        'test-user-id-0001',
+      external_id:        'sck_test_click_0001',   // = sck (click_id) em produção
       country:            'Brasil',
       fbp:                'fb.1.1700000000000.1234567890',
       fbc:                'fb.1.1700000000000.AbCdEfGh',

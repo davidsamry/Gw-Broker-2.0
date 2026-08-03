@@ -155,7 +155,10 @@ async function sendWebhook(key: WebhookKey, payload: Record<string, unknown>): P
 // automaticamente assim que passarmos a coletá-los. Enquanto isso, ficam de fora.
 
 export interface WebhookUserData {
-  id:        string          // → external_id
+  id:        string          // fallback de external_id (ID interno) quando não há sck
+  // click_id (param `sck` da URL do bot). Quando presente, VIRA o external_id
+  // do postback — é o que casa o evento com o clique do anúncio no TrackFlow.
+  sck?:      string | null
   email:     string
   name?:     string | null   // nome (pode conter nome completo)
   lastName?: string | null   // sobrenome (se separado)
@@ -195,7 +198,9 @@ function splitName(name?: string | null, lastName?: string | null): {
 function buildIdentityFields(u: WebhookUserData): Record<string, unknown> {
   const fields: Record<string, unknown> = {
     email:       u.email,
-    external_id: u.id,
+    // external_id = sck (click_id) quando veio do link do bot; senão o ID
+    // interno como fallback (usuário orgânico / sem clique rastreado).
+    external_id: (u.sck && u.sck.trim()) || u.id,
   }
   Object.assign(fields, splitName(u.name, u.lastName))
   const put = (key: string, val?: string | null) => {
