@@ -72,13 +72,17 @@ export async function webhooksAdminRoutes(app: FastifyInstance) {
     // city/state/zip ficam de fora aqui porque a produção também não os
     // envia ainda (a plataforma não coleta esses campos).
     const sampleUser = {
-      email:       'test@vx-global.com',
-      phone:       '+5511999999999',
-      first_name:  'Teste',
-      last_name:   'VX Global',
-      full_name:   'Teste VX Global',
-      external_id: 'test-user-id-0001',
-      country:     'Brasil',
+      email:              'test@vx-global.com',
+      phone:              '+5511999999999',
+      first_name:         'Teste',
+      last_name:          'VX Global',
+      full_name:          'Teste VX Global',
+      external_id:        'test-user-id-0001',
+      country:            'Brasil',
+      fbp:                'fb.1.1700000000000.1234567890',
+      fbc:                'fb.1.1700000000000.AbCdEfGh',
+      client_ip_address:  '177.92.19.64',
+      client_user_agent:  'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/126.0 Mobile Safari/537.36',
     }
     const samplePayload =
       cfg.key === 'REGISTRATION'

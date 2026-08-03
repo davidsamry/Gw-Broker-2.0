@@ -164,6 +164,14 @@ export interface WebhookUserData {
   city?:     string | null   // ainda não coletado
   state?:    string | null   // ainda não coletado
   zip?:      string | null   // ainda não coletado
+  // ── Sinais de navegador/clique (Meta Conversions API) ──────────────────
+  // Capturados no cadastro (user_tracking). fbp/fbc vêm dos cookies _fbp/_fbc,
+  // ip/userAgent do request. Aumentam MUITO a nota de matching. Enviados como
+  // fbp / fbc / client_ip_address / client_user_agent (nomes padrão do Meta).
+  fbp?:       string | null
+  fbc?:       string | null
+  ip?:        string | null
+  userAgent?: string | null
 }
 
 // Deriva first/last/full a partir de name + lastName. Se lastName vier vazio
@@ -199,6 +207,11 @@ function buildIdentityFields(u: WebhookUserData): Record<string, unknown> {
   put('city',    u.city)
   put('state',   u.state)
   put('zip',     u.zip)
+  // Sinais de navegador/clique (Meta CAPI advanced matching).
+  put('fbp',               u.fbp)
+  put('fbc',               u.fbc)
+  put('client_ip_address', u.ip)
+  put('client_user_agent', u.userAgent)
   return fields
 }
 

@@ -66,12 +66,18 @@ export async function registerUser(input: RegisterInput, requestMeta?: {
     // external_id). phone/country/lastName geralmente ainda nulos aqui —
     // são omitidos automaticamente e chegam nos webhooks de depósito.
     sendRegistrationWebhook({
-      id:       user.id,
-      email:    user.email,
-      name:     user.name,
-      lastName: (user as any).lastName ?? null,
-      phone:    (user as any).phone ?? null,
-      country:  (user as any).country ?? null,
+      id:        user.id,
+      email:     user.email,
+      name:      user.name,
+      lastName:  (user as any).lastName ?? null,
+      phone:     (user as any).phone ?? null,
+      country:   (user as any).country ?? null,
+      // Sinais de navegador/clique (Meta CAPI): fbp/fbc dos cookies enviados
+      // pelo client, ip/userAgent do request. Melhoram muito o matching.
+      fbp:       input.tracking?.fbp ?? null,
+      fbc:       input.tracking?.fbc ?? null,
+      ip:        requestMeta?.ip ?? null,
+      userAgent: requestMeta?.userAgent ?? null,
     })
   }).catch(() => { /* dynamic import only fails on bundler weirdness */ })
 

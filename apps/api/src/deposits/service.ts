@@ -481,6 +481,7 @@ export async function confirmDepositById(depositId: string) {
       userId: string; email: string; name: string | null; lastName: string | null;
       phone: string | null; country: string | null;
       city: string | null; state: string | null; zip: string | null;
+      fbp: string | null; fbc: string | null; ip: string | null; userAgent: string | null;
       amount: string; paid_count: bigint;
     }>>`
       SELECT
@@ -493,6 +494,10 @@ export async function confirmDepositById(depositId: string) {
         u.city,
         u.state,
         u.zip,
+        ut.fbp,
+        ut.fbc,
+        ut.ip,
+        ut."userAgent",
         d.amount::text AS amount,
         (
           SELECT COUNT(*)::bigint
@@ -504,6 +509,7 @@ export async function confirmDepositById(depositId: string) {
       FROM deposits d
       JOIN accounts a ON a.id = d."accountId"
       JOIN users    u ON u.id = a."userId"
+      LEFT JOIN user_tracking ut ON ut."userId" = u.id
       WHERE d.id = ${depositId}
       LIMIT 1
     `
@@ -512,17 +518,22 @@ export async function confirmDepositById(depositId: string) {
       const isFirst = Number(row.paid_count) === 1
       const value   = Number(row.amount)
       // Envia o máximo de identidade disponível (email, phone, nome,
-      // external_id, country). Campos vazios são omitidos pelo sender.
+      // external_id, country, localização) + sinais de navegador/clique
+      // (fbp/fbc/ip/userAgent da user_tracking). Vazios são omitidos.
       const userData = {
-        id:       row.userId,
-        email:    row.email,
-        name:     row.name,
-        lastName: row.lastName,
-        phone:    row.phone,
-        country:  row.country,
-        city:     row.city,
-        state:    row.state,
-        zip:      row.zip,
+        id:        row.userId,
+        email:     row.email,
+        name:      row.name,
+        lastName:  row.lastName,
+        phone:     row.phone,
+        country:   row.country,
+        city:      row.city,
+        state:     row.state,
+        zip:       row.zip,
+        fbp:       row.fbp,
+        fbc:       row.fbc,
+        ip:        row.ip,
+        userAgent: row.userAgent,
       }
       const { sendFirstDepositWebhook, sendSubsequentDepositWebhook } =
         await import('../webhooks/service.js')
