@@ -24,7 +24,7 @@ const SLOTS: FileSlot[] = [
   { key: 'selfieUrl',        label: 'Selfie com Documento', shortLabel: 'Selfie', hint: 'Segurando o doc' },
 ]
 
-const MAX_BYTES = 3 * 1024 * 1024  // 3MB per file
+const MAX_BYTES = 8 * 1024 * 1024  // 8MB per file
 const ACCEPT    = 'image/jpeg,image/png,image/webp'
 
 // Modal for the user to upload their 3 KYC documents. Files are read as
@@ -50,7 +50,7 @@ export function KycUploadModal({ onClose, onDone }: Props) {
       return
     }
     if (file.size > MAX_BYTES) {
-      setError(`Arquivo "${file.name}": tamanho máximo 3MB (atual: ${(file.size / 1024 / 1024).toFixed(1)}MB).`)
+      setError(`Arquivo "${file.name}": tamanho máximo 8MB (atual: ${(file.size / 1024 / 1024).toFixed(1)}MB).`)
       return
     }
     const dataUrl = await readAsDataUrl(file)
@@ -76,9 +76,9 @@ export function KycUploadModal({ onClose, onDone }: Props) {
       const status = err?.response?.status
       // Map common failure modes to actionable messages.
       if (code === 'VALIDATION_ERROR') {
-        setError('Algum arquivo é inválido: verifique formato (JPG/PNG/WEBP) e tamanho (até 3MB cada).')
+        setError('Algum arquivo é inválido: verifique formato (JPG/PNG/WEBP) e tamanho (até 8MB cada).')
       } else if (status === 413) {
-        setError('Imagens muito grandes. Reduza a qualidade ou tamanho (até 3MB cada).')
+        setError('Imagens muito grandes. Reduza a qualidade ou tamanho (até 8MB cada).')
       } else if (status === 401) {
         setError('Sessão expirou. Faça login novamente.')
       } else if (!err?.response) {
@@ -129,7 +129,7 @@ export function KycUploadModal({ onClose, onDone }: Props) {
             <div className="overflow-y-auto px-4 sm:px-5 py-4 sm:py-5 flex flex-col gap-4">
               <p className="text-xs text-[#ccc] leading-relaxed">
                 Envie 3 imagens claras e legíveis. Análise em até 48 horas.
-                JPG/PNG/WEBP, até 3MB por foto.
+                JPG/PNG/WEBP, até 8MB por foto.
               </p>
 
               <div className="grid grid-cols-3 gap-2 sm:gap-3">
@@ -248,7 +248,7 @@ function FilePicker({
           <Upload size={18} className="sm:hidden" />
           <Upload size={22} className="hidden sm:block" />
           <span className="text-[10px] sm:text-xs font-semibold">Selecionar</span>
-          <span className="hidden sm:block text-[10px] text-center leading-tight">JPG/PNG/WEBP<br/>até 3MB</span>
+          <span className="hidden sm:block text-[10px] text-center leading-tight">JPG/PNG/WEBP<br/>até 8MB</span>
         </button>
       )}
     </div>

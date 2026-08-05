@@ -17,7 +17,7 @@ import { listTransactions } from '../transactions/service.js'
 import { generateSecret, otpauthUrl, qrCodeDataUrl, verifyTotp } from './twoFactor.js'
 import { prisma } from '../prisma.js'
 
-const KYC_BODY_LIMIT = 10 * 1024 * 1024  // 10MB for the 3 base64 images
+const KYC_BODY_LIMIT = 36 * 1024 * 1024  // 36MB for the 3 base64 images (8MB raw each + base64 overhead + margin)
 
 const REFRESH_COOKIE = 'refresh_token'
 const REFRESH_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
@@ -415,7 +415,7 @@ export async function authRoutes(app: FastifyInstance) {
   })
 
   // ── KYC submission (user-initiated) ──────────────────────────────────────
-  // Bumped bodyLimit because the 3 base64-encoded images can total ~3-5MB.
+  // Bumped bodyLimit — 3 base64-encoded images (8MB raw each) can total ~30MB.
   app.post('/kyc/submit', {
     bodyLimit: KYC_BODY_LIMIT,
     preHandler: [(app as any).authenticate],

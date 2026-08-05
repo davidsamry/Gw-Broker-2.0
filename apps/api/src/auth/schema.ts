@@ -75,10 +75,13 @@ export const changePasswordSchema = z.object({
 })
 
 // KYC: 3 base64 data URLs (data:image/...;base64,XXX). Server stores them
-// as-is in kyc_submissions URL columns. ~2-3MB combined when 3 phone photos.
+// as-is in kyc_submissions URL columns. Frontend caps each file at 8MB;
+// base64 adds ~37% overhead, so 8MB raw ≈ 11MB encoded — limit set with
+// margin. Images are deleted from the DB once the KYC is approved (see
+// admin/kyc/service.ts), so this isn't a long-term storage concern.
 const dataUrlSchema = z.string()
   .regex(/^data:image\/(jpeg|jpg|png|webp);base64,/, 'Apenas imagens JPEG/PNG/WEBP.')
-  .max(4_500_000, 'Imagem muito grande (máx ~3MB cada).')
+  .max(11_500_000, 'Imagem muito grande (máx ~8MB cada).')
 
 export const kycSubmitSchema = z.object({
   documentFrontUrl: dataUrlSchema,
