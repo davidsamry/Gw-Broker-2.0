@@ -12,6 +12,8 @@ const listQuerySchema = z.object({
   // Filtra so' ops de UM usuario — usado pelo drawer "Detalhes do Usuario"
   // na /admin/operacoes pra puxar historico paginado.
   userId:      z.string().trim().min(1).optional(),
+  // Fonte: ALL une trades + copy + compras; TRADE isola so' as binarias.
+  kind:        z.enum(['ALL', 'TRADE', 'COPY', 'COPY_PURCHASE']).optional(),
 })
 
 export async function operationsAdminRoutes(app: FastifyInstance) {

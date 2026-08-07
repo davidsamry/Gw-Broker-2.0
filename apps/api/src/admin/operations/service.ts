@@ -16,18 +16,26 @@ export interface OperationRow {
   assetId:      string
   assetSymbol:  string
   marketSymbol: string | null
-  direction:    'CALL' | 'PUT'
+  // null pra linhas de Copy Trading/compra — não têm direção binária.
+  direction:    'CALL' | 'PUT' | null
   amount:       string
   payout:       number
-  entryPrice:   string
+  // null pra linhas de Copy Trading/compra — não têm preço de entrada/saída.
+  entryPrice:   string | null
   exitPrice:    string | null
   profit:       string | null
-  status:       'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
+  // 'PURCHASE' = compra de acesso a um Copy Trader (débito único, sem
+  // resultado ganhou/perdeu). Só aparece na consulta por usuário.
+  status:       'OPEN' | 'WON' | 'LOST' | 'CANCELLED' | 'PURCHASE'
   expiresAt:    Date
   openedAt:     Date
   closedAt:     Date | null
   /** Computed: round(expiresAt - openedAt) in seconds — for "Timeframe" col */
   timeframeSec: number
+  // TRADE = operação binária normal (tabela operations, comportamento
+  // default quando ausente). COPY = operação copiada (copy_trade_operations).
+  // COPY_PURCHASE = débito de compra de acesso a um trader pago.
+  kind?:        'TRADE' | 'COPY' | 'COPY_PURCHASE'
 }
 
 export interface ListOperationsParams {
@@ -38,6 +46,12 @@ export interface ListOperationsParams {
   accountType?: 'ALL' | 'REAL' | 'DEMO'
   /** Filtra so' as ops de UM usuario especifico (drawer "Detalhes do Usuario") */
   userId?:      string
+  /**
+   * Fonte das linhas. ALL (default) une trades + copy + compras de copy.
+   * TRADE isola so' as operacoes binarias (comportamento pre-copy), util
+   * quando o volume de copy domina a primeira pagina.
+   */
+  kind?:        'ALL' | 'TRADE' | 'COPY' | 'COPY_PURCHASE'
 }
 
 export interface ListOperationsResponse {
@@ -54,62 +68,148 @@ function decimalToString(x: any): string {
   return String(x)
 }
 
+// Monta o SELECT unificado das 3 fontes que impactam o extrato do usuário:
+//
+//   1. operations           → trades binários normais          (kind='TRADE')
+//   2. copy_trade_operations→ operações copiadas (Copy Trading)(kind='COPY')
+//   3. transactions COPY_PURCHASE → débito da compra de acesso (kind='COPY_PURCHASE')
+//
+// As 2 e 3 vivem em tabelas separadas (módulo de copy é isolado, sem FK com
+// operations), então unimos via UNION ALL normalizando as colunas. Copy ops
+// só existem na conta REAL, e o status é mapeado pro vocabulário da tela:
+// PENDING→OPEN, SETTLED+WIN→WON, SETTLED+LOSS→LOST, CANCELLED→CANCELLED.
+function buildUnifiedSql(params: ListOperationsParams): Prisma.Sql {
+  const status      = params.status      && params.status      !== 'ALL' ? params.status      : null
+  const accountType = params.accountType && params.accountType !== 'ALL' ? params.accountType : null
+  const search      = params.search?.trim() ? `%${params.search.trim()}%` : null
+
+  // ── 1) Trades binários ────────────────────────────────────────────────
+  const tradeWhere: Prisma.Sql[] = []
+  if (search)            tradeWhere.push(Prisma.sql`(u.email ILIKE ${search} OR u.name ILIKE ${search} OR o."assetSymbol" ILIKE ${search})`)
+  if (status)            tradeWhere.push(Prisma.sql`o.status = ${status}::"OperationStatus"`)
+  if (accountType)       tradeWhere.push(Prisma.sql`a.type = ${accountType}::"AccountType"`)
+  if (params.userId)     tradeWhere.push(Prisma.sql`u.id = ${params.userId}`)
+  const tradeWhereSql = tradeWhere.length ? Prisma.sql`WHERE ${Prisma.join(tradeWhere, ' AND ')}` : Prisma.empty
+
+  const tradeSql = Prisma.sql`
+    SELECT
+      o.id, o."accountId", a.type::text AS "accountType",
+      u.id AS "userId", u.name AS "userName", u.email AS "userEmail",
+      o."assetId", o."assetSymbol", o."marketSymbol",
+      o.direction::text AS direction,
+      o.amount, o.payout,
+      o."entryPrice"::text AS "entryPrice", o."exitPrice"::text AS "exitPrice",
+      o.profit,
+      o.status::text AS status,
+      o."expiresAt", o."openedAt", o."closedAt",
+      EXTRACT(EPOCH FROM (o."expiresAt" - o."openedAt"))::int AS "timeframeSec",
+      'TRADE' AS kind
+    FROM operations o
+    INNER JOIN accounts a ON a.id = o."accountId"
+    INNER JOIN users    u ON u.id = a."userId"
+    ${tradeWhereSql}
+  `
+
+  const kind = params.kind ?? 'ALL'
+  if (kind === 'TRADE') return tradeSql
+  // Copy só existe em conta REAL — se o filtro pede DEMO, nem entra no UNION.
+  if (accountType === 'DEMO') return tradeSql
+
+  // ── 2) Operações de Copy Trading ──────────────────────────────────────
+  const copyWhere: Prisma.Sql[] = []
+  if (search)        copyWhere.push(Prisma.sql`(u.email ILIKE ${search} OR u.name ILIKE ${search} OR ct.name ILIKE ${search})`)
+  if (params.userId) copyWhere.push(Prisma.sql`u.id = ${params.userId}`)
+  if (status === 'OPEN')      copyWhere.push(Prisma.sql`c.status = 'PENDING'`)
+  if (status === 'CANCELLED') copyWhere.push(Prisma.sql`c.status = 'CANCELLED'`)
+  if (status === 'WON')       copyWhere.push(Prisma.sql`(c.status = 'SETTLED' AND c.result = 'WIN')`)
+  if (status === 'LOST')      copyWhere.push(Prisma.sql`(c.status = 'SETTLED' AND c.result = 'LOSS')`)
+  const copyWhereSql = copyWhere.length ? Prisma.sql`WHERE ${Prisma.join(copyWhere, ' AND ')}` : Prisma.empty
+
+  const copySql = Prisma.sql`
+    SELECT
+      c.id, a.id AS "accountId", 'REAL' AS "accountType",
+      u.id AS "userId", u.name AS "userName", u.email AS "userEmail",
+      ct.id AS "assetId", ct.name AS "assetSymbol", NULL AS "marketSymbol",
+      NULL AS direction,
+      c.amount, 0 AS payout,
+      NULL AS "entryPrice", NULL AS "exitPrice",
+      CASE WHEN c.status = 'SETTLED' THEN c.pnl ELSE NULL END AS profit,
+      CASE
+        WHEN c.status = 'PENDING'   THEN 'OPEN'
+        WHEN c.status = 'CANCELLED' THEN 'CANCELLED'
+        WHEN c.result = 'WIN'       THEN 'WON'
+        ELSE 'LOST'
+      END AS status,
+      c."scheduledAt" AS "expiresAt", c."scheduledAt" AS "openedAt", c."settledAt" AS "closedAt",
+      0 AS "timeframeSec",
+      'COPY' AS kind
+    FROM copy_trade_operations c
+    INNER JOIN users        u  ON u.id = c."userId"
+    INNER JOIN copy_traders ct ON ct.id = c."traderId"
+    INNER JOIN accounts     a  ON a."userId" = u.id AND a.type = 'REAL'::"AccountType"
+    ${copyWhereSql}
+  `
+
+  if (kind === 'COPY') return copySql
+
+  // ── 3) Compras de acesso (débito) ─────────────────────────────────────
+  // Só entram quando não há filtro de status — "PURCHASE" não é um dos
+  // status da tela (não é ganhou/perdeu/aguardando).
+  if (status && kind !== 'COPY_PURCHASE') return Prisma.sql`${tradeSql} UNION ALL ${copySql}`
+
+  const purchaseWhere: Prisma.Sql[] = [Prisma.sql`t.type = 'COPY_PURCHASE'::"TransactionType"`]
+  if (search)        purchaseWhere.push(Prisma.sql`(u.email ILIKE ${search} OR u.name ILIKE ${search} OR t.description ILIKE ${search})`)
+  if (params.userId) purchaseWhere.push(Prisma.sql`u.id = ${params.userId}`)
+  const purchaseWhereSql = Prisma.sql`WHERE ${Prisma.join(purchaseWhere, ' AND ')}`
+
+  const purchaseSql = Prisma.sql`
+    SELECT
+      t.id, t."accountId", a.type::text AS "accountType",
+      u.id AS "userId", u.name AS "userName", u.email AS "userEmail",
+      '' AS "assetId", COALESCE(t.description, 'Compra de Copy Trader') AS "assetSymbol", NULL AS "marketSymbol",
+      NULL AS direction,
+      ABS(t.amount) AS amount, 0 AS payout,
+      NULL AS "entryPrice", NULL AS "exitPrice",
+      t.amount AS profit,
+      'PURCHASE' AS status,
+      t."createdAt" AS "expiresAt", t."createdAt" AS "openedAt", t."createdAt" AS "closedAt",
+      0 AS "timeframeSec",
+      'COPY_PURCHASE' AS kind
+    FROM transactions t
+    INNER JOIN accounts a ON a.id = t."accountId"
+    INNER JOIN users    u ON u.id = a."userId"
+    ${purchaseWhereSql}
+  `
+
+  if (kind === 'COPY_PURCHASE') return purchaseSql
+
+  return Prisma.sql`${tradeSql} UNION ALL ${copySql} UNION ALL ${purchaseSql}`
+}
+
 export async function listAdminOperations(params: ListOperationsParams): Promise<ListOperationsResponse> {
   const page     = Math.max(1, params.page ?? 1)
   const pageSize = Math.min(100, Math.max(5, params.pageSize ?? 25))
   const offset   = (page - 1) * pageSize
 
-  const where: Prisma.Sql[] = []
-  if (params.search) {
-    const q = `%${params.search.trim()}%`
-    where.push(Prisma.sql`(u.email ILIKE ${q} OR u.name ILIKE ${q} OR o."assetSymbol" ILIKE ${q})`)
-  }
-  if (params.status && params.status !== 'ALL') {
-    where.push(Prisma.sql`o.status = ${params.status}::"OperationStatus"`)
-  }
-  if (params.accountType && params.accountType !== 'ALL') {
-    where.push(Prisma.sql`a.type = ${params.accountType}::"AccountType"`)
-  }
-  if (params.userId) {
-    where.push(Prisma.sql`u.id = ${params.userId}`)
-  }
-  const whereSql = where.length
-    ? Prisma.sql`WHERE ${Prisma.join(where, ' AND ')}`
-    : Prisma.empty
+  const unified = buildUnifiedSql(params)
 
   const [rows, countRows] = await Promise.all([
     prisma.$queryRaw<any[]>`
-      SELECT
-        o.id, o."accountId", a.type::text AS "accountType",
-        u.id AS "userId", u.name AS "userName", u.email AS "userEmail",
-        o."assetId", o."assetSymbol", o."marketSymbol",
-        o.direction::text AS direction,
-        o.amount, o.payout, o."entryPrice", o."exitPrice", o.profit,
-        o.status::text AS status,
-        o."expiresAt", o."openedAt", o."closedAt",
-        EXTRACT(EPOCH FROM (o."expiresAt" - o."openedAt"))::int AS "timeframeSec"
-      FROM operations o
-      INNER JOIN accounts a ON a.id = o."accountId"
-      INNER JOIN users    u ON u.id = a."userId"
-      ${whereSql}
-      ORDER BY o."openedAt" DESC
+      SELECT * FROM (${unified}) AS unified
+      ORDER BY "openedAt" DESC
       LIMIT ${pageSize} OFFSET ${offset}
     `,
     prisma.$queryRaw<Array<{ total: bigint }>>`
-      SELECT COUNT(*)::bigint AS total
-      FROM operations o
-      INNER JOIN accounts a ON a.id = o."accountId"
-      INNER JOIN users    u ON u.id = a."userId"
-      ${whereSql}
+      SELECT COUNT(*)::bigint AS total FROM (${unified}) AS unified
     `,
   ])
 
   const operations: OperationRow[] = rows.map((r) => ({
     ...r,
     amount:     decimalToString(r.amount),
-    entryPrice: decimalToString(r.entryPrice),
-    exitPrice:  r.exitPrice != null ? decimalToString(r.exitPrice) : null,
-    profit:     r.profit    != null ? decimalToString(r.profit)    : null,
+    entryPrice: r.entryPrice != null ? decimalToString(r.entryPrice) : null,
+    exitPrice:  r.exitPrice  != null ? decimalToString(r.exitPrice)  : null,
+    profit:     r.profit     != null ? decimalToString(r.profit)     : null,
   }))
 
   return {

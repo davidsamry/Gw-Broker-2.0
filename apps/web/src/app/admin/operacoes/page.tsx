@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Activity, Search, RefreshCw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  ArrowUp, ArrowDown, Eye, X, ChevronDown, Trash2,
+  ArrowUp, ArrowDown, Eye, X, ChevronDown, Trash2, Copy, ShoppingCart,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -20,17 +20,20 @@ interface OpRow {
   assetId:      string
   assetSymbol:  string
   marketSymbol: string | null
-  direction:    'CALL' | 'PUT'
+  direction:    'CALL' | 'PUT' | null
   amount:       string
   payout:       number
-  entryPrice:   string
+  entryPrice:   string | null
   exitPrice:    string | null
   profit:       string | null
-  status:       'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
+  status:       'OPEN' | 'WON' | 'LOST' | 'CANCELLED' | 'PURCHASE'
   expiresAt:    string
   openedAt:     string
   closedAt:     string | null
   timeframeSec: number
+  // TRADE = trade binário (default). COPY = operação copiada.
+  // COPY_PURCHASE = débito da compra de acesso a um trader pago.
+  kind?:        'TRADE' | 'COPY' | 'COPY_PURCHASE'
 }
 
 interface ListResponse {
@@ -42,6 +45,7 @@ interface ListResponse {
 
 type StatusFilter      = 'ALL' | 'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
 type AccountTypeFilter = 'ALL' | 'REAL' | 'DEMO'
+type KindFilter        = 'ALL' | 'TRADE' | 'COPY' | 'COPY_PURCHASE'
 
 const PAGE_SIZE = 25
 
@@ -57,6 +61,7 @@ export default function AdminOperationsPage() {
   // Default to REAL — admin's main interest is real-money activity; DEMO ops
   // are visible via the filter but don't pollute the initial view.
   const [accountType, setAccountType] = useState<AccountTypeFilter>('REAL')
+  const [kind, setKind]               = useState<KindFilter>('ALL')
   const [page, setPage]               = useState(1)
   const [viewing, setViewing]         = useState<OpRow | null>(null)
   // Drawer de detalhes do usuario (mesmo componente usado em /admin/usuarios).
@@ -74,6 +79,7 @@ export default function AdminOperationsPage() {
       if (debouncedSearch.trim())   params.search      = debouncedSearch.trim()
       if (status !== 'ALL') params.status      = status
       if (accountType !== 'ALL') params.accountType = accountType
+      if (kind !== 'ALL') params.kind = kind
       const res = await api.get<ListResponse>('/admin/operations', { params })
       setData(res.data)
     } catch {
@@ -81,9 +87,9 @@ export default function AdminOperationsPage() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, status, accountType, page])
+  }, [debouncedSearch, status, accountType, kind, page])
 
-  useEffect(() => { setPage(1) }, [debouncedSearch, status, accountType])
+  useEffect(() => { setPage(1) }, [debouncedSearch, status, accountType, kind])
   useEffect(() => { load() }, [load])
 
   async function handleCancel(op: OpRow) {
@@ -182,6 +188,10 @@ export default function AdminOperationsPage() {
         <SelectField label="Carteira" value={accountType} onChange={(v) => setAccountType(v as AccountTypeFilter)} options={[
           ['ALL', 'Todas'], ['REAL', 'Real'], ['DEMO', 'Demo'],
         ]} />
+
+        <SelectField label="Tipo" value={kind} onChange={(v) => setKind(v as KindFilter)} options={[
+          ['ALL', 'Todos'], ['TRADE', 'Trades'], ['COPY', 'Copy Trading'], ['COPY_PURCHASE', 'Compras de Copy'],
+        ]} />
       </div>
 
       {error && (
@@ -216,10 +226,15 @@ export default function AdminOperationsPage() {
                 <tr><td colSpan={11} className="py-12 text-center text-sm text-[#8b8f9a]">Nenhuma operação encontrada.</td></tr>
               ) : (
                 data?.operations.map((op) => {
+                  const isCopy     = op.kind === 'COPY'
+                  const isPurchase = op.kind === 'COPY_PURCHASE'
                   const isUp   = op.direction === 'CALL'
                   const stake  = parseFloat(op.amount)
                   const profit = parseFloat(op.profit ?? '0')
+                  // Copy e compra já trazem o valor exato aplicado no saldo em
+                  // `profit` (pnl / débito). Trade binário usa a regra padrão.
                   const gain   =
+                    isCopy || isPurchase ? (op.profit != null ? profit : null) :
                     op.status === 'WON'  ? profit :
                     op.status === 'LOST' ? -stake :
                     null
@@ -240,7 +255,9 @@ export default function AdminOperationsPage() {
                         {op.userEmail}
                       </td>
                       <td className="px-3 py-3 text-[#8b8f9a]">{formatDateTime(op.openedAt)}</td>
-                      <td className="px-3 py-3 text-white">{formatTimeframe(op.timeframeSec)}</td>
+                      <td className="px-3 py-3 text-white">
+                        {isCopy || isPurchase ? '—' : formatTimeframe(op.timeframeSec)}
+                      </td>
                       <td className="px-3 py-3 text-right text-white">R$ {fmtBRL(op.amount)}</td>
                       <td className={cn('px-3 py-3 text-right font-semibold',
                         gain == null ? 'text-[#8b8f9a]' : gain >= 0 ? 'text-emerald-400' : 'text-red-400')}>
@@ -250,7 +267,17 @@ export default function AdminOperationsPage() {
                         <AccountChip type={op.accountType} />
                       </td>
                       <td className="px-3 py-3">
-                        <DirectionChip up={isUp} />
+                        {isCopy ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border w-fit bg-purple-500/15 text-purple-400 border-purple-500/40">
+                            <Copy size={9} /> COPY
+                          </span>
+                        ) : isPurchase ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border w-fit bg-blue-500/15 text-blue-400 border-blue-500/40">
+                            <ShoppingCart size={9} /> COMPRA
+                          </span>
+                        ) : (
+                          <DirectionChip up={isUp} />
+                        )}
                       </td>
                       <td className="px-3 py-3 text-white font-mono text-[11px]">{op.assetSymbol}</td>
                       <td className="px-3 py-3"><StatusChip status={op.status} /></td>
@@ -260,17 +287,21 @@ export default function AdminOperationsPage() {
                             <Eye size={13} />
                           </IconBtn>
                           <IconBtn
-                            title={op.status === 'OPEN' ? 'Cancelar e devolver saldo' : 'Apenas operações em aberto podem ser canceladas'}
+                            title={
+                              isCopy || isPurchase ? 'Copy Trading não é cancelável por aqui'
+                              : op.status === 'OPEN' ? 'Cancelar e devolver saldo'
+                              : 'Apenas operações em aberto podem ser canceladas'
+                            }
                             onClick={() => handleCancel(op)}
-                            disabled={op.status !== 'OPEN' || cancellingId === op.id}
+                            disabled={isCopy || isPurchase || op.status !== 'OPEN' || cancellingId === op.id}
                             tone="red"
                           >
                             <X size={13} />
                           </IconBtn>
                           <IconBtn
-                            title="Excluir permanentemente (reverte saldo)"
+                            title={isCopy || isPurchase ? 'Copy Trading não é excluível por aqui' : 'Excluir permanentemente (reverte saldo)'}
                             onClick={() => handleDelete(op)}
-                            disabled={deletingId === op.id}
+                            disabled={isCopy || isPurchase || deletingId === op.id}
                             tone="red"
                           >
                             <Trash2 size={13} />
@@ -335,7 +366,7 @@ function SelectField({ label, value, onChange, options }: {
         className="h-9 bg-[#1a1e2a] border border-[#1f232e] rounded-lg pl-3 pr-8 text-xs text-white outline-none focus:border-emerald-500/50 appearance-none cursor-pointer"
       >
         {options.map(([v, lbl]) => (
-          <option key={v} value={v}>{label === 'Carteira' || label === 'Status' ? `${label}: ${lbl}` : lbl}</option>
+          <option key={v} value={v}>{`${label}: ${lbl}`}</option>
         ))}
       </select>
       <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#8b8f9a] pointer-events-none" />
@@ -377,6 +408,7 @@ function StatusChip({ status }: { status: OpRow['status'] }) {
     WON:       { label: 'Ganhou',     tone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40' },
     LOST:      { label: 'Perdeu',     tone: 'bg-red-500/15 text-red-400 border-red-500/40' },
     CANCELLED: { label: 'Cancelada',  tone: 'bg-[#1a1e2a] text-[#8b8f9a] border-[#1f232e]' },
+    PURCHASE:  { label: 'Compra',     tone: 'bg-blue-500/15 text-blue-400 border-blue-500/40' },
   }
   const cfg = map[status]
   return (
@@ -430,12 +462,23 @@ function ViewModal({ op, onClose }: { op: OpRow; onClose: () => void }) {
           <DetailRow label="Usuário"       value={op.userName} />
           <DetailRow label="Email"         value={op.userEmail} truncate />
           <DetailRow label="Carteira"      value={<AccountChip type={op.accountType} />} />
-          <DetailRow label="Direção"       value={<DirectionChip up={op.direction === 'CALL'} />} />
-          <DetailRow label="Mercado"       value={op.assetSymbol} mono />
-          <DetailRow label="Timeframe"     value={formatTimeframe(op.timeframeSec)} />
-          <DetailRow label="Apostado"      value={`R$ ${fmtBRL(op.amount)}`} />
-          <DetailRow label="Payout"        value={`${op.payout}%`} />
-          <DetailRow label="Preço entrada" value={op.entryPrice} mono />
+          <DetailRow
+            label="Tipo"
+            value={
+              op.kind === 'COPY'          ? 'Copy Trading'
+              : op.kind === 'COPY_PURCHASE' ? 'Compra de Copy Trader'
+              : <DirectionChip up={op.direction === 'CALL'} />
+            }
+          />
+          <DetailRow
+            label={op.kind === 'TRADE' || op.kind == null ? 'Mercado' : 'Trader'}
+            value={op.assetSymbol}
+            mono
+          />
+          <DetailRow label="Timeframe"     value={op.kind === 'TRADE' || op.kind == null ? formatTimeframe(op.timeframeSec) : '—'} />
+          <DetailRow label="Valor"         value={`R$ ${fmtBRL(op.amount)}`} />
+          <DetailRow label="Payout"        value={op.kind === 'TRADE' || op.kind == null ? `${op.payout}%` : '—'} />
+          <DetailRow label="Preço entrada" value={op.entryPrice ?? '—'} mono />
           <DetailRow label="Preço saída"   value={op.exitPrice ?? '—'} mono />
           <DetailRow label="Aberta em"     value={formatDateTime(op.openedAt)} />
           <DetailRow label="Expira em"     value={formatDateTime(op.expiresAt)} />

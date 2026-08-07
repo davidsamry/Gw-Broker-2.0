@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   X, ArrowUp, ArrowDown, ExternalLink, Trash2, Loader2,
-  TrendingDown, TrendingUp, DollarSign, Globe,
+  TrendingDown, TrendingUp, DollarSign, Globe, Copy, ShoppingCart,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -72,13 +72,16 @@ interface UserSummary {
 interface OperationRow {
   id:           string
   assetSymbol:  string
-  direction:    'CALL' | 'PUT'
+  direction:    'CALL' | 'PUT' | null
   amount:       string
-  entryPrice:   string
+  entryPrice:   string | null
   exitPrice:    string | null
   profit:       string | null
-  status:       'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
+  status:       'OPEN' | 'WON' | 'LOST' | 'CANCELLED' | 'PURCHASE'
   openedAt:     string
+  // TRADE = trade binário (default). COPY = operação copiada.
+  // COPY_PURCHASE = débito da compra de acesso a um trader pago.
+  kind?:        'TRADE' | 'COPY' | 'COPY_PURCHASE'
 }
 
 interface OpsListResponse {
@@ -497,10 +500,15 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
                         <tr><td colSpan={9} className="py-10 text-center text-[#8b8f9a]">Nenhuma operação encontrada.</td></tr>
                       ) : (
                         ops?.operations.map(op => {
+                          const isCopy     = op.kind === 'COPY'
+                          const isPurchase = op.kind === 'COPY_PURCHASE'
                           const isUp   = op.direction === 'CALL'
                           const stake  = parseFloat(op.amount)
                           const profit = parseFloat(op.profit ?? '0')
+                          // Copy/compra já trazem o valor exato aplicado no
+                          // saldo em `profit` (pnl / débito).
                           const pnl    =
+                            isCopy || isPurchase ? (op.profit != null ? profit : null) :
                             op.status === 'WON'  ? profit :
                             op.status === 'LOST' ? -stake :
                             null
@@ -510,18 +518,28 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
                               <td className="px-3 py-2.5 text-[#8b8f9a] font-mono">{formatTime(op.openedAt)}</td>
                               <td className="px-3 py-2.5 text-white font-mono">{op.assetSymbol}</td>
                               <td className="px-3 py-2.5">
-                                <span className={cn(
-                                  'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border w-fit',
-                                  isUp
-                                    ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40'
-                                    : 'bg-red-500/15 text-red-400 border-red-500/40'
-                                )}>
-                                  {isUp ? <ArrowUp size={9} /> : <ArrowDown size={9} />}
-                                  {isUp ? 'Acima' : 'Abaixo'}
-                                </span>
+                                {isCopy ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border w-fit bg-purple-500/15 text-purple-400 border-purple-500/40">
+                                    <Copy size={9} /> Copy
+                                  </span>
+                                ) : isPurchase ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border w-fit bg-blue-500/15 text-blue-400 border-blue-500/40">
+                                    <ShoppingCart size={9} /> Compra
+                                  </span>
+                                ) : (
+                                  <span className={cn(
+                                    'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border w-fit',
+                                    isUp
+                                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40'
+                                      : 'bg-red-500/15 text-red-400 border-red-500/40'
+                                  )}>
+                                    {isUp ? <ArrowUp size={9} /> : <ArrowDown size={9} />}
+                                    {isUp ? 'Acima' : 'Abaixo'}
+                                  </span>
+                                )}
                               </td>
                               <td className="px-3 py-2.5 text-right text-white">R$ {fmtBRL(stake)}</td>
-                              <td className="px-3 py-2.5 text-right text-white font-mono">{op.entryPrice}</td>
+                              <td className="px-3 py-2.5 text-right text-white font-mono">{op.entryPrice ?? '—'}</td>
                               <td className="px-3 py-2.5 text-right text-white font-mono">{op.exitPrice ?? '—'}</td>
                               <td className="px-3 py-2.5">
                                 {op.status === 'OPEN' && (
@@ -542,6 +560,11 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
                                 {op.status === 'CANCELLED' && (
                                   <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border bg-[#1a1e2a] text-[#8b8f9a] border-[#1f232e]">
                                     Cancelada
+                                  </span>
+                                )}
+                                {op.status === 'PURCHASE' && (
+                                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border bg-blue-500/15 text-blue-400 border-blue-500/40">
+                                    Compra
                                   </span>
                                 )}
                               </td>
