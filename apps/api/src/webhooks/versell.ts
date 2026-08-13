@@ -78,7 +78,15 @@ export async function versellWebhookRoutes(app: FastifyInstance) {
     }
 
     // ── Camada 2: header X-Webhook-Secret (obrigatório) ─────────────────
-    const expectedHeader = process.env.VERSELL_WEBHOOK_HEADER_SECRET || expectedPath
+    // Ignora placeholder não substituído (ex.: "<o secret que a Versell...>"):
+    // sem isso, o valor de exemplo viraria o secret esperado e TODOS os
+    // webhooks seriam rejeitados com 401, sem depósito nenhum confirmar.
+    const headerSecretEnv = (process.env.VERSELL_WEBHOOK_HEADER_SECRET ?? '').trim()
+    const headerSecretOk  = headerSecretEnv.length > 0 && !headerSecretEnv.startsWith('<')
+    if (headerSecretEnv.length > 0 && !headerSecretOk) {
+      req.log.warn('[VERSELL] VERSELL_WEBHOOK_HEADER_SECRET parece um placeholder — usando o path-secret como fallback')
+    }
+    const expectedHeader = headerSecretOk ? headerSecretEnv : expectedPath
     const got = req.headers['x-webhook-secret']
     const gotStr = typeof got === 'string' ? got : ''
     if (!gotStr || !timingSafeEq(gotStr, expectedHeader)) {
