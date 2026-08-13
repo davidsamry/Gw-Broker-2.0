@@ -229,7 +229,10 @@ async function fetchAccessToken(): Promise<string> {
     cfg.tls,
   )
 
-  if (res.status !== 200) {
+  // A Versell responde 201 Created (não 200) no /oauth/token — aceitamos
+  // qualquer 2xx. Restringir a 200 fazia toda cobrança falhar com
+  // VERSELL_REQUEST_FAILED mesmo com a autenticação bem-sucedida.
+  if (res.status < 200 || res.status >= 300) {
     const err = parseApiError(res.status, res.body)
     console.error(`[VERSELL] Authentication error — HTTP ${res.status} (${err.code})`)
     throw err
