@@ -157,9 +157,21 @@ function httpsRequest(
     })
     req.on('error', (err: any) => {
       // Erros de TLS/handshake viram código próprio pra o admin diagnosticar.
+      // UNABLE_TO_VERIFY_LEAF_SIGNATURE / SELF_SIGNED_* aparecem quando a CA
+      // da Versell (onz.software, privada) não está em VERSELL_CA_PATH — o
+      // servidor deles não envia a cadeia completa no handshake.
       const code = String(err?.code ?? '')
-      if (code.includes('CERT') || code.includes('SSL') || code === 'EPROTO') {
-        reject(new VersellError(`Falha de mTLS/TLS: ${code}`, 'VERSELL_MTLS_FAILED'))
+      const isTls = code.includes('CERT') || code.includes('SSL') || code === 'EPROTO'
+                 || code.includes('VERIFY') || code.includes('SELF_SIGNED')
+                 || code.includes('CHAIN')
+      if (isTls) {
+        reject(new VersellError(
+          `Falha de mTLS/TLS: ${code}` +
+          (code.includes('VERIFY') || code.includes('SELF_SIGNED')
+            ? ' — configure VERSELL_CA_PATH com a CA da Versell (onz.software)'
+            : ''),
+          'VERSELL_MTLS_FAILED',
+        ))
       } else {
         reject(new VersellError(`Falha de rede: ${code || 'unknown'}`, 'VERSELL_NETWORK_ERROR'))
       }
