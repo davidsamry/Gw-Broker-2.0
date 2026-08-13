@@ -3,7 +3,8 @@ import { sendEmailAsync } from '../email/service.js'
 import { getSettings } from '../settings/service.js'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
-import { createCashin, createCryptoCashin, getBrlToUsdtRate, isConfigured } from '../payments/bspay.js'
+import { createCryptoCashin, getBrlToUsdtRate, isConfigured } from '../payments/bspay.js'
+import { getActiveProvider } from '../payments/gateway.js'
 import type { CreatePixDepositInput } from './schema.js'
 import {
   validateCodeForUser, createPendingGrantForDeposit, activateForPaidDeposit,
@@ -33,7 +34,13 @@ function buildPostbackUrl(): string {
 // The user's balance is NOT credited here — it's credited by the webhook
 // when the gateway confirms payment.
 export async function createPixDeposit(userId: string, input: CreatePixDepositInput): Promise<CreatedDeposit> {
-  if (!isConfigured()) throw new Error('BSPAY_NOT_CONFIGURED')
+  // Gateway ativo (admin escolhe em /admin/configuracoes). SEM fallback:
+  // se o selecionado não estiver configurado, o erro sobe — nunca caímos
+  // silenciosamente no outro provedor.
+  const provider = getActiveProvider()
+  if (!provider.isConfigured()) {
+    throw new Error(provider.id === 'versell' ? 'VERSELL_NOT_CONFIGURED' : 'BSPAY_NOT_CONFIGURED')
+  }
 
   // Find the user's REAL account + display name (BSPay shows the payer
   // name on the bank app side).
@@ -103,11 +110,13 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
   // Insert the deposit row first — gives us a stable id to use as external_id
   // with the gateway. If the gateway call below fails, we leave the PENDING
   // row in place (won't credit the user — only the webhook can do that).
+  // paymentGateway é gravado JUNTO com a criação e nunca muda depois: cada
+  // depósito fica permanentemente associado ao gateway que o originou.
   await prisma.$executeRaw`
-    INSERT INTO deposits (id, "accountId", amount, method, status, "createdAt", "updatedAt")
+    INSERT INTO deposits (id, "accountId", amount, method, status, "paymentGateway", "createdAt", "updatedAt")
     VALUES (
       ${depositId}, ${accountId}, ${amountDec},
-      'PIX'::"DepositMethod", 'PENDING'::"DepositStatus", NOW(), NOW()
+      'PIX'::"DepositMethod", 'PENDING'::"DepositStatus", ${provider.id}, NOW(), NOW()
     )
   `
 
@@ -130,25 +139,27 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
     }
   }
 
-  // Call BSPay. On failure, mark the deposit FAILED + bubble the error
-  // so the user sees something actionable.
+  // Chama o gateway ATIVO (BSPay ou Versell). Em falha, marca FAILED e
+  // propaga o erro — nenhum fallback automático entre gateways.
   let qrcode:     string
   let providerId: string | null
   try {
-    const cashin = await createCashin({
-      amount:        input.amount,
-      externalId:    depositId,
-      postbackUrl:   buildPostbackUrl(),
+    const charge = await provider.createPixCharge({
+      depositId,
+      // String decimal com 2 casas — evita float em valor financeiro.
+      amount:        amountDec.toFixed(2),
       payerDocument: input.cpf,
       payerName,
+      description:   'Depósito VX Global',
     })
-    qrcode     = cashin.qrcode
-    providerId = cashin.providerId
+    qrcode     = charge.qrcode
+    providerId = charge.providerId
   } catch (err: any) {
     await prisma.$executeRaw`
       UPDATE deposits SET status = 'FAILED'::"DepositStatus", "updatedAt" = NOW()
       WHERE id = ${depositId}
     `
+    console.error(`[${provider.id.toUpperCase()}] charge creation failed — deposit=${depositId} code=${err?.code ?? err?.message?.slice(0, 60)}`)
     throw err
   }
 

@@ -26,6 +26,9 @@ export interface PlatformSettings {
   // Gatilho alternativo (OR): % do rollover atingido que também dispara a
   // auto-Liquidez (mesmo sem lucro). Default 50%. 0 desativa.
   autoLiquidityRolloverPct: number
+  // Gateway usado para criar NOVAS cobranças PIX: 'bspay' | 'versell'.
+  // Não afeta depósitos já criados nem o processamento de webhooks.
+  depositGateway:          string
   updatedAt:               Date
 }
 
@@ -45,6 +48,7 @@ const DEFAULTS: PlatformSettings = {
   safeModeEnabled:        false,
   autoLiquidityProfitPct: 20,
   autoLiquidityRolloverPct: 50,
+  depositGateway:         'bspay',
   updatedAt:              new Date(0),
 }
 
@@ -74,6 +78,9 @@ export async function refreshSettingsCache(): Promise<PlatformSettings> {
       // primeiro deploy; default 20 garante fallback útil.
       autoLiquidityProfitPct: (row as any).autoLiquidityProfitPct ?? 20,
       autoLiquidityRolloverPct: (row as any).autoLiquidityRolloverPct ?? 50,
+      // Default 'bspay' preserva o comportamento de produção caso o client
+      // Prisma esteja stale no primeiro deploy da migration.
+      depositGateway:         (row as any).depositGateway === 'versell' ? 'versell' : 'bspay',
       updatedAt:              row.updatedAt,
     }
   } catch (err) {
@@ -102,6 +109,7 @@ export interface UpdateSettingsInput {
   safeModeEnabled?:        boolean
   autoLiquidityProfitPct?: number
   autoLiquidityRolloverPct?: number
+  depositGateway?:         string
 }
 
 export async function updateSettings(input: UpdateSettingsInput): Promise<PlatformSettings> {

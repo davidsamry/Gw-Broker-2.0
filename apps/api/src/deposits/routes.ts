@@ -20,7 +20,7 @@ export async function depositRoutes(app: FastifyInstance) {
       const deposit = await createPixDeposit(userId, parsed.data)
       return reply.status(201).send({ deposit })
     } catch (err: any) {
-      if (err.message === 'BSPAY_NOT_CONFIGURED') {
+      if (err.message === 'BSPAY_NOT_CONFIGURED' || err.code === 'VERSELL_NOT_CONFIGURED') {
         return reply.status(503).send({ error: 'PAYMENT_GATEWAY_UNAVAILABLE' })
       }
       if (err.message === 'REAL_ACCOUNT_NOT_FOUND') {
@@ -28,6 +28,15 @@ export async function depositRoutes(app: FastifyInstance) {
       }
       if (err.message?.startsWith('BSPAY_CASHIN_FAILED')) {
         req.log.error({ err }, 'BSPay cashin failed')
+        return reply.status(502).send({ error: 'PAYMENT_GATEWAY_ERROR' })
+      }
+      // Erros da Versell (VersellError.code). Nunca logamos credenciais —
+      // apenas code + detail já sanitizados pelo client.
+      if (typeof err.code === 'string' && err.code.startsWith('VERSELL_')) {
+        req.log.error(
+          { code: err.code, httpStatus: err.httpStatus, detail: err.detail },
+          '[VERSELL] PIX charge creation failed',
+        )
         return reply.status(502).send({ error: 'PAYMENT_GATEWAY_ERROR' })
       }
       // Fase B1: bonus validation errors raised by createPixDeposit when

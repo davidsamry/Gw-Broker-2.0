@@ -20,6 +20,8 @@ interface DepositRow {
   bonus:      string | null
   method:     string
   externalId: string | null
+  /** Gateway que originou o depósito. Antigos (pré multi-gateway) = 'bspay'. */
+  paymentGateway?: string
   status:     'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED'
   isFake:     boolean
   notes:      string | null
@@ -199,6 +201,7 @@ export default function AdminDepositsPage() {
                 <th className="text-left  px-4 py-3">Nome</th>
                 <th className="text-right px-3 py-3">Valor</th>
                 <th className="text-right px-3 py-3">Bônus</th>
+                <th className="text-left  px-3 py-3">Gateway</th>
                 <th className="text-left  px-3 py-3">Status</th>
                 <th className="text-left  px-3 py-3">Data</th>
                 <th className="text-center px-3 py-3">Fake</th>
@@ -207,9 +210,9 @@ export default function AdminDepositsPage() {
             </thead>
             <tbody>
               {loading && !data ? (
-                <tr><td colSpan={7} className="py-12 text-center text-sm text-[#8b8f9a]">Carregando…</td></tr>
+                <tr><td colSpan={8} className="py-12 text-center text-sm text-[#8b8f9a]">Carregando…</td></tr>
               ) : data && data.deposits.length === 0 ? (
-                <tr><td colSpan={7} className="py-12 text-center text-sm text-[#8b8f9a]">
+                <tr><td colSpan={8} className="py-12 text-center text-sm text-[#8b8f9a]">
                   Nenhum depósito encontrado.
                 </td></tr>
               ) : (
@@ -224,6 +227,9 @@ export default function AdminDepositsPage() {
                       {d.bonus && parseFloat(d.bonus) > 0
                         ? <span className="text-emerald-400 font-semibold">+R$ {fmtBRL(d.bonus)}</span>
                         : <span className="text-[#8b8f9a]">—</span>}
+                    </td>
+                    <td className="px-3 py-3">
+                      <GatewayChip gateway={d.paymentGateway} externalId={d.externalId} />
                     </td>
                     <td className="px-3 py-3"><StatusChip status={d.status} /></td>
                     <td className="px-3 py-3 text-[#8b8f9a]">{formatDateTime(d.createdAt)}</td>
@@ -301,6 +307,26 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
     >
       {children}
     </button>
+  )
+}
+
+// Gateway que processou o depósito. Registros antigos vêm sem o campo e são
+// exibidos como BSPay (mesma regra do backend). O txid/id do provedor entra
+// no tooltip pra conciliação rápida.
+function GatewayChip({ gateway, externalId }: { gateway?: string; externalId: string | null }) {
+  const isVersell = gateway === 'versell'
+  return (
+    <span
+      title={externalId ? `ID no gateway: ${externalId}` : 'Sem ID do gateway'}
+      className={cn(
+        'inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border',
+        isVersell
+          ? 'bg-violet-500/15 text-violet-300 border-violet-500/40'
+          : 'bg-sky-500/15 text-sky-300 border-sky-500/40',
+      )}
+    >
+      {isVersell ? 'Versell' : 'BSPay'}
+    </span>
   )
 }
 

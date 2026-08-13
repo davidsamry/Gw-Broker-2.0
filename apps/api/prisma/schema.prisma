@@ -339,6 +339,11 @@ model Deposit {
   bonus       Decimal?       @db.Decimal(18, 2)  // promotional bonus credited on payment
   method      DepositMethod  @default(PIX)
   externalId  String?        // gateway transaction reference
+  // Gateway que ORIGINOU este depósito: 'bspay' | 'versell'. NULL = registros
+  // antigos (pré-multi-gateway) — tratados como BSPay por compatibilidade.
+  // Imutável após a criação: trocar o gateway ativo NÃO altera depósitos
+  // existentes, e cada webhook só processa os depósitos do seu próprio gateway.
+  paymentGateway String?
   status      DepositStatus  @default(PENDING)
   isFake      Boolean        @default(false)     // admin marker: test/manual deposit
   notes       String?
@@ -359,6 +364,7 @@ model Deposit {
   @@index([status, createdAt])
   @@index([accountId, status])
   @@index([cryptoTxHash])  // pra lookup rapido no webhook
+  @@index([externalId])    // lookup do webhook Versell por txid
   @@map("deposits")
 }
 
@@ -864,6 +870,12 @@ model PlatformSettings {
   // auto-Liquidez + bloqueio de Cripto, mesmo sem atingir o lucro acima.
   // Default 50 = quando rolloverProgress >= rolloverRequired * 0.50. 0 desativa.
   autoLiquidityRolloverPct Int @default(50)
+
+  // Gateway ativo para NOVOS depósitos PIX: 'bspay' | 'versell'.
+  // Só afeta cobranças novas — depósitos existentes mantêm o gateway em que
+  // foram criados (deposits.paymentGateway) e seus webhooks seguem funcionando
+  // independentemente do que estiver selecionado aqui.
+  depositGateway    String   @default("bspay")
 
   // Feature toggles
   copyTradeEnabled  Boolean  @default(true)

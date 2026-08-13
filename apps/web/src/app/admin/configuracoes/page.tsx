@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Settings, Save, RefreshCw, Check, AlertCircle, Loader2,
-  Banknote, TrendingUp, BarChart2, Timer, Copy, Shield, ShieldCheck,
+  Banknote, TrendingUp, BarChart2, Timer, Copy, Shield, ShieldCheck, CreditCard,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -27,6 +27,8 @@ interface PlatformSettings {
   safeModeEnabled:        boolean
   autoLiquidityProfitPct: number
   autoLiquidityRolloverPct: number
+  // Gateway ativo para NOVAS cobranças PIX. Não altera depósitos existentes.
+  depositGateway:         'bspay' | 'versell'
 }
 
 interface Response { settings: PlatformSettings }
@@ -203,6 +205,15 @@ export default function AdminConfiguracoesPage() {
             />
           </Card>
 
+          {/* Gateway de Depósito — full row. Só UM ativo por vez; a troca
+              afeta apenas cobranças NOVAS. */}
+          <div className="md:col-span-2">
+            <GatewayCard
+              value={form.depositGateway}
+              onChange={(v) => patch('depositGateway', v)}
+            />
+          </div>
+
           {/* Modo Seguro (Anti-DevTools) — full row, status banner + toggle */}
           <div className="md:col-span-2">
             <SafeModeCard
@@ -213,6 +224,78 @@ export default function AdminConfiguracoesPage() {
 
         </div>
       )}
+    </div>
+  )
+}
+
+// Gateway de Depósito — seleção exclusiva (radio) de qual provedor recebe
+// as NOVAS cobranças PIX. Depósitos já criados mantêm o gateway de origem e
+// os webhooks dos dois provedores seguem ativos.
+function GatewayCard({ value, onChange }: {
+  value:    'bspay' | 'versell'
+  onChange: (v: 'bspay' | 'versell') => void
+}) {
+  const OPTIONS: { id: 'bspay' | 'versell'; name: string; desc: string }[] = [
+    { id: 'bspay',   name: 'BSPay',   desc: 'Gateway atual em produção' },
+    { id: 'versell', name: 'Versell', desc: 'Pix via OAuth2 + mTLS' },
+  ]
+  return (
+    <div className="rounded-xl bg-[#1a1f2e] border border-[#2a2e3b] p-5 flex flex-col gap-4">
+      <div className="flex items-start gap-3">
+        <CreditCard size={20} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+        <div>
+          <h2 className="text-sm font-bold text-white">Gateway de Depósito Ativo</h2>
+          <p className="text-xs text-[#8b8f9a] mt-1 leading-relaxed">
+            Define por qual provedor os <strong>novos</strong> depósitos PIX serão gerados.
+            Apenas um pode ficar ativo por vez.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {OPTIONS.map((o) => {
+          const active = value === o.id
+          return (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => onChange(o.id)}
+              className={cn(
+                'text-left rounded-lg border px-4 py-3 transition-colors',
+                active
+                  ? 'border-emerald-500/60 bg-emerald-500/10'
+                  : 'border-[#2a2e3b] bg-[#151925] hover:border-[#3a3f50]',
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <span className={cn(
+                  'w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0',
+                  active ? 'border-emerald-400' : 'border-[#4a4f60]',
+                )}>
+                  {active && <span className="w-2 h-2 rounded-full bg-emerald-400" />}
+                </span>
+                <span className={cn('text-sm font-bold', active ? 'text-emerald-400' : 'text-white')}>
+                  {o.name}
+                </span>
+                {active && (
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wide text-emerald-400">
+                    Ativo
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-[#8b8f9a] mt-1 ml-6">{o.desc}</div>
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-3">
+        <ul className="text-[11px] text-[#9aa3b6] space-y-1 leading-relaxed">
+          <li>• A troca vale apenas para <strong>novos</strong> depósitos — os já criados continuam no gateway de origem.</li>
+          <li>• Os webhooks dos dois gateways permanecem ativos: depósitos pendentes antigos continuam sendo confirmados normalmente.</li>
+          <li>• Não há fallback automático. Se o gateway ativo falhar, o depósito retorna erro (registrado nos logs).</li>
+        </ul>
+      </div>
     </div>
   )
 }

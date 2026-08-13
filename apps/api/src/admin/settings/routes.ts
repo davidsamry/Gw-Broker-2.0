@@ -24,6 +24,9 @@ const updateSchema = z.object({
   // % do rollover atingido que também dispara auto-Liquidez (OR com o lucro).
   // 0 desativa; cap 100 (não faz sentido exigir > 100% do rollover).
   autoLiquidityRolloverPct: z.number().int().min(0).max(100).optional(),
+  // Gateway ativo para NOVAS cobranças PIX. Enum fechado — nada além
+  // desses dois valores chega ao banco.
+  depositGateway:         z.enum(['bspay', 'versell']).optional(),
 }).refine(
   (v) => Object.values(v).some((x) => x !== undefined),
   { message: 'Envie pelo menos um campo.' },

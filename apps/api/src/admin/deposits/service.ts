@@ -15,6 +15,8 @@ export interface DepositRow {
   bonus:      string | null
   method:     string
   externalId: string | null
+  /** 'bspay' | 'versell'. Registros antigos (NULL no banco) viram 'bspay'. */
+  paymentGateway: string
   status:     'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED'
   isFake:     boolean
   notes:      string | null
@@ -74,7 +76,10 @@ export async function listAdminDeposits(params: ListDepositsParams): Promise<Lis
         d.id, d."accountId",
         u.id AS "userId", u.name AS "userName", u.email AS "userEmail",
         d.amount, d.bonus, d.method::text AS method,
-        d."externalId", d.status::text AS status,
+        d."externalId",
+        -- NULL = depósito anterior ao multi-gateway → BSPay (compatibilidade).
+        COALESCE(d."paymentGateway", 'bspay') AS "paymentGateway",
+        d.status::text AS status,
         d."isFake", d.notes,
         d."createdAt", d."paidAt"
       FROM deposits d

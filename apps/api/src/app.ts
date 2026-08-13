@@ -13,6 +13,7 @@ import { transactionRoutes } from './transactions/routes.js'
 import { adminRoutes } from './admin/routes.js'
 import { depositRoutes } from './deposits/routes.js'
 import { bspayWebhookRoutes } from './webhooks/bspay.js'
+import { versellWebhookRoutes } from './webhooks/versell.js'
 import { ticketRoutes } from './tickets/routes.js'
 import { otcV2Routes } from './otc/v2/routes.js'
 import { bonusRoutes } from './bonuses/routes.js'
@@ -187,6 +188,10 @@ export async function buildApp() {
   await app.register(adminRoutes,        { prefix: '/admin' })
   await app.register(depositRoutes,      { prefix: '/deposits' })
   await app.register(bspayWebhookRoutes, { prefix: '/webhooks' })
+  // Webhook Versell — plugin SEPARADO do BSPay (contextos de encapsulamento
+  // distintos no Fastify, então o content-type parser do BSPay não interfere).
+  // Ambos ficam sempre ativos, independentemente do gateway selecionado.
+  await app.register(versellWebhookRoutes, { prefix: '/webhooks' })
   await app.register(ticketRoutes,       { prefix: '/tickets'  })
   await app.register(otcV2Routes,        { prefix: '/otc/v2'   })
   await app.register(bonusRoutes,        { prefix: '/bonuses'  })

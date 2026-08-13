@@ -15,6 +15,16 @@ out/
 **/.env
 !**/.env.example
 
+# Certificados / chaves privadas (mTLS Versell e afins) — NUNCA versionar
+*.pem
+*.key
+*.crt
+*.csr
+*.pfx
+*.p12
+certs/
+secrets/
+
 # Prisma generated
 apps/api/prisma/migrations/.tmp/
 
