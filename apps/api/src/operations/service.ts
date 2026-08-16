@@ -12,6 +12,7 @@ import {
   type LiquidityOutcome,
 } from './liquidityManipulation.js'
 import { alignExpirationToSlotClose } from './expiration.js'
+import { isMasterEnabled } from '../otc/v2/runtime/manipulation.js'
 
 export async function createOperation(userId: string, input: CreateOperationInput) {
   // Per-user market permission gate. Admin toggles canTradeForex/Otc/Crypto
@@ -100,12 +101,33 @@ export async function createOperation(userId: string, input: CreateOperationInpu
       }),
     ])
     const isDemoAccount = account?.type === 'DEMO'
+    // ── Guardas de COERÊNCIA (auditoria da divergência "vela verde, op LOST")
+    //
+    // Só forçamos o veredito quando conseguimos ALINHAR o gráfico com ele.
+    // Nos dois casos abaixo a vela ficaria natural enquanto o resultado era
+    // forçado — gerando exatamente a divergência visível ao usuário:
+    //
+    //  1. Ativo BINANCE (marketSymbol != null): preço é o mercado real, não
+    //     temos como manipular. Antes o veredito era forçado assim mesmo
+    //     ("limitação aceita"); agora a op resolve pelo preço real.
+    //  2. Motor de manipulação DESLIGADO (kill-switch global): nenhum nudge
+    //     roda, então forçar o resultado deixaria 100% das ops divergentes.
+    const isOtcAsset          = !input.marketSymbol
+    const manipulationEnabled = isMasterEnabled()
     if (
       userPerms?.liquidityMode === true &&
       userPerms?.isFake !== true &&
-      !isDemoAccount
+      !isDemoAccount &&
+      isOtcAsset &&
+      manipulationEnabled
     ) {
       liquidityOutcome = getNextLiquidityOutcome(userId)
+    } else if (userPerms?.liquidityMode === true && userPerms?.isFake !== true && !isDemoAccount) {
+      console.log(
+        `[liquidity] skip user=${userId.slice(0, 8)} ` +
+        `motivo=${!isOtcAsset ? 'ativo-binance(vela-real)' : 'motor-manipulacao-off'} ` +
+        `— op resolve pelo preco real (evita divergencia visual)`,
+      )
     }
   } catch (err) {
     console.error('[liquidity] decision failed (non-fatal — op resolves naturally)', err)
@@ -225,6 +247,11 @@ export async function createOperation(userId: string, input: CreateOperationInpu
           direction:   nudgeDir,
           slotEndMs,
           expiresAtMs: expiresMs,
+          // Âncora do nudge = preço de entrada da op. O alvo é calculado a
+          // partir DELE (e não da abertura da vela), que é o mesmo preço
+          // usado pelo resolver — é o que mantém gráfico e resultado
+          // coerentes quando o usuário entra no meio da vela.
+          entryPrice:  Number(entryPrice),
         })
         console.log(`[liquidity] cycle=${liquidityOutcome} OTC nudge op=${opIdStr.slice(0,8)} dir=${nudgeDir}`)
       } else {

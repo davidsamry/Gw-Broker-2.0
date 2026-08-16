@@ -29,6 +29,15 @@ export interface LiquiditySignal {
   // NUDGE_WINDOW_MS of this slot.
   slotEndMs:    number
   expiresAtMs:  number
+  // ── Âncora do nudge (correção da divergência "vela verde, op LOST") ──
+  // O resultado da op é julgado contra ESTE preço (operations.entryPrice),
+  // não contra a abertura da vela. Ancorar o alvo aqui é o que garante
+  // que o preço final fique do lado coerente com o veredito forçado.
+  //
+  // Sem isso o alvo era candleOpenPrice*(1±m): quando o usuário entrava no
+  // MEIO da vela, longe da abertura, o nudge cumpria a meta contra a vela e
+  // mesmo assim a op ficava visualmente vencedora (divergência de até 24%).
+  entryPrice:   number
 }
 
 // NB: the per-op force-loss / force-win in-memory Sets were removed

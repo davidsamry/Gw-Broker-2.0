@@ -14,10 +14,39 @@ const BATCH_SIZE       = 50
 
 let isPolling = false
 
-async function fetchBinanceLastPrice(marketSymbol: string): Promise<number | null> {
+// Preço da Binance NO INSTANTE DA EXPIRAÇÃO (não o preço "agora").
+//
+// O worker roda em poll de 1s e pode liquidar até ~1,3s depois do expiresAt;
+// usar /ticker/price (preço atual) fazia a op ser julgada por um preço que o
+// usuário não viu no vencimento. Aqui pegamos o candle de 1 SEGUNDO que
+// contém o expiresAt e usamos o CLOSE dele — o mesmo valor que o gráfico
+// mostrava naquele segundo.
+//
+// Fallback para /ticker/price se o kline não vier (símbolo sem histórico de
+// 1s, janela ainda não consolidada, etc.) — comportamento anterior preservado.
+async function fetchBinancePriceAt(marketSymbol: string, expiresAt: Date): Promise<number | null> {
+  const sym = encodeURIComponent(marketSymbol)
+  const endMs = expiresAt.getTime()
   try {
-    const url = `https://data-api.binance.vision/api/v3/ticker/price?symbol=${encodeURIComponent(marketSymbol)}`
+    // Janela de 1s terminando no expiresAt → o último candle fechado é o do
+    // segundo da expiração. limit=1 mantém a resposta mínima.
+    const url = `https://data-api.binance.vision/api/v3/klines?symbol=${sym}&interval=1s`
+      + `&startTime=${endMs - 1000}&endTime=${endMs}&limit=1`
     const res = await fetch(url, { signal: AbortSignal.timeout(2000) })
+    if (res.ok) {
+      const rows = await res.json() as any[]
+      // Formato do kline: [openTime, open, high, low, close, ...]
+      const close = Number(rows?.[0]?.[4])
+      if (Number.isFinite(close) && close > 0) return close
+    }
+  } catch {
+    // cai no fallback
+  }
+  try {
+    const res = await fetch(
+      `https://data-api.binance.vision/api/v3/ticker/price?symbol=${sym}`,
+      { signal: AbortSignal.timeout(2000) },
+    )
     if (!res.ok) return null
     const j = await res.json() as { price?: string }
     const p = Number(j.price)
@@ -114,7 +143,7 @@ async function resolveExitPrice(op: {
 }): Promise<ExitInfo> {
   // ── 1. BINANCE (real market) ──────────────────────────────────────
   if (op.marketSymbol) {
-    const p = await fetchBinanceLastPrice(op.marketSymbol)
+    const p = await fetchBinancePriceAt(op.marketSymbol, op.expiresAt)
     if (p != null) {
       return { price: p, source: 'binance', tickAgeMs: 0 }
     }

