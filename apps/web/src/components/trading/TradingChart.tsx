@@ -390,14 +390,18 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
     if (!ts) return
     const current = (ts.options() as any).barSpacing ?? 8
     const next    = Math.max(2, Math.min(50, current * factor))
-    ts.applyOptions({ barSpacing: next })
-    // Alargar as barras faz a série ocupar mais largura, e a lib mantém a
-    // ancoragem pela ESQUERDA — o resultado é o gráfico "fugir" para o
-    // passado justamente no zoom máximo, escondendo a vela atual. Voltar
-    // para o tempo real mantém o preço vivo em quadro.
-    // Só quando o auto-scroll está ligado: se o usuário arrastou para
-    // analisar o histórico, respeitamos onde ele está.
-    if (autoScrollRef.current) ts.scrollToRealTime()
+    // rightOffsetPixels PRECISA ir junto com o barSpacing.
+    // Na lib: rightOffset = rightOffsetPixels / barSpacing, e esse recálculo
+    // só roda quando rightOffsetPixels vem no applyOptions. Mandando só o
+    // barSpacing, o rightOffset continua o antigo (em BARRAS) e a margem
+    // direita infla com o zoom (10 barras × 50px = 500px de vazio),
+    // empurrando a vela atual para fora da tela — o "gráfico foi pra
+    // esquerda". Com os dois juntos, a margem fica fixa em 80px.
+    ts.applyOptions({ barSpacing: next, rightOffsetPixels: 80 })
+    // NÃO chamar scrollToRealTime() aqui: ele restaura o rightOffset a
+    // partir das options (10 BARRAS) e desfaz o rightOffsetPixels — medido:
+    // a margem voltava de 158px para 265px. O rightOffsetPixels já mantém a
+    // vela atual em quadro, então o scroll é desnecessário.
   }
 
   useEffect(() => {
@@ -436,6 +440,12 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           secondsVisible: selectedTf.seconds < 60,
           fixLeftEdge: false,
           rightOffset: 10,
+          // Margem direita FIXA em pixels (tem prioridade sobre rightOffset).
+          // rightOffset é contado em BARRAS, então ao dar zoom a margem
+          // inflava junto (10 barras × 50px = 500px de vazio) e empurrava a
+          // vela atual para a esquerda. Em pixels, a margem não muda com o
+          // zoom. 80px ≈ o mesmo respiro do padrão (10 barras × 8px).
+          rightOffsetPixels: 80,
           barSpacing: 8,
           lockVisibleTimeRangeOnResize: true,
         },
