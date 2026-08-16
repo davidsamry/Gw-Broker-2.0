@@ -176,6 +176,34 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
   const [chartTypeOpen, setChartTypeOpen] = useState(false)
   const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set())
 
+  // ── Suavização visual do preço (60 FPS) + bolinha de preço atual ────────
+  //
+  // SEPARAÇÃO DE CAMADAS — ler antes de mexer:
+  //   • PREÇO REAL: o que chega do motor OTC / Binance. É o único usado para
+  //     entrada, formação da vela, fechamento e liquidação. NÃO é tocado aqui.
+  //   • PREÇO VISUAL: valor interpolado que existe SOMENTE neste componente,
+  //     para o olho perceber movimento contínuo. Nunca sai do navegador.
+  //
+  // Os feeds (SSE/WebSocket) chegam a ~10 Hz. Pintar direto dá 10 FPS e o
+  // movimento "pula". Aqui o tick vira ALVO e um loop de requestAnimationFrame
+  // aproxima o valor visual desse alvo a 60 FPS.
+  //
+  // Só o CLOSE é animado. open/high/low continuam sendo os reais — animar o
+  // pavio criaria máximas/mínimas que nunca existiram.
+  const animRef = useRef<{
+    /** Última barra REAL recebida (fonte da verdade para o desenho). */
+    target: { time: number; open: number; high: number; low: number; close: number } | null
+    /** Close interpolado — puramente visual. */
+    visualClose: number | null
+    raf: number | null
+    /** Tipo de gráfico no momento do frame (velas/area/heiken-ashi/barras). */
+    chartType: ChartType
+  }>({ target: null, visualClose: null, raf: null, chartType: 'velas' })
+
+  // Bolinha manipulada via DOM direto (sem state) — a 60 FPS um setState
+  // dispararia re-render do React a cada frame.
+  const priceDotRef = useRef<HTMLDivElement | null>(null)
+
   // Stable string for use in effect dep arrays (Set identity changes every render).
   const activeIndicatorKey = Array.from(activeIndicators).sort().join(',')
   const activeIndicatorDefs = INDICATORS.filter((i) => activeIndicators.has(i.id))
@@ -698,6 +726,70 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
         }
       }
 
+      // ── Loop de suavização (60 FPS) ───────────────────────────────────
+      // Aproxima o close VISUAL do close REAL por easing exponencial:
+      //   visual += (alvo − visual) × EASING
+      // Nunca "termina": se um tick novo chegar no meio, ele só troca o alvo
+      // e o movimento continua — por isso não há fila nem risco de atraso.
+      const EASING          = 0.25    // ~90% da distância em ~130ms
+      const SNAP_PCT        = 0.003   // salto real (>0,3%) é mostrado como salto
+      const NEGLIGIBLE_PCT  = 0.000002 // abaixo disso, encosta no alvo e para
+
+      animRef.current.chartType = chartType
+
+      const animate = () => {
+        const st = animRef.current
+        if (disposed) return
+        const t = st.target
+        if (!t) { st.raf = requestAnimationFrame(animate); return }
+
+        if (st.visualClose == null) st.visualClose = t.close
+
+        const diff = t.close - st.visualClose
+        const rel  = t.close !== 0 ? Math.abs(diff / t.close) : 0
+        if (rel > SNAP_PCT || rel < NEGLIGIBLE_PCT) {
+          // Movimento brusco de verdade (gap/spike) OU já chegou: encosta.
+          st.visualClose = t.close
+        } else {
+          st.visualClose += diff * EASING
+        }
+
+        // Trava dentro do range REAL da barra: o valor animado jamais pode
+        // criar um pavio que não existiu.
+        const v = Math.min(t.high, Math.max(t.low, st.visualClose))
+
+        try {
+          if (st.chartType === 'area') {
+            mainSeries.update({ time: t.time, value: v })
+          } else if (st.chartType === 'heiken-ashi') {
+            const haClose = parseFloat(((t.open + t.high + t.low + v) / 4).toFixed(5))
+            mainSeries.update({ time: t.time, open: t.open, high: t.high, low: t.low, close: haClose })
+          } else {
+            mainSeries.update({ time: t.time, open: t.open, high: t.high, low: t.low, close: v })
+          }
+
+          // Bolinha do preço atual — segue o valor ANIMADO, colada na ponta
+          // da vela em formação (mesma leitura visual da referência IQ Option).
+          const dot = priceDotRef.current
+          if (dot && chartRef.current) {
+            const y = mainSeries.priceToCoordinate(v)
+            const x = chartRef.current.timeScale().timeToCoordinate(t.time as any)
+            if (x != null && y != null) {
+              const up = v >= t.open
+              dot.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`
+              dot.style.background = up ? '#26a69a' : '#ef5350'
+              dot.style.boxShadow  = `0 0 10px 3px ${up ? 'rgba(38,166,154,.55)' : 'rgba(239,83,80,.55)'}`
+              dot.style.opacity    = '1'
+            } else {
+              dot.style.opacity = '0'   // fora da área visível (pan/zoom)
+            }
+          }
+        } catch { /* série já removida no meio do frame — ignora */ }
+
+        st.raf = requestAnimationFrame(animate)
+      }
+      animRef.current.raf = requestAnimationFrame(animate)
+
       priceInterval = setInterval(() => {
         if (disposed || !chartRef.current) return
         const now = nowSec()
@@ -760,17 +852,12 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           candleLow    = k.low
           lastTickPrice = k.close
 
-          if (chartType === 'area') {
-            mainSeries.update({ time, value: k.close })
-          } else if (chartType === 'heiken-ashi') {
-            // Live Heiken-Ashi: simplified — full re-derivation would need
-            // every prior bar's haOpen/haClose. The current bar's
-            // approximation is acceptable visually.
-            const haClose = parseFloat(((k.open + k.high + k.low + k.close) / 4).toFixed(5))
-            mainSeries.update({ time, open: k.open, high: k.high, low: k.low, close: haClose })
-          } else {
-            mainSeries.update({ time, open: k.open, high: k.high, low: k.low, close: k.close })
-          }
+          // Define o ALVO visual; o loop de animação pinta a 60 FPS.
+          // Ao virar a barra (time novo), encosta no valor real na hora —
+          // a vela precisa FECHAR exatamente no preço verdadeiro.
+          const st = animRef.current
+          if (!st.target || st.target.time !== time) st.visualClose = k.close
+          st.target = { time, open: k.open, high: k.high, low: k.low, close: k.close }
         })
       }
 
@@ -789,14 +876,11 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           candleLow    = c.low
           lastTickPrice = c.close
 
-          if (chartType === 'area') {
-            mainSeries.update({ time, value: c.close })
-          } else if (chartType === 'heiken-ashi') {
-            const haClose = parseFloat(((c.open + c.high + c.low + c.close) / 4).toFixed(5))
-            mainSeries.update({ time, open: c.open, high: c.high, low: c.low, close: haClose })
-          } else {
-            mainSeries.update({ time, open: c.open, high: c.high, low: c.low, close: c.close })
-          }
+          // Mesmo contrato do feed Binance: o tick vira ALVO e o loop anima.
+          // Nova barra → snap, para a vela anterior fechar no preço real.
+          const st = animRef.current
+          if (!st.target || st.target.time !== time) st.visualClose = c.close
+          st.target = { time, open: c.open, high: c.high, low: c.low, close: c.close }
         })
       }
     }
@@ -816,6 +900,15 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
     return () => {
       disposed = true
       if (priceInterval) clearInterval(priceInterval)
+      // Cancela o loop de animação ANTES de remover o chart — um frame
+      // pendente tocaria numa série já destruída.
+      if (animRef.current.raf != null) {
+        cancelAnimationFrame(animRef.current.raf)
+        animRef.current.raf = null
+      }
+      animRef.current.target      = null
+      animRef.current.visualClose = null
+      if (priceDotRef.current) priceDotRef.current.style.opacity = '0'
       if (klineUnsub)       klineUnsub()
       if (otcCandleUnsub)   otcCandleUnsub()
       resizeObserver.disconnect()
@@ -976,6 +1069,26 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
 
       {/* Chart */}
       <div ref={chartContainerRef} className="flex-1 w-full" />
+
+      {/* Bolinha do preço atual — acompanha o close ANIMADO na ponta da vela
+          em formação (referência: IQ Option). Posicionada por transform via
+          DOM direto dentro do loop de rAF: a 60 FPS, um setState re-renderi-
+          zaria o componente inteiro a cada frame. Verde/vermelho conforme a
+          vela está acima ou abaixo da abertura. pointer-events-none para não
+          roubar clique das ferramentas de desenho. */}
+      <div
+        ref={priceDotRef}
+        aria-hidden
+        className="absolute top-0 left-0 w-[9px] h-[9px] rounded-full pointer-events-none z-20"
+        style={{
+          opacity: 0,
+          background: '#26a69a',
+          // A transição curta suaviza a troca de cor; a POSIÇÃO não entra aqui
+          // (é atualizada a cada frame — animar via CSS criaria atraso duplo).
+          transition: 'background-color 120ms linear, box-shadow 120ms linear',
+          willChange: 'transform',
+        }}
+      />
 
       {/* Candle expiry timer — anchored to the RIGHT edge of the chart at
           the current price line's height. Anchoring by X (`candleTimerX +
