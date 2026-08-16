@@ -391,6 +391,13 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
     const current = (ts.options() as any).barSpacing ?? 8
     const next    = Math.max(2, Math.min(50, current * factor))
     ts.applyOptions({ barSpacing: next })
+    // Alargar as barras faz a série ocupar mais largura, e a lib mantém a
+    // ancoragem pela ESQUERDA — o resultado é o gráfico "fugir" para o
+    // passado justamente no zoom máximo, escondendo a vela atual. Voltar
+    // para o tempo real mantém o preço vivo em quadro.
+    // Só quando o auto-scroll está ligado: se o usuário arrastou para
+    // analisar o histórico, respeitamos onde ele está.
+    if (autoScrollRef.current) ts.scrollToRealTime()
   }
 
   useEffect(() => {
@@ -778,7 +785,7 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
               const up = v >= t.open
               dot.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`
               dot.style.background = up ? '#26a69a' : '#ef5350'
-              dot.style.boxShadow  = `0 0 10px 3px ${up ? 'rgba(38,166,154,.55)' : 'rgba(239,83,80,.55)'}`
+              dot.style.boxShadow  = `0 0 7px 2px ${up ? 'rgba(38,166,154,.5)' : 'rgba(239,83,80,.5)'}`
               dot.style.opacity    = '1'
             } else {
               dot.style.opacity = '0'   // fora da área visível (pan/zoom)
@@ -1079,7 +1086,7 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
       <div
         ref={priceDotRef}
         aria-hidden
-        className="absolute top-0 left-0 w-[9px] h-[9px] rounded-full pointer-events-none z-20"
+        className="absolute top-0 left-0 w-[6px] h-[6px] rounded-full pointer-events-none z-20"
         style={{
           opacity: 0,
           background: '#26a69a',
