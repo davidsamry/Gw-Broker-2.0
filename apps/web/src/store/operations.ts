@@ -12,7 +12,8 @@ export interface ApiOperation {
   amount:      string
   payout:      number
   profit:      string | null
-  status:      'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
+  // DRAW = empate (saída igual à entrada): valor apostado devolvido.
+  status:      'OPEN' | 'WON' | 'LOST' | 'CANCELLED' | 'DRAW'
   entryPrice?: string
   expiresAt:   string
   openedAt:    string

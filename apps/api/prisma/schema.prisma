@@ -25,6 +25,9 @@ enum OperationStatus {
   WON
   LOST
   CANCELLED
+  // Empate: preço de saída IGUAL ao de entrada. Não é ganho nem perda —
+  // a entrada é devolvida integralmente ao saldo (profit = 0).
+  DRAW
 }
 
 enum TransactionType {

@@ -265,6 +265,13 @@ async function resolveOperation(op: {
     const forcedWin  = op.isFake === true || op.liquidityOutcome === 'WIN'
     const forcedLoss = !forcedWin && op.liquidityOutcome === 'LOSS'
 
+    // ── Empate: saída EXATAMENTE igual à entrada ───────────────────────
+    // Não é ganho nem perda — a entrada é devolvida (status DRAW). Só vale
+    // para resolução NATURAL: se o veredito foi forçado (isFake ou ciclo de
+    // liquidez), ele manda, porque nesse caso o preço foi conduzido de
+    // propósito e o par entrada/saída não deve virar devolução.
+    const isDraw = !forcedWin && !forcedLoss && exitPrice === entry
+
     const won = forcedWin
       ? true
       : forcedLoss
@@ -277,13 +284,13 @@ async function resolveOperation(op: {
     // audit trail of WHY this op resolved the way it did.
     clearLiquiditySignalsForOp(op.id)
 
-    const profit = won ? parseFloat((amount * (op.payout / 100)).toFixed(2)) : 0
+    const profit = won && !isDraw ? parseFloat((amount * (op.payout / 100)).toFixed(2)) : 0
 
     // Atomic claim: only one worker actually resolves this op.
     const claim = await prisma.operation.updateMany({
       where: { id: op.id, status: 'OPEN' },
       data: {
-        status:    won ? 'WON' : 'LOST',
+        status:    isDraw ? 'DRAW' : won ? 'WON' : 'LOST',
         exitPrice,
         profit,
         closedAt:  new Date(),
@@ -292,7 +299,38 @@ async function resolveOperation(op: {
 
     if (claim.count === 0) return // someone else already resolved it
 
-    if (won) {
+    // ── Empate → devolve a entrada ────────────────────────────────────
+    // Credita de volta o valor apostado (sem payout) e REVERTE o
+    // rolloverProgress que o createOperation somou: a operação foi anulada,
+    // então não deve contar como movimentação para liberar saque — senão um
+    // ativo parado viraria caminho para cumprir rollover sem risco.
+    //
+    // O crédito vai todo para `balance`, mesmo que parte da entrada tenha
+    // saído de bonusBalance — é o mesmo critério já usado no WIN.
+    if (isDraw) {
+      await prisma.$transaction([
+        prisma.$executeRaw`
+          UPDATE accounts
+          SET balance = balance + ${new Prisma.Decimal(amount)},
+              "rolloverProgress" = GREATEST(0, "rolloverProgress" - ${new Prisma.Decimal(amount)})
+          WHERE id = ${op.accountId}
+        `,
+        prisma.transaction.create({
+          data: {
+            accountId:   op.accountId,
+            type:        'ADJUSTMENT',
+            amount:      amount,
+            description: `Operação empatada: devolução de R$${amount.toFixed(2)}`,
+          },
+        }),
+      ])
+      console.log(
+        `[resolve] op=${op.id.slice(0, 8)} DRAW asset=${op.assetSymbol} ` +
+        `price=${entry} devolvido=R$${amount.toFixed(2)}`,
+      )
+      // Empate não credita payout nem dispara auto-liquidez (não houve lucro).
+      // Segue o fluxo até o broadcast para o frontend atualizar saldo/lista.
+    } else if (won) {
       await prisma.$transaction([
         prisma.account.update({
           where: { id: op.accountId },
@@ -408,7 +446,7 @@ async function resolveOperation(op: {
             amount:      amount.toFixed(2),
             payout:      op.payout,
             profit:      profit.toFixed(2),
-            status:      won ? 'WON' : 'LOST',
+            status:      isDraw ? 'DRAW' : won ? 'WON' : 'LOST',
             entryPrice:  entry.toFixed(5),
             exitPrice:   exitPrice.toFixed(5),
             expiresAt:   op.expiresAt.toISOString(),

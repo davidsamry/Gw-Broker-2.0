@@ -50,7 +50,8 @@ export interface Trade {
   payout: number
   entryPrice: number
   exitPrice?: number
-  status: 'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
+  // DRAW = empate (saída igual à entrada): valor apostado devolvido.
+  status: 'OPEN' | 'WON' | 'LOST' | 'CANCELLED' | 'DRAW'
   openedAt: number
   closedAt?: number
 }

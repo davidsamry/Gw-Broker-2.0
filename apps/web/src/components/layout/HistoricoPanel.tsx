@@ -23,7 +23,7 @@ interface Item {
   code2:     string
   direction: 'CALL' | 'PUT'
   amount:    number
-  status:    'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
+  status:    'OPEN' | 'WON' | 'LOST' | 'CANCELLED' | 'DRAW'
   profit:    number  // R$
   payout:    number  // %
 }
@@ -78,7 +78,7 @@ export function HistoricoPanel({ onClose, isDemo }: HistoricoPanelProps) {
 
   const filtered = ops.filter((o) => {
     if (filter === 'PENDENTES')   return o.status === 'OPEN'
-    if (filter === 'FINALIZADAS') return o.status === 'WON' || o.status === 'LOST'
+    if (filter === 'FINALIZADAS') return o.status === 'WON' || o.status === 'LOST' || o.status === 'DRAW'
     return true
   })
 
@@ -155,9 +155,12 @@ export function HistoricoPanel({ onClose, isDemo }: HistoricoPanelProps) {
 function HistoricoItem({ item }: { item: Item }) {
   const won  = item.status === 'WON'
   const lost = item.status === 'LOST'
-  // Profit display: won -> +profit, lost -> -amount, pending -> 0
+  // DRAW = empate: saída igual à entrada, valor apostado devolvido. Não é
+  // ganho nem perda — mostra R$ 0,00 / 0% em cinza, como as pendentes.
+  const draw = item.status === 'DRAW'
+  // Profit display: won -> +profit, lost -> -amount, draw/pending -> 0
   const net = won ? item.profit : lost ? -item.amount : 0
-  // Percentage: won -> +payout%, lost -> -100%, pending -> 0%
+  // Percentage: won -> +payout%, lost -> -100%, draw -> 0% (devolvido)
   const pct = won ? `+${item.payout}%` : lost ? '-100%' : '0%'
   const sign = net > 0 ? '+' : net < 0 ? '' : ''
   const netColor = won ? 'text-green-400' : lost ? 'text-red-400' : 'text-[#8b8f9a]'
@@ -203,7 +206,9 @@ function HistoricoItem({ item }: { item: Item }) {
               <span className="text-[11px] font-bold text-white">R$ {item.amount.toFixed(2).replace('.', ',')}</span>
             </div>
             <span className={cn('text-[10px] font-bold mt-0.5', netColor)}>
-              {sign}R$ {Math.abs(net).toFixed(2).replace('.', ',')} ({pct})
+              {draw
+                ? 'Empate — devolvido'
+                : `${sign}R$ ${Math.abs(net).toFixed(2).replace('.', ',')} (${pct})`}
             </span>
           </div>
         </div>

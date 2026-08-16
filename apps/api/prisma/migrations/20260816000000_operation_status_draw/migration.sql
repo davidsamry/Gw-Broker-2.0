@@ -1,0 +1,11 @@
+-- Empate (exitPrice == entryPrice) deixa de ser LOSS e passa a devolver a
+-- entrada. Novo status DRAW no enum OperationStatus.
+--
+-- Aditivo: apenas ACRESCENTA o valor ao enum. Nenhuma linha existente é
+-- alterada — operações antigas que empataram continuam como LOST (histórico
+-- financeiro preservado; reclassificar retroativamente mudaria saldos já
+-- consolidados).
+--
+-- ALTER TYPE ... ADD VALUE é seguro dentro de transação no PG 12+ desde que o
+-- valor novo não seja USADO na mesma transação — aqui só declaramos.
+ALTER TYPE "OperationStatus" ADD VALUE IF NOT EXISTS 'DRAW';

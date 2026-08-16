@@ -395,6 +395,7 @@ function OperationStatusBadge({ status }: { status: ApiOperation['status'] }) {
     WON:       { color: 'text-green-400',   label: 'Vencida'   },
     LOST:      { color: 'text-red-400',     label: 'Perdida'   },
     CANCELLED: { color: 'text-[#8b8f9a]',   label: 'Cancelada' },
+    DRAW:      { color: 'text-yellow-400',  label: 'Empate'    },
   } as const
   const cfg = map[status] ?? map.OPEN
   return <span className={cn('text-xs font-semibold', cfg.color)}>{cfg.label}</span>

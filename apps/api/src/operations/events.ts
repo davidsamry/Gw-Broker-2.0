@@ -28,7 +28,8 @@ export interface OperationEvent {
     amount:      string       // Decimal serialised
     payout:      number
     profit:      string | null
-    status:      'OPEN' | 'WON' | 'LOST' | 'CANCELLED'
+    // DRAW = empate (saída igual à entrada): entrada devolvida, profit 0.
+    status:      'OPEN' | 'WON' | 'LOST' | 'CANCELLED' | 'DRAW'
     entryPrice:  string
     exitPrice?:  string | null
     expiresAt:   string       // ISO

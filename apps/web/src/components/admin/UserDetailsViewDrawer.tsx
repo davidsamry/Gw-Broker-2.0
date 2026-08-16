@@ -77,7 +77,7 @@ interface OperationRow {
   entryPrice:   string | null
   exitPrice:    string | null
   profit:       string | null
-  status:       'OPEN' | 'WON' | 'LOST' | 'CANCELLED' | 'PURCHASE'
+  status:       'OPEN' | 'WON' | 'LOST' | 'CANCELLED' | 'PURCHASE' | 'DRAW'
   openedAt:     string
   // TRADE = trade binário (default). COPY = operação copiada.
   // COPY_PURCHASE = débito da compra de acesso a um trader pago.
@@ -565,6 +565,11 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
                                 {op.status === 'PURCHASE' && (
                                   <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border bg-blue-500/15 text-blue-400 border-blue-500/40">
                                     Compra
+                                  </span>
+                                )}
+                                {op.status === 'DRAW' && (
+                                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border bg-yellow-500/15 text-yellow-400 border-yellow-500/40">
+                                    Empate
                                   </span>
                                 )}
                               </td>

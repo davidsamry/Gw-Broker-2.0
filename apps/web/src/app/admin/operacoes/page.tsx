@@ -26,7 +26,7 @@ interface OpRow {
   entryPrice:   string | null
   exitPrice:    string | null
   profit:       string | null
-  status:       'OPEN' | 'WON' | 'LOST' | 'CANCELLED' | 'PURCHASE'
+  status:       'OPEN' | 'WON' | 'LOST' | 'CANCELLED' | 'PURCHASE' | 'DRAW'
   expiresAt:    string
   openedAt:     string
   closedAt:     string | null
@@ -409,6 +409,7 @@ function StatusChip({ status }: { status: OpRow['status'] }) {
     LOST:      { label: 'Perdeu',     tone: 'bg-red-500/15 text-red-400 border-red-500/40' },
     CANCELLED: { label: 'Cancelada',  tone: 'bg-[#1a1e2a] text-[#8b8f9a] border-[#1f232e]' },
     PURCHASE:  { label: 'Compra',     tone: 'bg-blue-500/15 text-blue-400 border-blue-500/40' },
+    DRAW:      { label: 'Empate',     tone: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/40' },
   }
   const cfg = map[status]
   return (
