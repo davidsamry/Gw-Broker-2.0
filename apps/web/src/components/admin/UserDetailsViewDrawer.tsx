@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   X, ArrowUp, ArrowDown, ExternalLink, Trash2, Loader2,
-  TrendingDown, TrendingUp, DollarSign, Globe, Copy, ShoppingCart,
+  TrendingDown, TrendingUp, DollarSign, Globe, Copy, ShoppingCart, FileText,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -30,6 +30,12 @@ interface UserSummary {
     id:    string
     name:  string
     email: string
+    // Já vinham do backend (getUserDetail), só não eram declarados aqui.
+    // Usados no cabeçalho do PDF de extrato.
+    lastName?:  string | null
+    cpf?:       string | null
+    phone?:     string | null
+    createdAt?: string | null
   }
   accounts: Array<{
     id:               string
@@ -116,6 +122,9 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
   const [deletingAll, setDeletingAll] = useState(false)
   // Estado do botao "Logar como Usuario"
   const [impersonating, setImpersonating] = useState(false)
+  // Estado do botao "Exportar PDF" (exportMsg mostra o progresso da busca)
+  const [exportando, setExportando] = useState(false)
+  const [exportMsg,  setExportMsg]  = useState('')
   // Rollover editavel — input controlado + flag salvando
   const [rolloverDraft, setRolloverDraft] = useState('')
   const [savingRollover, setSavingRollover] = useState(false)
@@ -156,6 +165,36 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
     }
   }, [userId, page])
   useEffect(() => { loadOps() }, [loadOps])
+
+  // ── Handler: exportar extrato em PDF ───────────────────────────────────
+  // Somente LEITURA — nenhuma regra de saldo/operação é tocada. O gerador
+  // busca TODAS as operações da conta REAL (paginando o mesmo endpoint que
+  // esta tela usa), então o PDF não fica limitado à página exibida.
+  async function handleExportPdf() {
+    if (exportando || !summary) return
+    setExportando(true)
+    setExportMsg('')
+    try {
+      const { gerarExtratoPdf } = await import('@/lib/extratoPdf')
+      const r = await gerarExtratoPdf({
+        user:     summary.user,
+        accounts: summary.accounts,
+        kpis:     summary.kpis,
+        onProgresso: (n) => setExportMsg(`${n} ops…`),
+      })
+      if (r.operacoes === 0) {
+        // PDF é gerado mesmo assim (com o aviso de "nenhuma operação"), mas
+        // avisamos para o admin não achar que o arquivo veio quebrado.
+        alert('Este usuário não possui operações na conta REAL. O PDF foi gerado apenas com os dados cadastrais.')
+      }
+    } catch (err) {
+      console.error('[extrato-pdf] falha ao gerar', err)
+      alert('Não foi possível gerar o PDF. Tente novamente.')
+    } finally {
+      setExportando(false)
+      setExportMsg('')
+    }
+  }
 
   // ── Handler: logar como usuario (impersonation) ────────────────────────
   // Flow:
@@ -318,6 +357,19 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
             <div className="text-xs text-[#8b8f9a] mt-0.5 truncate">{summary?.user.email}</div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {/* Exporta o extrato COMPLETO da conta REAL (não só a página
+                visível) — o gerador pagina o endpoint por conta própria. */}
+            <button
+              onClick={handleExportPdf}
+              disabled={exportando || !summary}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#2a2e3b] bg-[#1a1e2a] text-xs font-semibold text-white hover:border-emerald-500/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Baixar o extrato completo de operações deste usuário em PDF"
+            >
+              {exportando
+                ? <Loader2 size={13} className="animate-spin" />
+                : <FileText size={13} />}
+              {exportando ? (exportMsg || 'Gerando…') : 'Exportar PDF'}
+            </button>
             <button
               onClick={handleImpersonate}
               disabled={impersonating}
