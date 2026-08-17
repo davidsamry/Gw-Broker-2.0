@@ -7,6 +7,7 @@
 // no bundle inicial da plataforma — só carregam quando o admin clica no botão.
 
 import { api } from './api'
+import { VX_LOGO_PNG_BASE64, VX_LOGO_ASPECT } from './vxLogoBase64'
 
 // ── Tipos (espelham o que a API já devolve) ───────────────────────────────
 
@@ -172,12 +173,26 @@ export async function montarPdf(opts: {
   // ── Cabeçalho ──────────────────────────────────────────────────────────
   doc.setFillColor(...ESCURO)
   doc.rect(0, 0, LARGURA, 26, 'F')
-  doc.setTextColor(...VERDE)
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(17)
-  doc.text('VX GLOBAL', 14, 12)
+
+  // Logo oficial embutida (a arte tem texto branco, feita para fundo escuro).
+  // Se por qualquer motivo a imagem falhar, cai no texto — o extrato nunca
+  // deixa de ser gerado por causa da marca.
+  const LOGO_W = 34
+  const LOGO_H = LOGO_W / VX_LOGO_ASPECT
+  try {
+    doc.addImage(
+      `data:image/png;base64,${VX_LOGO_PNG_BASE64}`,
+      'PNG', 14, (26 - LOGO_H) / 2 - 3, LOGO_W, LOGO_H,
+    )
+  } catch {
+    doc.setTextColor(...VERDE)
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(15)
+    doc.text('VX GLOBAL', 14, 12)
+  }
+
   doc.setTextColor(255, 255, 255)
-  doc.setFontSize(12)
-  doc.text('EXTRATO DE OPERAÇÕES', 14, 20)
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(12)
+  doc.text('EXTRATO DE OPERAÇÕES', 14, 21)
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
   doc.setTextColor(200, 200, 200)
   doc.text(`Gerado em ${g.data} às ${g.hora}`, LARGURA - 14, 12, { align: 'right' })
