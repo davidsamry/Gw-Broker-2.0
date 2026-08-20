@@ -101,7 +101,17 @@ export async function registerUser(input: RegisterInput, requestMeta?: {
     }
     try {
       const { sendCompleteRegistrationAsync } = await import('../meta/service.js')
-      sendCompleteRegistrationAsync({ id: user.id, email: user.email })
+      // Advanced matching: manda tudo que o cadastro coletou. Cidade/estado/
+      // CEP não são pedidos no signup (só no perfil), então costumam ir
+      // vazios aqui — e são preenchidos no Purchase, que lê o cadastro atual.
+      sendCompleteRegistrationAsync({
+        id:        user.id,
+        email:     user.email,
+        phone:     (user as any).phone     ?? null,
+        firstName: user.name,
+        lastName:  (user as any).lastName  ?? null,
+        country:   (user as any).country   ?? null,
+      })
     } catch (err) {
       console.error('[meta] CompleteRegistration enqueue failed (non-fatal)', err)
     }

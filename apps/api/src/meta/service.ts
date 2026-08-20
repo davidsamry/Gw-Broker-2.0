@@ -33,11 +33,72 @@ function hashEmail(email: string | null | undefined): string | null {
 }
 
 // Phone: digits only BEFORE hash (Meta wants international with no +).
+//
+// O usuário digita no formato brasileiro — "(11) 98765-4321" vira
+// "11987654321". A Meta exige o CÓDIGO DO PAÍS junto, senão o match falha.
+// Prefixamos 55 quando o número tem 10 ou 11 dígitos (fixo/celular BR) e
+// ainda não começa com 55. Números que já vêm internacionais passam intactos.
 function hashPhone(phone: string | null | undefined): string | null {
   if (!phone) return null
-  const norm = phone.replace(/\D/g, '')
+  let norm = phone.replace(/\D/g, '')
   if (norm === '') return null
+  if ((norm.length === 10 || norm.length === 11) && !norm.startsWith('55')) {
+    norm = `55${norm}`
+  }
   return sha256(norm)
+}
+
+// Nome (fn/ln): minúsculas, sem acentos, só letras. A Meta compara contra o
+// cadastro do Facebook normalizado da mesma forma.
+function hashName(name: string | null | undefined): string | null {
+  if (!name) return null
+  const norm = name.trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')   // remove acentos
+    .replace(/[^a-z]/g, '')
+  return norm === '' ? null : sha256(norm)
+}
+
+// Cidade (ct): minúsculas, sem acentos, sem espaços nem pontuação.
+// "São Paulo" → "saopaulo"
+function hashCity(city: string | null | undefined): string | null {
+  if (!city) return null
+  const norm = city.trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z]/g, '')
+  return norm === '' ? null : sha256(norm)
+}
+
+// Estado (st): sigla de 2 letras minúsculas. Aceita "SP" ou "São Paulo"
+// (nesse caso só normaliza; se não couber em 2 letras, envia como veio).
+function hashState(state: string | null | undefined): string | null {
+  if (!state) return null
+  const norm = state.trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z]/g, '')
+  return norm === '' ? null : sha256(norm)
+}
+
+// CEP (zp): só dígitos. "01310-100" → "01310100"
+function hashZip(zip: string | null | undefined): string | null {
+  if (!zip) return null
+  const norm = zip.replace(/\D/g, '')
+  return norm === '' ? null : sha256(norm)
+}
+
+// País (country): código ISO de 2 letras, minúsculo. O cadastro guarda o
+// nome por extenso ("Brasil"), então mapeamos os do seletor de países.
+const ISO_POR_PAIS: Record<string, string> = {
+  brasil: 'br', portugal: 'pt', argentina: 'ar', chile: 'cl',
+  colombia: 'co', mexico: 'mx', peru: 'pe',
+  'estados unidos': 'us', espanha: 'es',
+}
+function hashCountry(country: string | null | undefined): string | null {
+  if (!country) return null
+  const bruto = country.trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+  // Já veio como sigla?
+  const iso = bruto.length === 2 ? bruto : ISO_POR_PAIS[bruto]
+  return iso ? sha256(iso) : null
 }
 
 // User ID: hash so we can match anonymous browser sessions to the same
@@ -65,6 +126,14 @@ export interface UserPayload {
   id:    string
   email: string | null
   phone?: string | null
+  // Advanced matching — quanto mais campos, melhor a atribuição da Meta.
+  // Todos opcionais: o que estiver vazio simplesmente não é enviado.
+  firstName?: string | null
+  lastName?:  string | null
+  city?:      string | null
+  state?:     string | null
+  zip?:       string | null
+  country?:   string | null
 }
 
 /**
@@ -116,6 +185,39 @@ export function sendPurchaseAsync(user: UserPayload, deposit: DepositPayload): v
   }).catch((err) => console.error('[meta] Purchase dispatch threw', err))
 }
 
+/**
+ * Monta o bloco `user_data` do evento (advanced matching).
+ *
+ * Cada campo entra como array de 1 item — formato que a Meta espera — e só
+ * quando existe: mandar chave vazia não ajuda no match e ainda polui o
+ * payload. Os campos de PII vão com SHA-256; fbp/fbc/IP/user-agent vão em
+ * texto puro, porque a Meta os usa como identificadores de sessão.
+ *
+ * Exportada para ser verificável isoladamente — o hash é silencioso: se a
+ * normalização estiver errada, a Meta simplesmente não casa o usuário e
+ * nenhum erro aparece.
+ */
+export function buildUserData(
+  user: UserPayload,
+  tracking: { fbp?: string | null; fbc?: string | null; ip?: string | null; userAgent?: string | null },
+): Record<string, unknown> {
+  const userData: Record<string, unknown> = {}
+  const em = hashEmail(user.email);        if (em) userData.em          = [em]
+  const ph = hashPhone(user.phone);        if (ph) userData.ph          = [ph]
+  const ex = hashUserId(user.id);          if (ex) userData.external_id = [ex]
+  const fn = hashName(user.firstName);     if (fn) userData.fn          = [fn]
+  const ln = hashName(user.lastName);      if (ln) userData.ln          = [ln]
+  const ct = hashCity(user.city);          if (ct) userData.ct          = [ct]
+  const st = hashState(user.state);        if (st) userData.st          = [st]
+  const zp = hashZip(user.zip);            if (zp) userData.zp          = [zp]
+  const co = hashCountry(user.country);    if (co) userData.country     = [co]
+  if (tracking.fbp)       userData.fbp               = tracking.fbp
+  if (tracking.fbc)       userData.fbc               = tracking.fbc
+  if (tracking.ip)        userData.client_ip_address = tracking.ip
+  if (tracking.userAgent) userData.client_user_agent = tracking.userAgent
+  return userData
+}
+
 // ── Core dispatch ───────────────────────────────────────────────────────
 
 interface DispatchArgs {
@@ -146,14 +248,7 @@ async function dispatch(args: DispatchArgs): Promise<void> {
   const tracking = await getUserTracking(args.user.id)
 
   // 4. Build the payload per Meta v23 spec.
-  const userData: Record<string, unknown> = {}
-  const em = hashEmail(args.user.email);  if (em) userData.em = [em]
-  const ph = hashPhone(args.user.phone);  if (ph) userData.ph = [ph]
-  const ex = hashUserId(args.user.id);    if (ex) userData.external_id = [ex]
-  if (tracking.fbp)       userData.fbp                = tracking.fbp
-  if (tracking.fbc)       userData.fbc                = tracking.fbc
-  if (tracking.ip)        userData.client_ip_address  = tracking.ip
-  if (tracking.userAgent) userData.client_user_agent  = tracking.userAgent
+  const userData = buildUserData(args.user, tracking)
 
   const payload: Record<string, unknown> = {
     data: [

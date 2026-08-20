@@ -566,8 +566,12 @@ export async function confirmDepositById(depositId: string) {
   try {
     const purchaseLookup = await prisma.$queryRaw<Array<{
       userId: string; email: string; amount: string;
+      name: string | null; lastName: string | null; phone: string | null;
+      city: string | null; state: string | null; zip: string | null; country: string | null;
     }>>`
-      SELECT u.id AS "userId", u.email, d.amount::text AS amount
+      SELECT u.id AS "userId", u.email, u.name, u."lastName", u.phone,
+             u.city, u.state, u.zip, u.country,
+             d.amount::text AS amount
       FROM deposits d
       JOIN accounts a ON a.id = d."accountId"
       JOIN users    u ON u.id = a."userId"
@@ -577,8 +581,20 @@ export async function confirmDepositById(depositId: string) {
     const row = purchaseLookup[0]
     if (row) {
       const { sendPurchaseAsync } = await import('../meta/service.js')
+      // Advanced matching completo — no Purchase o cadastro já costuma estar
+      // preenchido (perfil), então este é o evento com melhor atribuição.
       sendPurchaseAsync(
-        { id: row.userId, email: row.email },
+        {
+          id:        row.userId,
+          email:     row.email,
+          phone:     row.phone,
+          firstName: row.name,
+          lastName:  row.lastName,
+          city:      row.city,
+          state:     row.state,
+          zip:       row.zip,
+          country:   row.country,
+        },
         { id: depositId, amount: Number(row.amount) },
       )
     }
