@@ -218,6 +218,73 @@ export function buildUserData(
   return userData
 }
 
+// ── Backfill (reenvio retroativo) ───────────────────────────────────────
+//
+// Usado quando o Pixel ficou desligado e eventos deixaram de ser enviados.
+//
+// LIMITE DA META: event_time só pode ter até 7 dias. Eventos mais antigos
+// fazem a requisição INTEIRA ser rejeitada (a doc é explícita: "we return an
+// error for the entire request and process no events"). Por isso a janela é
+// checada aqui, evento a evento — nada fora dela chega a ser tentado.
+//
+// Usamos 6,5 dias como corte para ter folga: entre montar a lista e a
+// requisição chegar à Meta passam alguns segundos/minutos.
+const BACKFILL_MAX_AGE_SEC = Math.floor(6.5 * 24 * 60 * 60)
+
+export function dentroDaJanelaMeta(quando: Date): boolean {
+  const idadeSec = (Date.now() - quando.getTime()) / 1000
+  return idadeSec >= 0 && idadeSec <= BACKFILL_MAX_AGE_SEC
+}
+
+export type ResultadoBackfill = 'enviado' | 'duplicado' | 'fora-da-janela' | 'falhou' | 'desligado'
+
+/** Reenvia um CompleteRegistration com o horário ORIGINAL do cadastro. */
+export async function backfillRegistration(
+  user: UserPayload, registradoEm: Date,
+): Promise<ResultadoBackfill> {
+  if (!dentroDaJanelaMeta(registradoEm)) return 'fora-da-janela'
+  const eventTime = Math.floor(registradoEm.getTime() / 1000)
+  // event_id determinístico (com o horário original) — se o backfill rodar
+  // duas vezes, o dedupe do meta_events_log barra a segunda.
+  return dispatchBackfill({
+    eventName: 'CompleteRegistration',
+    eventId:   `registration_${user.id}_${eventTime}`,
+    user, customData: {}, depositId: null, eventTime,
+  })
+}
+
+/** Reenvia um Purchase com o horário ORIGINAL da confirmação do depósito. */
+export async function backfillPurchase(
+  user: UserPayload, deposit: DepositPayload, pagoEm: Date,
+): Promise<ResultadoBackfill> {
+  if (!dentroDaJanelaMeta(pagoEm)) return 'fora-da-janela'
+  return dispatchBackfill({
+    eventName: 'Purchase',
+    eventId:   `purchase_${deposit.id}_${user.id}`,   // já é determinístico
+    user,
+    customData: {
+      currency: 'BRL', value: deposit.amount,
+      content_name: 'Deposit', content_category: 'Broker Deposit',
+      deposit_id: deposit.id,
+    },
+    depositId: deposit.id,
+    eventTime: Math.floor(pagoEm.getTime() / 1000),
+  })
+}
+
+/** Versão do dispatch que AGUARDA e informa o resultado (o normal é fire-and-forget). */
+async function dispatchBackfill(args: DispatchArgs): Promise<ResultadoBackfill> {
+  const cfg = await getMetaPixelSettings()
+  if (!cfg.enabled || !cfg.pixelId?.trim() || !cfg.pixelToken?.trim()) return 'desligado'
+  if (await alreadySent(args.eventId)) return 'duplicado'
+  try {
+    await dispatch(args)
+    return (await alreadySent(args.eventId)) ? 'enviado' : 'falhou'
+  } catch {
+    return 'falhou'
+  }
+}
+
 // ── Core dispatch ───────────────────────────────────────────────────────
 
 interface DispatchArgs {
@@ -226,6 +293,15 @@ interface DispatchArgs {
   user:        UserPayload
   customData:  Record<string, unknown>
   depositId:   string | null
+  /**
+   * Horário REAL do evento (epoch em segundos). Omitido = agora, que é o
+   * caso normal (evento disparado no instante em que acontece).
+   *
+   * Usado pelo backfill: a Meta REJEITA o lote inteiro se algum event_time
+   * tiver mais de 7 dias, então o horário original importa — e eventos
+   * fora da janela nem devem ser tentados.
+   */
+  eventTime?:  number
 }
 
 async function dispatch(args: DispatchArgs): Promise<void> {
@@ -254,7 +330,7 @@ async function dispatch(args: DispatchArgs): Promise<void> {
     data: [
       {
         event_name:    args.eventName,
-        event_time:    Math.floor(Date.now() / 1000),
+        event_time:    args.eventTime ?? Math.floor(Date.now() / 1000),
         event_id:      args.eventId,
         action_source: 'website',
         user_data:     userData,
