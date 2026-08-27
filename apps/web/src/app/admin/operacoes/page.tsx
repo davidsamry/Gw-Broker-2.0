@@ -176,7 +176,7 @@ export default function AdminOperationsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar operação (usuário, email, ativo)..."
+            placeholder="Buscar por nome, email, CPF, telefone ou ativo..."
             className="w-full h-9 bg-[#1a1e2a] border border-[#1f232e] rounded-lg pl-8 pr-3 text-xs text-white placeholder-[#8b8f9a] outline-none focus:border-emerald-500/50"
           />
         </div>

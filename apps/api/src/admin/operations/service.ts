@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../prisma.js'
+import { buildUserSearchSql } from '../users/service.js'
 
 // Admin-side operations management. Raw SQL throughout to keep parity with
 // the rest of the admin module (and to avoid coupling to the generated
@@ -82,10 +83,13 @@ function buildUnifiedSql(params: ListOperationsParams): Prisma.Sql {
   const status      = params.status      && params.status      !== 'ALL' ? params.status      : null
   const accountType = params.accountType && params.accountType !== 'ALL' ? params.accountType : null
   const search      = params.search?.trim() ? `%${params.search.trim()}%` : null
+  // Mesmo filtro de usuário da tela de Usuários (nome/sobrenome, e-mail,
+  // CPF com ou sem máscara e telefone) — aqui somado ao ativo.
+  const buscaUser   = params.search?.trim() ? buildUserSearchSql(params.search) : null
 
   // ── 1) Trades binários ────────────────────────────────────────────────
   const tradeWhere: Prisma.Sql[] = []
-  if (search)            tradeWhere.push(Prisma.sql`(u.email ILIKE ${search} OR u.name ILIKE ${search} OR o."assetSymbol" ILIKE ${search})`)
+  if (search && buscaUser) tradeWhere.push(Prisma.sql`(${buscaUser} OR o."assetSymbol" ILIKE ${search})`)
   if (status)            tradeWhere.push(Prisma.sql`o.status = ${status}::"OperationStatus"`)
   if (accountType)       tradeWhere.push(Prisma.sql`a.type = ${accountType}::"AccountType"`)
   if (params.userId)     tradeWhere.push(Prisma.sql`u.id = ${params.userId}`)
@@ -117,7 +121,7 @@ function buildUnifiedSql(params: ListOperationsParams): Prisma.Sql {
 
   // ── 2) Operações de Copy Trading ──────────────────────────────────────
   const copyWhere: Prisma.Sql[] = []
-  if (search)        copyWhere.push(Prisma.sql`(u.email ILIKE ${search} OR u.name ILIKE ${search} OR ct.name ILIKE ${search})`)
+  if (search && buscaUser) copyWhere.push(Prisma.sql`(${buscaUser} OR ct.name ILIKE ${search})`)
   if (params.userId) copyWhere.push(Prisma.sql`u.id = ${params.userId}`)
   if (status === 'OPEN')      copyWhere.push(Prisma.sql`c.status = 'PENDING'`)
   if (status === 'CANCELLED') copyWhere.push(Prisma.sql`c.status = 'CANCELLED'`)
@@ -158,7 +162,7 @@ function buildUnifiedSql(params: ListOperationsParams): Prisma.Sql {
   if (status && kind !== 'COPY_PURCHASE') return Prisma.sql`${tradeSql} UNION ALL ${copySql}`
 
   const purchaseWhere: Prisma.Sql[] = [Prisma.sql`t.type = 'COPY_PURCHASE'::"TransactionType"`]
-  if (search)        purchaseWhere.push(Prisma.sql`(u.email ILIKE ${search} OR u.name ILIKE ${search} OR t.description ILIKE ${search})`)
+  if (search && buscaUser) purchaseWhere.push(Prisma.sql`(${buscaUser} OR t.description ILIKE ${search})`)
   if (params.userId) purchaseWhere.push(Prisma.sql`u.id = ${params.userId}`)
   const purchaseWhereSql = Prisma.sql`WHERE ${Prisma.join(purchaseWhere, ' AND ')}`
 

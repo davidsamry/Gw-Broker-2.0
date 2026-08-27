@@ -42,6 +42,46 @@ export interface ListUsersParams {
 
 // ── List ───────────────────────────────────────────────────────────────────
 
+/**
+ * Monta o filtro de busca de usuário: NOME (+ sobrenome), E-MAIL e CPF.
+ *
+ * Cuidados que a busca ingênua não cobria:
+ *
+ *  • CPF é gravado com 11 DÍGITOS CRUS ("03782015304"), mas o admin
+ *    normalmente copia com máscara ("037.820.153-04"). Comparar direto
+ *    nunca casaria. Aqui os dígitos do termo são extraídos e comparados
+ *    contra o CPF do banco — assim "037.820.153-04", "03782015304" e até
+ *    um pedaço como "820153" encontram o mesmo usuário.
+ *
+ *  • Nome completo agora vive em DUAS colunas (name + lastName). Buscar
+ *    "Silva" precisa achar quem tem name='João' e lastName='Silva', e
+ *    "João Silva" precisa casar com a concatenação das duas.
+ *
+ *  • Só aplica o ramo de CPF quando o termo tem 3+ dígitos: sem isso,
+ *    buscar por texto puro geraria '%%' e casaria todo mundo que tem CPF.
+ *
+ * Exportada para ser reaproveitada por outras listagens do admin.
+ */
+export function buildUserSearchSql(termo: string): Prisma.Sql {
+  const t = termo.trim()
+  const q = `%${t}%`
+  const digitos = t.replace(/\D/g, '')
+
+  const ramos: Prisma.Sql[] = [
+    Prisma.sql`u.email ILIKE ${q}`,
+    Prisma.sql`u.name ILIKE ${q}`,
+    Prisma.sql`u."lastName" ILIKE ${q}`,
+    // Nome completo: "joão silva" casa mesmo estando em colunas separadas.
+    Prisma.sql`(u.name || ' ' || COALESCE(u."lastName", '')) ILIKE ${q}`,
+  ]
+  if (digitos.length >= 3) {
+    ramos.push(Prisma.sql`u.cpf ILIKE ${`%${digitos}%`}`)
+    // Telefone também é útil no suporte e segue a mesma regra de dígitos.
+    ramos.push(Prisma.sql`regexp_replace(COALESCE(u.phone, ''), '\\D', '', 'g') ILIKE ${`%${digitos}%`}`)
+  }
+  return Prisma.sql`(${Prisma.join(ramos, ' OR ')})`
+}
+
 export async function listUsers(params: ListUsersParams): Promise<UserListResponse> {
   const page     = Math.max(1, params.page ?? 1)
   const pageSize = Math.min(100, Math.max(5, params.pageSize ?? 20))
@@ -51,8 +91,7 @@ export async function listUsers(params: ListUsersParams): Promise<UserListRespon
   // each filter is parameterized — never string-interpolated.
   const where: Prisma.Sql[] = []
   if (params.search) {
-    const q = `%${params.search.trim()}%`
-    where.push(Prisma.sql`(u.email ILIKE ${q} OR u.name ILIKE ${q})`)
+    where.push(buildUserSearchSql(params.search))
   }
   if (params.role && params.role !== 'ALL') {
     where.push(Prisma.sql`u.role = ${params.role}::"UserRole"`)
