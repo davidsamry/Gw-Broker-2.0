@@ -1,77 +1,94 @@
 /**
- * Recalibra o volatilityBase dos ativos OTC para um movimento "equilibrado".
+ * Recalibra o volatilityBase dos ativos OTC.
  *
- * CONTEXTO: medido em producao, o BTC OTC tinha amplitude media de 4,29% por
- * vela de 1min contra 0,059% do BTC real na Binance — 73x mais volatil. Isso
- * fazia o preco viver colado nas barreiras do motor (+-20% do seed), gerando
- * o padrao ondulante repetitivo que nao parece mercado de verdade.
+ * CONTEXTO: medido em producao, as velas OTC de 1min tinham 3,43% de
+ * amplitude media contra 0,059% do BTC real na Binance — 58x. Com esse
+ * tamanho de passo o preco vivia colado na barreira de +-20% do seed
+ * (10 de 34 ativos estavam la), batendo e sendo empurrado de volta sem
+ * parar: era dai que vinha o padrao ondulante de velas repetidas.
  *
- * ALVO: ~0,4% de amplitude por vela de 1min (~7x o mercado real). Realista o
- * bastante para o grafico parecer natural, e movimentado o bastante para
- * operacoes de 30s ainda terem resultado claro (o real, a 0,06%, empataria
- * quase sempre).
+ * ALVO: ~0,4% de amplitude por vela de 1min (~7x o mercado real).
+ * Realista o bastante para o grafico parecer natural, e movimentado o
+ * bastante para operacoes de 30s ainda terem resultado claro (o real,
+ * a 0,06%, empataria quase sempre).
  *
- * METODO: fator UNICO aplicado a todos, preservando as diferencas relativas
- * entre ativos — DOGE continua mais volatil que ouro, como no mundo real.
- * Normalizar cada um para o mesmo alvo apagaria essa personalidade.
+ * FATOR: 3,43% / 0,4% = 8,6. Numero tirado DIRETO da medicao de
+ * producao. Na primeira tentativa usei 31, vindo de uma simulacao
+ * Monte Carlo que superestimava a amplitude em ~3,5x; o resultado em
+ * producao foi 0,10% — 4x mais parado que o pedido. A producao escala
+ * LINEARMENTE com o volatilityBase (3,43/31 = 0,111 ~= 0,10 medido),
+ * entao regra de tres sobre dados reais e' o metodo confiavel aqui.
+ * Nao confie em simulacao para calibrar isto.
+ *
+ * IDEMPOTENTE: parte dos valores ORIGINAIS abaixo, nao do que esta no
+ * banco. Rodar duas vezes da o mesmo resultado.
  *
  * USO:
  *   node --import tsx scripts/otc-recalibrar-volatilidade.ts            → simula
  *   node --import tsx scripts/otc-recalibrar-volatilidade.ts --aplicar  → grava
  *
- * IMPORTANTE: o motor le a config no BOOT (runtime/boot.ts -> assetStates).
- * A mudanca so tem efeito depois de reiniciar a API.
+ * O motor le a config no BOOT (runtime/boot.ts -> assetStates). Na
+ * pratica: rode o script e faca o deploy — os dois passam a valer
+ * juntos no restart.
  */
 import { prisma } from '../src/prisma.js'
 
-// Fator fixo — TEM de bater com DIRECTIONAL_SCALE em
-// src/otc/v2/engine/pricing.ts (1/31). O motor escala drift, reversao
-// e force-reverse pelo mesmo fator; se os dois divergirem, a proporcao
-// drift:ruido sai do lugar e o grafico deixa de parecer natural.
-const FATOR    = 31
-const APLICAR  = process.argv.includes('--aplicar')
+// Fator unico, preservando as diferencas relativas entre ativos: DOGE
+// continua mais volatil que ouro, como no mundo real. Normalizar cada
+// um para o mesmo alvo apagaria essa personalidade.
+//
+// TEM de bater com DIRECTIONAL_SCALE em src/otc/v2/engine/pricing.ts
+// (1/8.6). O motor escala drift, force-reverse e trendBias pelo mesmo
+// fator; se os dois divergirem, a proporcao drift:ruido sai do lugar e
+// os trends viram rampas retas.
+const FATOR   = 8.6
+const APLICAR = process.argv.includes('--aplicar')
+
+// Valores de fabrica, antes de qualquer recalibracao. Fonte da verdade
+// para o calculo — assim o script pode rodar quantas vezes for preciso
+// sem dividir em cima do que ja foi dividido.
+const ORIGINAIS: Record<string, number> = {
+  'aapl-otc': 0.0006,     'ada-usd-otc': 0.0012,  'amzn-otc': 0.0006,
+  'aud-usd-otc': 0.0004,  'bnb-usd-otc': 0.001,   'brent-otc': 0.0006,
+  'btc-usd-otc': 0.00072, 'copper-otc': 0.0006,   'doge-usd-otc': 0.0015,
+  'eth-usd-otc': 0.001,   'eur-aud-otc': 0.0004,  'eur-gbp-otc': 0.0004,
+  'eur-usd-otc': 0.0005,  'gbp-jpy-otc': 0.00027, 'gold-otc': 0.0003,
+  'googl-otc': 0.0006,    'link-usd-otc': 0.001,  'meta-otc': 0.0006,
+  'msft-otc': 0.0006,     'nasdaq-otc': 0.00018,  'natgas-otc': 0.0008,
+  'nvda-otc': 0.0007,     'nzd-usd-otc': 0.0004,  'oil-otc': 0.0006,
+  'platinum-otc': 0.0005, 'silver-otc': 0.0006,   'sol-usd-otc': 0.0012,
+  'tsla-otc': 0.0008,     'usd-brl-otc': 0.0005,  'usd-cad-otc': 0.0004,
+  'usd-chf-otc': 0.0004,  'usd-jpy-otc': 0.0004,  'wheat-otc': 0.0005,
+  'xrp-usd-otc': 0.0012,
+}
 
 ;(async () => {
-  // Amplitude REAL medida das ultimas 4h por ativo
-  const medido = await prisma.$queryRaw<Array<any>>`
-    SELECT c."assetId",
-           AVG((c."highPrice"-c."lowPrice")/NULLIF(c."openPrice",0)*100)::float8 AS amp,
-           COUNT(*)::int AS velas
-    FROM otc_candles c
-    WHERE c.timeframe = 60 AND c."openTime" > NOW() - INTERVAL '4 hours'
-    GROUP BY 1 HAVING COUNT(*) > 30`
-  const ampPorAtivo = new Map(medido.map((m) => [m.assetId, m.amp]))
+  const ativos = await prisma.$queryRaw<Array<{ id: string; vol: number }>>`
+    SELECT id, "volatilityBase"::float8 AS vol FROM otc_assets ORDER BY id`
 
-  const ativos = await prisma.$queryRaw<Array<any>>`
-    SELECT id, "volatilityBase"::float8 AS vol, "seedPrice"::float8 AS seed
-    FROM otc_assets ORDER BY id`
+  const semOriginal = ativos.filter((a) => ORIGINAIS[a.id] == null)
+  if (semOriginal.length > 0) {
+    console.error('⚠️  Ativos sem valor original mapeado — adicione em ORIGINAIS antes de rodar:')
+    console.error('   ' + semOriginal.map((a) => `${a.id} (hoje ${a.vol})`).join(', '))
+    await prisma.$disconnect(); process.exit(1)
+  }
 
-  const comAmp = ativos.filter((a) => ampPorAtivo.has(a.id))
-  const ampMedia = comAmp.reduce((s, a) => s + ampPorAtivo.get(a.id)!, 0) / comAmp.length
+  console.log(`Dividindo os valores de fábrica por ${FATOR}×  →  alvo ~0,40% de amplitude por vela\n`)
 
-  console.log(`Amplitude média atual: ${ampMedia.toFixed(2)}% por vela de 1min`)
-  console.log(`Dividindo por ${FATOR}×  →  alvo ${(ampMedia / FATOR).toFixed(2)}% por vela
-`)
-
-  const linhas = ativos.map((a) => {
-    const ampAtual = ampPorAtivo.get(a.id)
-    const novo = Number((a.vol / FATOR).toPrecision(3))
-    return {
-      ativo: a.id,
-      amp_atual_pct: ampAtual ? Number(ampAtual.toFixed(2)) : null,
-      amp_prevista_pct: ampAtual ? Number((ampAtual / FATOR).toFixed(3)) : null,
-      vol_atual: a.vol,
-      vol_novo: novo,
-    }
-  })
+  const linhas = ativos.map((a) => ({
+    ativo: a.id,
+    vol_original: ORIGINAIS[a.id]!,
+    vol_no_banco: a.vol,
+    vol_novo: Number((ORIGINAIS[a.id]! / FATOR).toPrecision(3)),
+  }))
   console.table(linhas)
-  console.log(`(${linhas.length} ativos no total)\n`)
+
+  const mudam = linhas.filter((l) => l.vol_no_banco !== l.vol_novo).length
+  console.log(`${linhas.length} ativos — ${mudam} mudam de valor\n`)
 
   if (!APLICAR) {
     console.log('🟡 SIMULAÇÃO — nada foi gravado.')
     console.log('   Para aplicar: node --import tsx scripts/otc-recalibrar-volatilidade.ts --aplicar')
-    console.log('\n   Valores ATUAIS (guarde para reverter se precisar):')
-    console.log('   ' + ativos.map((a) => `${a.id}=${a.vol}`).join(' '))
     await prisma.$disconnect(); return
   }
 
@@ -79,10 +96,10 @@ const APLICAR  = process.argv.includes('--aplicar')
     await prisma.$executeRaw`
       UPDATE otc_assets SET "volatilityBase" = ${l.vol_novo} WHERE id = ${l.ativo}`
   }
-  const conf = await prisma.$queryRaw<Array<any>>`
-    SELECT ROUND(AVG("volatilityBase")::numeric,6) AS media,
-           ROUND(MIN("volatilityBase")::numeric,6) AS minimo,
-           ROUND(MAX("volatilityBase")::numeric,6) AS maximo FROM otc_assets`
+  const conf = await prisma.$queryRaw<Array<unknown>>`
+    SELECT ROUND(AVG("volatilityBase")::numeric,7) AS media,
+           ROUND(MIN("volatilityBase")::numeric,7) AS minimo,
+           ROUND(MAX("volatilityBase")::numeric,7) AS maximo FROM otc_assets`
   console.log(`✅ ${linhas.length} ativos atualizados.`)
   console.table(conf)
   console.log('\n⚠️  O motor lê a config no BOOT — reinicie a API para valer.')

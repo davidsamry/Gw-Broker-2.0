@@ -198,16 +198,21 @@ const NUDGE_WINDOW_MS = 20_000
 // ficava ENTERRADO no ruído: medido, 0,13x o movimento natural de 20s.
 // Quem garantia o resultado era o hard clamp, não o blend.
 //
-// Com a volatilidade 31x menor, manter 0.0035 inverteria o problema:
-// viraria 2,94x o movimento natural da janela, e os últimos 20s da
-// vela manipulada seriam uma rampa lisa e direcionada enquanto as
-// velas naturais ficam serrilhadas — sempre contra o usuário, o tipo
-// de padrão que alguém atento identifica.
+// Com a volatilidade 8,6x menor, manter 0.0035 inverteria o problema:
+// os últimos 20s da vela manipulada seriam uma rampa lisa e
+// direcionada enquanto as velas naturais ficam serrilhadas — sempre
+// contra o usuário, o tipo de padrão que alguém atento identifica.
 //
-// Medido com o motor recalibrado (Monte Carlo, 3000 janelas de 20s):
-//   movimento natural em 20s = 0,119% (mediana), 0,286% (p90)
-//   nudge 0,08% = 0,67x o natural  → se confunde com uma vela normal
-//   clamp 0,05% = 0,42x o natural  → garante o lado sem aparecer
+// Medido em PRODUÇÃO (81.800 janelas de 20s sobre otc_ticks reais),
+// com o motor rodando a 1/31: movimento natural em 20s = 0,042%
+// (mediana). Como a produção escala linearmente, a 1/8,6 isso dá
+// ~0,15%. Daí:
+//   nudge 0,08% = 0,53x o natural  → se confunde com uma vela normal
+//   clamp 0,05% = 0,33x o natural  → garante o lado sem aparecer
+//
+// Se mudar DIRECTIONAL_SCALE, RE-MEÇA isto com a query acima e
+// reajuste — a 1/31 o nudge de 0,08% já era 1,9x o natural, ou seja,
+// visível.
 //
 // NÃO escalar por 31 junto com a volatilidade: a margem do clamp
 // cairia para 0,0016% e, em ativo de preço baixo, o preço de saída

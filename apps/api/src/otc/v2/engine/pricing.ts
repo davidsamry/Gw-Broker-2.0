@@ -70,31 +70,32 @@ const LIQUIDITY_BIAS_WEIGHT    = 1.0
 // bastante para operacoes de 30s ainda terem resultado claro — a 0,06%
 // do mercado real, quase toda operacao curta empataria.
 //
-// COMO: volatilityBase de todos os ativos dividido por 31 (script
+// COMO: volatilityBase de todos os ativos dividido por 8,6 (script
 // scripts/otc-recalibrar-volatilidade.ts) E as forcas direcionais pelo
 // mesmo fator. Drift, force-reverse e trendBias sao valores ABSOLUTOS
 // por tick — nao escalam junto com a volatilidade. Cortando so' a
-// volatilidade, o drift (0,6%/min) passaria a dominar o ruido e os
-// trends virariam rampas retas: artificial, e previsivel para o
-// usuario apostar contra. Escalando junto, a proporcao drift:ruido que
-// define o carater do movimento fica preservada.
+// volatilidade, o drift passaria a dominar o ruido e os trends
+// virariam rampas retas: artificial, e previsivel para o usuario
+// apostar contra. Escalando junto, a proporcao drift:ruido que define
+// o carater do movimento fica preservada.
 //
 // A barreira suave de +-20% NAO e' escalada de proposito: e' rede de
 // seguranca, e agora deve ficar inalcancavel.
 //
-// MEDIDO (Monte Carlo com o motor real, 24h simuladas, 3 rodadas —
-// scripts/tmp/sim.ts descartado apos a calibracao):
-//   amplitude media 0,39% por vela | corpo medio 0,30%
-//   range em 24h 9-12% | desvio maximo do seed 5,5-6,2%
-// Ou seja: fica a ~1/3 do caminho ate' a barreira mesmo no pior caso.
+// DE ONDE VEM O 8,6: 3,43% medido / 0,4% desejado. Regra de tres sobre
+// dados de PRODUCAO. A producao escala linearmente com o
+// volatilityBase — confirmado na marra: a primeira tentativa usou 31,
+// vindo de um Monte Carlo que previa 0,39%, e o resultado real foi
+// 0,10% (= 3,43/31). A simulacao superestimava a amplitude em ~3,5x.
 //
-// ATENCAO: estes tres fatores foram calibrados JUNTOS, empiricamente.
-// Mexer num sem os outros desequilibra o motor — a estimativa
-// analitica erra feio aqui porque a camada micro (microdynamics.ts)
-// soma um jitter AR(1) de 2-4x effectiveVol sobre o preco emitido, e
-// o volume oscila ate' 2x. Se precisar mudar a amplitude, mude o fator
-// e RE-MEDA.
-const DIRECTIONAL_SCALE = 1 / 31
+// ATENCAO: NAO calibre isto por simulacao. Mude o fator, faca o
+// deploy, e meca a amplitude real em otc_candles:
+//   SELECT AVG(("highPrice"-"lowPrice")/"openPrice"*100) FROM otc_candles
+//    WHERE timeframe=60 AND "openTime" > NOW() - INTERVAL '15 minutes'
+//
+// E mexa nos tres fatores JUNTOS — um sem os outros desequilibra o
+// motor.
+const DIRECTIONAL_SCALE = 1 / 8.6
 
 // Puxao de volta ao seed, por tick, por unidade de distancia relativa.
 // Era 0.0005 — dimensionado para a volatilidade antiga. Tem escala
@@ -102,11 +103,17 @@ const DIRECTIONAL_SCALE = 1 / 31
 // diferente: o drift define o CARATER do movimento, a reversao define
 // a LARGURA do intervalo onde o preco vive.
 //
-// Medido: 0.000011 deixava o desvio chegar a 13,8% em 24h (perto
-// demais da barreira). Subir para 0.00003 trouxe para ~6%. Subir mais
-// (testei 0.000044) nao muda quase nada — a essa altura quem limita as
-// excursoes e' a alternancia de trends do FSM, nao a reversao. Por
-// isso fica no menor valor que resolve, para nao prender o preco.
+// O que limita a excursao e' o equilibrio entre o drift do trend e a
+// reversao: drift_tick = k * distancia. Com o drift do TREND_STRONG em
+// 0.00001*DIRECTIONAL_SCALE e k=0.00003, o preco estabiliza a ~3,9% do
+// seed, mais o ruido por cima — bem longe dos +-20% da barreira.
+//
+// Confirmado em producao: rodando com DIRECTIONAL_SCALE=1/31 (drift 3x
+// menor), a formula previa 1,1% e o desvio maximo medido nos 34 ativos
+// foi 2,06%. Antes da recalibracao eram 20-26% em 10 ativos.
+//
+// Fica no menor valor que resolve, para nao prender o preco colado no
+// seed e matar os trends.
 const REVERSION_PER_TICK = 0.00003
 
 // Force-reversal drift (per tick) applied when the runtime detects
