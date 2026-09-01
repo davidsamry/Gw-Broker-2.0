@@ -198,7 +198,14 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
     raf: number | null
     /** Tipo de gráfico no momento do frame (velas/area/heiken-ashi/barras). */
     chartType: ChartType
-  }>({ target: null, visualClose: null, raf: null, chartType: 'velas' })
+    /**
+     * Pinta uma barra na série. Definida quando o gráfico monta.
+     * Necessária FORA do loop porque o requestAnimationFrame congela com a
+     * aba em segundo plano — sem isso, velas que fecham enquanto o usuário
+     * está em outra aba nunca chegam a ser desenhadas.
+     */
+    pintar: ((t: { time: number; open: number; high: number; low: number; close: number }, close: number) => void) | null
+  }>({ target: null, visualClose: null, raf: null, chartType: 'velas', pintar: null })
 
   // Bolinha manipulada via DOM direto (sem state) — a 60 FPS um setState
   // dispararia re-render do React a cada frame.
@@ -410,6 +417,7 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
     let priceInterval: ReturnType<typeof setInterval> | undefined
     let klineUnsub:       (() => void) | undefined
     let otcCandleUnsub:   (() => void) | undefined
+    let limparVisibilidade: (() => void) | undefined
 
     async function initChart() {
       if (!chartContainerRef.current || disposed) return
@@ -754,6 +762,32 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
 
       animRef.current.chartType = chartType
 
+      /**
+       * Desenha uma barra na série. `close` permite pintar o valor animado
+       * (loop) ou o valor REAL (quando a barra fecha / a aba volta).
+       *
+       * Existe separada do loop porque o requestAnimationFrame PARA quando a
+       * aba vai para segundo plano: se a pintura só acontecesse lá, as velas
+       * que fecham enquanto o usuário está em outra aba nunca seriam
+       * desenhadas e virariam buracos no gráfico.
+       */
+      const pintarBarra = (
+        t: { time: number; open: number; high: number; low: number; close: number },
+        close: number,
+      ) => {
+        try {
+          if (animRef.current.chartType === 'area') {
+            mainSeries.update({ time: t.time, value: close })
+          } else if (animRef.current.chartType === 'heiken-ashi') {
+            const haClose = parseFloat(((t.open + t.high + t.low + close) / 4).toFixed(5))
+            mainSeries.update({ time: t.time, open: t.open, high: t.high, low: t.low, close: haClose })
+          } else {
+            mainSeries.update({ time: t.time, open: t.open, high: t.high, low: t.low, close })
+          }
+        } catch { /* série já removida — ignora */ }
+      }
+      animRef.current.pintar = pintarBarra
+
       const animate = () => {
         const st = animRef.current
         if (disposed) return
@@ -775,18 +809,11 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
         // criar um pavio que não existiu.
         const v = Math.min(t.high, Math.max(t.low, st.visualClose))
 
-        try {
-          if (st.chartType === 'area') {
-            mainSeries.update({ time: t.time, value: v })
-          } else if (st.chartType === 'heiken-ashi') {
-            const haClose = parseFloat(((t.open + t.high + t.low + v) / 4).toFixed(5))
-            mainSeries.update({ time: t.time, open: t.open, high: t.high, low: t.low, close: haClose })
-          } else {
-            mainSeries.update({ time: t.time, open: t.open, high: t.high, low: t.low, close: v })
-          }
+        pintarBarra(t, v)
 
-          // Bolinha do preço atual — segue o valor ANIMADO, colada na ponta
-          // da vela em formação (mesma leitura visual da referência IQ Option).
+        // Bolinha do preço atual — segue o valor ANIMADO, colada na ponta
+        // da vela em formação (mesma leitura visual da referência IQ Option).
+        try {
           const dot = priceDotRef.current
           if (dot && chartRef.current) {
             const y = mainSeries.priceToCoordinate(v)
@@ -801,11 +828,74 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
               dot.style.opacity = '0'   // fora da área visível (pan/zoom)
             }
           }
-        } catch { /* série já removida no meio do frame — ignora */ }
+        } catch { /* idem */ }
 
         st.raf = requestAnimationFrame(animate)
       }
       animRef.current.raf = requestAnimationFrame(animate)
+
+      // ── Volta de outra aba: recarrega se ficou tempo demais fora ────────
+      //
+      // Com a aba em segundo plano o navegador congela o rAF e estrangula os
+      // timers; o SSE pode até ser derrubado (comum no mobile). Ao voltar:
+      //   • ausência curta  → só religa o loop; o próximo evento já corrige.
+      //   • ausência longa  → rebusca as velas do servidor, porque os
+      //     eventos perdidos NÃO são reenviados: o stream manda a barra
+      //     atual, e as que fecharam no intervalo ficariam faltando.
+      const AUSENCIA_MAX_MS = 5_000
+      let ocultoDesde: number | null = null
+
+      const onVisibilidade = async () => {
+        if (disposed) return
+        if (document.visibilityState === 'hidden') {
+          ocultoDesde = Date.now()
+          // Cancela o loop explicitamente em vez de deixar o navegador
+          // congelá-lo — evita um frame órfão tocando na série.
+          if (animRef.current.raf != null) {
+            cancelAnimationFrame(animRef.current.raf)
+            animRef.current.raf = null
+          }
+          return
+        }
+
+        // Voltou à tela: religa a animação (se não estiver rodando).
+        if (animRef.current.raf == null) {
+          animRef.current.raf = requestAnimationFrame(animate)
+        }
+
+        const foraMs = ocultoDesde ? Date.now() - ocultoDesde : 0
+        ocultoDesde = null
+        if (foraMs < AUSENCIA_MAX_MS) return
+
+        // Rebusca o histórico — mesma chamada do carregamento inicial.
+        try {
+          const frescas = asset.source === 'BINANCE' && asset.marketSymbol
+            ? await fetchBinanceCandles(
+                asset.marketSymbol,
+                BINANCE_INTERVAL_BY_TIMEFRAME[selectedTf.seconds] ?? '1m',
+                500,
+              )
+            : await fetchOtcCandles(asset.id, selectedTf.seconds, 500)
+          if (disposed || !frescas?.length) return
+
+          const dados = frescas.map((c: any) => ({ ...c, time: c.time + BRT_OFFSET }))
+          if (chartType === 'area') {
+            mainSeries.setData(dados.map((c: any) => ({ time: c.time, value: c.close })))
+          } else {
+            mainSeries.setData(dados)
+          }
+          // Ressincroniza o alvo da animação com a última barra real, senão
+          // o loop continuaria perseguindo um preço velho.
+          const ultima = dados[dados.length - 1]
+          animRef.current.target      = ultima
+          animRef.current.visualClose = ultima.close
+          if (autoScrollRef.current) chartRef.current?.timeScale().scrollToRealTime()
+        } catch {
+          // Falhou o refetch: o SSE segue ativo e corrige na próxima barra.
+        }
+      }
+      document.addEventListener('visibilitychange', onVisibilidade)
+      limparVisibilidade = () => document.removeEventListener('visibilitychange', onVisibilidade)
 
       priceInterval = setInterval(() => {
         if (disposed || !chartRef.current) return
@@ -870,11 +960,17 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           lastTickPrice = k.close
 
           // Define o ALVO visual; o loop de animação pinta a 60 FPS.
-          // Ao virar a barra (time novo), encosta no valor real na hora —
-          // a vela precisa FECHAR exatamente no preço verdadeiro.
           const st = animRef.current
-          if (!st.target || st.target.time !== time) st.visualClose = k.close
-          st.target = { time, open: k.open, high: k.high, low: k.low, close: k.close }
+          const barra = { time, open: k.open, high: k.high, low: k.low, close: k.close }
+          if (!st.target || st.target.time !== time) {
+            // Barra NOVA: fecha a anterior no preço real e pinta esta na hora.
+            // Não pode esperar o rAF — com a aba em segundo plano ele está
+            // parado, e a barra que fechou nunca seria desenhada.
+            if (st.target) st.pintar?.(st.target, st.target.close)
+            st.visualClose = k.close
+            st.pintar?.(barra, k.close)
+          }
+          st.target = barra
         })
       }
 
@@ -894,10 +990,16 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
           lastTickPrice = c.close
 
           // Mesmo contrato do feed Binance: o tick vira ALVO e o loop anima.
-          // Nova barra → snap, para a vela anterior fechar no preço real.
           const st = animRef.current
-          if (!st.target || st.target.time !== time) st.visualClose = c.close
-          st.target = { time, open: c.open, high: c.high, low: c.low, close: c.close }
+          const barra = { time, open: c.open, high: c.high, low: c.low, close: c.close }
+          if (!st.target || st.target.time !== time) {
+            // Barra nova → fecha a anterior no preço real e pinta esta já,
+            // sem depender do rAF (que congela com a aba oculta).
+            if (st.target) st.pintar?.(st.target, st.target.close)
+            st.visualClose = c.close
+            st.pintar?.(barra, c.close)
+          }
+          st.target = barra
         })
       }
     }
@@ -925,6 +1027,8 @@ export function TradingChart({ asset, marketPrice, hasFreshTicker = false, onInf
       }
       animRef.current.target      = null
       animRef.current.visualClose = null
+      animRef.current.pintar      = null
+      limparVisibilidade?.()
       if (priceDotRef.current) priceDotRef.current.style.opacity = '0'
       if (klineUnsub)       klineUnsub()
       if (otcCandleUnsub)   otcCandleUnsub()
