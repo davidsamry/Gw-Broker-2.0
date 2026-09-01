@@ -20,9 +20,12 @@ import {
 
 const updateSchema = z.object({
   payout:          z.number().int().min(1).max(100).optional(),
-  // Tick size as fraction of seedPrice. 0.0005 ≈ 5bp per tick — a
-  // reasonable upper limit before the chart starts looking erratic.
-  volatilityBase:  z.number().min(0.00005).max(0.01).optional(),
+  // Tick size as fraction of seedPrice. Piso baixado 0.00005 → 0.000001
+  // na recalibracao de 2026-09-01: os 34 ativos foram divididos por 31,
+  // e o mais calmo (nasdaq-otc) foi para 0.0000058 — abaixo do piso
+  // antigo. Sem baixar, o admin rejeitaria qualquer edicao futura
+  // nesses ativos com um erro de validacao confuso.
+  volatilityBase:  z.number().min(0.000001).max(0.01).optional(),
   // 1.0 = base 10Hz. Capped at 5x to avoid hammering the DB. Note:
   // takes full effect on next process restart (interval period is
   // captured at boot).

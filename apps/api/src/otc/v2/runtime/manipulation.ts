@@ -186,12 +186,34 @@ export function isSlotUnderManipulation(
 // 20s window on M1 = 40s natural + 20s smooth pull-to-target.
 const NUDGE_WINDOW_MS = 20_000
 
-// Target distance from open as a fraction of price. The final close
-// lands near open*(1 ± NUDGE_MAGNITUDE). 35bp on EUR/USD at 1.085 ≈
-// 38 pips — clearly larger than the typical natural M1 body (~10-15
-// pips) so manipulated candles read as a decisive move on the chart
-// instead of blending in with normal volatility.
-const NUDGE_MAGNITUDE = 0.0035
+// Distância alvo em relação à âncora, como fração do preço. O close
+// final para perto de âncora*(1 ± NUDGE_MAGNITUDE).
+//
+// 2026-09-01: baixado 0.0035 → 0.0008 junto com a recalibração de
+// volatilidade (DIRECTIONAL_SCALE em engine/pricing.ts).
+//
+// O valor antigo foi escolhido para ser "claramente maior que o corpo
+// natural de ~10-15 pips" — premissa que nunca bateu com a produção,
+// onde o corpo natural era 2,7%, umas 30x isso. Na prática o nudge
+// ficava ENTERRADO no ruído: medido, 0,13x o movimento natural de 20s.
+// Quem garantia o resultado era o hard clamp, não o blend.
+//
+// Com a volatilidade 31x menor, manter 0.0035 inverteria o problema:
+// viraria 2,94x o movimento natural da janela, e os últimos 20s da
+// vela manipulada seriam uma rampa lisa e direcionada enquanto as
+// velas naturais ficam serrilhadas — sempre contra o usuário, o tipo
+// de padrão que alguém atento identifica.
+//
+// Medido com o motor recalibrado (Monte Carlo, 3000 janelas de 20s):
+//   movimento natural em 20s = 0,119% (mediana), 0,286% (p90)
+//   nudge 0,08% = 0,67x o natural  → se confunde com uma vela normal
+//   clamp 0,05% = 0,42x o natural  → garante o lado sem aparecer
+//
+// NÃO escalar por 31 junto com a volatilidade: a margem do clamp
+// cairia para 0,0016% e, em ativo de preço baixo, o preço de saída
+// poderia arredondar igual ao de entrada — o que cai no empate →
+// estorno do worker de operações. Viraria devolução em vez de LOSS.
+const NUDGE_MAGNITUDE = 0.0008
 
 // Janela final em que o preço é GARANTIDO do lado correto da âncora
 // (só vale para sinais de liquidez, que carregam anchorPrice). O blend
@@ -201,6 +223,8 @@ const HARD_CLAMP_MS = 3_000
 
 // Margem mínima entre o preço final e a âncora (entryPrice). 5bp é o
 // bastante para o resolver decidir sem ambiguidade e some no gráfico.
+// Mantido em 0.0005 na recalibração de 2026-09-01 de propósito — ver o
+// último parágrafo do comentário de NUDGE_MAGNITUDE acima.
 const MIN_CLAMP_MARGIN = 0.0005
 
 export function maybeManipulatePrice(

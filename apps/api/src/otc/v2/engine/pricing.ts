@@ -58,6 +58,57 @@ const COUNTER_TREND_SPIKE_PROB = 0.7
 // to [0.3, 0.7] so max contribution is ±0.4 × effectiveVol.
 const LIQUIDITY_BIAS_WEIGHT    = 1.0
 
+// ── Recalibracao 2026-09-01 ────────────────────────────────────────
+// PROBLEMA: as velas OTC de 1min tinham 3,4% de amplitude media contra
+// 0,059% do BTC real na Binance — 58x. O preco vivia colado na
+// barreira de +-20% do seed (10 de 34 ativos estavam la), batendo e
+// sendo empurrado de volta sem parar. Era dai que vinha o padrao
+// ondulante de velas repetidas que nao parecia mercado de verdade.
+//
+// ALVO: ~0,4% de amplitude por vela de 1min (~7x o mercado real).
+// Realista o bastante para o grafico parecer natural, e movimentado o
+// bastante para operacoes de 30s ainda terem resultado claro — a 0,06%
+// do mercado real, quase toda operacao curta empataria.
+//
+// COMO: volatilityBase de todos os ativos dividido por 31 (script
+// scripts/otc-recalibrar-volatilidade.ts) E as forcas direcionais pelo
+// mesmo fator. Drift, force-reverse e trendBias sao valores ABSOLUTOS
+// por tick — nao escalam junto com a volatilidade. Cortando so' a
+// volatilidade, o drift (0,6%/min) passaria a dominar o ruido e os
+// trends virariam rampas retas: artificial, e previsivel para o
+// usuario apostar contra. Escalando junto, a proporcao drift:ruido que
+// define o carater do movimento fica preservada.
+//
+// A barreira suave de +-20% NAO e' escalada de proposito: e' rede de
+// seguranca, e agora deve ficar inalcancavel.
+//
+// MEDIDO (Monte Carlo com o motor real, 24h simuladas, 3 rodadas —
+// scripts/tmp/sim.ts descartado apos a calibracao):
+//   amplitude media 0,39% por vela | corpo medio 0,30%
+//   range em 24h 9-12% | desvio maximo do seed 5,5-6,2%
+// Ou seja: fica a ~1/3 do caminho ate' a barreira mesmo no pior caso.
+//
+// ATENCAO: estes tres fatores foram calibrados JUNTOS, empiricamente.
+// Mexer num sem os outros desequilibra o motor — a estimativa
+// analitica erra feio aqui porque a camada micro (microdynamics.ts)
+// soma um jitter AR(1) de 2-4x effectiveVol sobre o preco emitido, e
+// o volume oscila ate' 2x. Se precisar mudar a amplitude, mude o fator
+// e RE-MEDA.
+const DIRECTIONAL_SCALE = 1 / 31
+
+// Puxao de volta ao seed, por tick, por unidade de distancia relativa.
+// Era 0.0005 — dimensionado para a volatilidade antiga. Tem escala
+// propria (nao usa DIRECTIONAL_SCALE) porque faz um trabalho
+// diferente: o drift define o CARATER do movimento, a reversao define
+// a LARGURA do intervalo onde o preco vive.
+//
+// Medido: 0.000011 deixava o desvio chegar a 13,8% em 24h (perto
+// demais da barreira). Subir para 0.00003 trouxe para ~6%. Subir mais
+// (testei 0.000044) nao muda quase nada — a essa altura quem limita as
+// excursoes e' a alternancia de trends do FSM, nao a reversao. Por
+// isso fica no menor valor que resolve, para nao prender o preco.
+const REVERSION_PER_TICK = 0.00003
+
 // Force-reversal drift (per tick) applied when the runtime detects
 // 5+ consecutive same-direction M1 candles.
 //
@@ -67,7 +118,7 @@ const LIQUIDITY_BIAS_WEIGHT    = 1.0
 // regime HIGH_VOL (shock pode ser ±0.1% a 0.5% num unico tick). Com
 // 0.00006 (3.6%/min de pull) o force domina ate' HIGH_VOL sem virar
 // um spike artificial visivel.
-const FORCE_REVERSE_DRIFT_PER_TICK = 0.00006
+const FORCE_REVERSE_DRIFT_PER_TICK = 0.00006 * DIRECTIONAL_SCALE
 
 // Session-based volatility multiplier — rough approximation of real
 // market activity windows. Helps the chart "feel" different at
@@ -115,7 +166,7 @@ export const REGIME_PARAMS: Record<OtcRegime, RegimeParams> = {
     },
   },
   TREND_UP_WEAK: {
-    driftPerTick: 0.000005,        // ~0.3% per minute
+    driftPerTick: 0.000005 * DIRECTIONAL_SCALE,   // ~0,035% por minuto
     volMultiplier: 1.0,
     durMinMs: 30_000, durMaxMs: 90_000,
     transitions: {
@@ -127,7 +178,7 @@ export const REGIME_PARAMS: Record<OtcRegime, RegimeParams> = {
     // 2026-05-26 calibration — was 0.000015 (~0.9%/min). Cut to 0.000010
     // (~0.6%/min). Combined with the strengthened reversion below, this
     // keeps strong trends from running 40%+ off seed within 15 min.
-    driftPerTick: 0.000010,
+    driftPerTick: 0.000010 * DIRECTIONAL_SCALE,   // ~0,07% por minuto
     volMultiplier: 1.2,
     durMinMs: 10_000, durMaxMs: 30_000,
     transitions: {
@@ -136,7 +187,7 @@ export const REGIME_PARAMS: Record<OtcRegime, RegimeParams> = {
     },
   },
   TREND_DOWN_WEAK: {
-    driftPerTick: -0.000005,
+    driftPerTick: -0.000005 * DIRECTIONAL_SCALE,
     volMultiplier: 1.0,
     durMinMs: 30_000, durMaxMs: 90_000,
     transitions: {
@@ -146,7 +197,7 @@ export const REGIME_PARAMS: Record<OtcRegime, RegimeParams> = {
   },
   TREND_DOWN_STRONG: {
     // 2026-05-26 calibration — symmetric with TREND_UP_STRONG above.
-    driftPerTick: -0.000010,
+    driftPerTick: -0.000010 * DIRECTIONAL_SCALE,
     volMultiplier: 1.2,
     durMinMs: 10_000, durMaxMs: 30_000,
     transitions: {
@@ -283,7 +334,7 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
   // trendBias max ±1 → max ±0.000005 per tick = ±0.3%/min — same
   // scale as a STRONG regime drift, so a slammed bias has noticeable
   // but bounded effect, not an instant runaway.
-  const drift = params.driftPerTick * effectiveDriftMult + s.trendBias * 0.000005 + forceBias
+  const drift = params.driftPerTick * effectiveDriftMult + s.trendBias * 0.000005 * DIRECTIONAL_SCALE + forceBias
 
   // ── Session vol multiplier ───────────────────────────────────────
   const sessionMult = NATURAL_V2 ? sessionVolMultiplier() : 1
@@ -297,7 +348,7 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
   //   off the catastrophic clamp — enough that strong trends bend before
   //   they break the chart's auto-scale.
   const distRatio = (s.price - s.config.seedPrice) / s.config.seedPrice
-  const reversion = -0.0005 * distRatio
+  const reversion = -REVERSION_PER_TICK * distRatio
 
   // Fase M4 soft barrier; 2026-05-26 task #113 calibration: threshold
   // lowered 0.35 → 0.20 (engages MUCH earlier so prices don't get a free
