@@ -97,24 +97,37 @@ const LIQUIDITY_BIAS_WEIGHT    = 1.0
 // motor.
 const DIRECTIONAL_SCALE = 1 / 8.6
 
-// Puxao de volta ao seed, por tick, por unidade de distancia relativa.
-// Era 0.0005 — dimensionado para a volatilidade antiga. Tem escala
-// propria (nao usa DIRECTIONAL_SCALE) porque faz um trabalho
-// diferente: o drift define o CARATER do movimento, a reversao define
-// a LARGURA do intervalo onde o preco vive.
+// Puxao de volta ao seed. Multiplica effectiveVol e a distancia
+// relativa ao seed: reversion = -C * effectiveVol * distRatio.
 //
-// O que limita a excursao e' o equilibrio entre o drift do trend e a
-// reversao: drift_tick = k * distancia. Com o drift do TREND_STRONG em
-// 0.00001*DIRECTIONAL_SCALE e k=0.00003, o preco estabiliza a ~3,9% do
-// seed, mais o ruido por cima — bem longe dos +-20% da barreira.
+// PROPORCIONAL a effectiveVol, nao absoluta — este foi o bug que
+// mantinha os precos presos na barreira de +-20%.
 //
-// Confirmado em producao: rodando com DIRECTIONAL_SCALE=1/31 (drift 3x
-// menor), a formula previa 1,1% e o desvio maximo medido nos 34 ativos
-// foi 2,06%. Antes da recalibracao eram 20-26% em 10 ativos.
+// No motor, TODAS as forcas que empurram o preco sao proporcionais a
+// effectiveVol: shock, liquidityBias, spike e a camada micro. A
+// reversao era o unico contrapeso ABSOLUTO. Resultado: a proporcao
+// entre empurrao e contrapeso mudava conforme a volatilidade, e em
+// nenhuma escala ela dava conta do liquidityBias.
 //
-// Fica no menor valor que resolve, para nao prender o preco colado no
-// seed e matar os trends.
-const REVERSION_PER_TICK = 0.00003
+// O liquidityBias vale ate' 0,4 * effectiveVol por tick (buyPressure
+// vive em [0,3-0,7] e o peso e' 1,0) — cerca de 10x a contribuicao do
+// ruido por minuto, e SUSTENTADO enquanto a pressao ficar torta. Quem
+// segurava era so' a barreira quadratica de +-20%, ou seja: o preco
+// era EMPURRADO ate' encostar nela e ficava la, no cabo de guerra que
+// gerava as velas repetidas.
+//
+// Sendo proporcional, o equilibrio vira uma razao pura, igual para
+// todo ativo e toda escala de volatilidade:
+//   0,4 * effVol = C * effVol * d   =>   d = 0,4 / C
+// Com C=10 o preco se equilibra a no maximo 4% do seed sob pressao
+// maxima, e ~1% sob pressao tipica. A barreira volta a ser o que
+// deveria ser: rede de seguranca que nunca engaja.
+//
+// A formula preve o comportamento observado antes da correcao: o
+// equilibrio ficava onde a barreira segurava o bias,
+// 0,20 + sqrt(0,4*effVol/0,15). Para o bnb original da 26,3% — e o que
+// se via em producao era doge +26%, eth +25,3%. Bate.
+const REVERSION_STRENGTH = 10
 
 // Force-reversal drift (per tick) applied when the runtime detects
 // 5+ consecutive same-direction M1 candles.
@@ -355,7 +368,7 @@ export function stepPrice(s: OtcAssetState, rand: () => number = Math.random): n
   //   off the catastrophic clamp — enough that strong trends bend before
   //   they break the chart's auto-scale.
   const distRatio = (s.price - s.config.seedPrice) / s.config.seedPrice
-  const reversion = -REVERSION_PER_TICK * distRatio
+  const reversion = -REVERSION_STRENGTH * effectiveVol * distRatio
 
   // Fase M4 soft barrier; 2026-05-26 task #113 calibration: threshold
   // lowered 0.35 → 0.20 (engages MUCH earlier so prices don't get a free
