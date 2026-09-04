@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore, useCurrentAccount } from '@/store/auth'
 import { useOperationsStore } from '@/store/operations'
 import { GraduationCap, Plus, Bell, ChevronDown, X } from 'lucide-react'
 import { getAccountLevel } from '@/lib/accountLevel'
+import { getAssetMarket, isMarketAllowed } from '@/lib/marketPermissions'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { Header } from '@/components/layout/Header'
 import { Logo } from '@/components/layout/Logo'
@@ -165,6 +166,47 @@ export default function TradingPage() {
     try { localStorage.setItem(SELECTED_ASSET_KEY, selectedAsset.id) }
     catch { /* quota / disabled */ }
   }, [selectedAsset])
+
+  // Esconde do seletor os ativos de mercado que o usuário não pode
+  // operar (admin desliga canTradeForex/Otc/Crypto em /admin/usuarios).
+  //
+  // Antes, o mercado fechado só aparecia DEPOIS de escolher o ativo, no
+  // banner "Mercado Fechado" do TradingPanel — o ativo continuava na
+  // lista e o usuário só descobria ao tentar operar. Pior: o
+  // localStorage restaura as abas a partir do ASSETS completo (efeito
+  // acima), então quem tinha EUR/USD aberto voltava com a aba lá mesmo
+  // com forex fechado. Era esse o "fica no cache".
+  //
+  // Derivado em vez de filtrado no fetch de propósito: o carregamento
+  // tem dois caminhos que caem no ASSETS inteiro (Binance vazia e o
+  // catch), e filtrar aqui cobre os três de uma vez.
+  //
+  // isMarketAllowed é fail-OPEN: enquanto o /auth/me não resolve, o
+  // usuário é undefined e nada some. Quando as flags chegam, este memo
+  // recalcula e o efeito abaixo limpa as abas.
+  const { canTradeForex, canTradeOtc, canTradeCrypto } = authStore.user ?? {}
+  const visibleAssets = useMemo(
+    () => assets.filter((a) => isMarketAllowed(
+      authStore.user ?? undefined, getAssetMarket(a),
+    )),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [assets, canTradeForex, canTradeOtc, canTradeCrypto],
+  )
+
+  // Tira das abas abertas e da seleção o que deixou de ser permitido.
+  // Sem isto o filtro acima só valeria para o seletor, e a aba já aberta
+  // continuaria clicável.
+  useEffect(() => {
+    if (!restoredRef.current) return
+    if (visibleAssets.length === 0) return   // tudo bloqueado: não há pra onde ir
+    const permitido = new Set(visibleAssets.map((a) => a.id))
+    setOpenAssets((prev) => {
+      const mantidos = prev.filter((a) => permitido.has(a.id))
+      if (mantidos.length === prev.length) return prev
+      return mantidos.length > 0 ? mantidos : [visibleAssets[0]]
+    })
+    setSelectedAsset((prev) => permitido.has(prev.id) ? prev : visibleAssets[0])
+  }, [visibleAssets])
   const [switchModal, setSwitchModal] = useState<'demo' | 'real' | null>(null)
   const [assetInfoOpen, setAssetInfoOpen] = useState(false)
   const [assetSelectorOpen, setAssetSelectorOpen] = useState(false)
@@ -638,7 +680,7 @@ export default function TradingPage() {
         <NiveisModal realBalance={realBalance} onClose={() => setNiveisOpen(false)} />
       )}
       {assetSelectorOpen && (
-        <AssetSelectorModal selectedAsset={selectedAsset} assets={assets} onSelect={handleSelectAsset} onClose={() => setAssetSelectorOpen(false)} />
+        <AssetSelectorModal selectedAsset={selectedAsset} assets={visibleAssets} onSelect={handleSelectAsset} onClose={() => setAssetSelectorOpen(false)} />
       )}
       {assetInfoOpen && (
         <AssetInfoModal asset={selectedAsset} marketPrice={displayPrice} onClose={() => setAssetInfoOpen(false)} onTrade={() => setAssetInfoOpen(false)} />
