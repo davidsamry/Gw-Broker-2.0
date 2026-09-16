@@ -75,14 +75,32 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
     let cancelled = false
     api.get('/admin/ping')
       .then(() => { if (!cancelled) setVerified(true) })
-      .catch((err) => {
+      .catch(async (err) => {
         if (cancelled) return
         const code = err?.response?.data?.error
-        if (code === 'STEP_UP_REQUIRED') {
-          router.replace('/admin/login')
-        } else {
+        if (code !== 'STEP_UP_REQUIRED') {
           router.replace(`/login?next=${encodeURIComponent(pathname)}`)
+          return
         }
+
+        // Token sem adminAuth. Antes de mandar pro /admin/login, tenta o
+        // step-up silencioso pelo trust-device cookie — é o que a própria
+        // /admin/login faria ao carregar, só que sem o redirect de ida e
+        // volta. Acontece quando o token no localStorage veio de um login
+        // normal (sem step-up) ou de um refresh anterior a esta correção.
+        // Se não houver cookie válido, cai no fluxo normal de código 2FA.
+        try {
+          const res = await api.post('/auth/admin-step-up-trusted', {})
+          const newTok = res.data?.token
+          if (cancelled) return
+          if (newTok) {
+            localStorage.setItem('token', newTok)
+            useAuthStore.setState({ token: newTok })
+            setVerified(true)
+            return
+          }
+        } catch { /* sem cookie, ou expirado — pede o código */ }
+        if (!cancelled) router.replace('/admin/login')
       })
 
     return () => { cancelled = true }

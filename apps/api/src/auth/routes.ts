@@ -222,12 +222,44 @@ export async function authRoutes(app: FastifyInstance) {
     try {
       const decoded = await (req as any).refreshJwtVerify()
       const userId  = decoded.sub as string
-      const token   = await issueTokens(app, reply, userId)
+
+      // Mantém o step-up do admin através do refresh, quando o dispositivo
+      // é confiável.
+      //
+      // O access token dura 15min e a claim adminAuth vive SÓ nele. Antes,
+      // todo refresh emitia o token novo sem a claim — então a cada 15min
+      // de aba parada o admin caía em 403 STEP_UP_REQUIRED, era mandado
+      // pro /admin/login, que tentava o step-up-trusted e voltava. Pra
+      // quem tinha marcado "lembrar dispositivo" isso aparecia como um
+      // "verificando acesso…" toda vez que trocava de aba; pra quem não
+      // tinha, pedia o código 2FA de novo.
+      //
+      // Não é capacidade nova: o trust cookie JÁ concede adminAuth sem o
+      // código via /admin-step-up-trusted. Aqui é a mesma concessão, sem
+      // o redirect. Sem cookie (ou cookie inválido), o comportamento é o
+      // de antes — token sem claim, step-up obrigatório.
+      const adminAuth = await trustedAdminElevation(userId, req)
+      const token     = await issueTokens(app, reply, userId, { adminAuth })
       return reply.send({ token })
     } catch {
       return reply.status(401).send({ error: 'INVALID_REFRESH' })
     }
   })
+
+  // Confere se o request traz um trust-device cookie válido pertencente a
+  // um ADMIN. Falha fechada: qualquer erro ou ausência → false.
+  async function trustedAdminElevation(userId: string, req: any): Promise<boolean> {
+    const cookieToken = req.cookies?.[TRUST_COOKIE_NAME]
+    if (!cookieToken) return false
+    try {
+      const ok = await verifyTrustedDevice({ userId, tokenRaw: cookieToken })
+      if (!ok) return false
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } })
+      return user?.role === 'ADMIN'
+    } catch {
+      return false
+    }
+  }
 
   app.post('/logout', async (_req, reply) => {
     reply.clearCookie(REFRESH_COOKIE, { path: '/' })
