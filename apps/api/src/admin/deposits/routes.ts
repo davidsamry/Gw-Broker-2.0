@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { listAdminDeposits, markDepositPaid, toggleDepositFake } from './service.js'
+import { listAdminDeposits, markDepositPaid, toggleDepositFake, deleteDeposit } from './service.js'
 import { recordAdminAction } from '../auditLog.js'
 
 const listQuerySchema = z.object({
@@ -46,6 +46,28 @@ export async function depositsAdminRoutes(app: FastifyInstance) {
       return reply.send({ ok: true, status: 'PAID' })
     } catch (err: any) {
       if (err.message === 'DEPOSIT_NOT_PAYABLE') return reply.status(409).send({ error: 'DEPOSIT_NOT_PAYABLE' })
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Exclui depósito PENDING ou CANCELLED (nunca PAID — creditou saldo).
+  // Limpa a lista de QR codes gerados e abandonados. Auditado.
+  app.delete('/:id', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    try {
+      const before = await deleteDeposit(id)
+      void recordAdminAction(req, {
+        resourceType: 'DEPOSIT',
+        resourceId:   id,
+        action:       'DELETE',
+        before:       { status: before.status, amount: before.amount },
+        after:        null,
+      })
+      return reply.send({ ok: true })
+    } catch (err: any) {
+      if (err.message === 'DEPOSIT_NOT_FOUND')     return reply.status(404).send({ error: 'DEPOSIT_NOT_FOUND' })
+      if (err.message === 'DEPOSIT_NOT_DELETABLE') return reply.status(409).send({ error: 'DEPOSIT_NOT_DELETABLE' })
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })
     }

@@ -199,3 +199,32 @@ export async function toggleDepositFake(depositId: string, isFake: boolean) {
   `
   if (result === 0) throw new Error('DEPOSIT_NOT_FOUND')
 }
+
+// Exclui um depósito que nunca virou dinheiro. Só PENDING ou CANCELLED —
+// um PAID creditou saldo e disparou webhook/Meta; apagar quebraria o
+// rastro contábil. Exclusão física mesmo: não há saldo envolvido e a
+// linha só polui a lista (QR code gerado e abandonado).
+//
+// Bônus PENDING amarrado a este depósito ficaria órfão esperando um
+// pagamento que nunca vem — cancela junto. Grants ACTIVE/COMPLETED não
+// existem para depósito não pago, então não há risco de mexer em bônus
+// já creditado.
+export async function deleteDeposit(depositId: string): Promise<{ status: string; amount: string }> {
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ status: string; amount: string }>>`
+      SELECT status::text AS status, amount::text AS amount
+      FROM deposits WHERE id = ${depositId} LIMIT 1
+    `
+    const dep = rows[0]
+    if (!dep) throw new Error('DEPOSIT_NOT_FOUND')
+    if (dep.status !== 'PENDING' && dep.status !== 'CANCELLED') {
+      throw new Error('DEPOSIT_NOT_DELETABLE')
+    }
+    await tx.$executeRaw`
+      UPDATE bonus_grants SET status = 'CANCELLED', "cancelledAt" = NOW()
+      WHERE "depositId" = ${depositId} AND status = 'PENDING'
+    `
+    await tx.$executeRaw`DELETE FROM deposits WHERE id = ${depositId}`
+    return dep
+  })
+}

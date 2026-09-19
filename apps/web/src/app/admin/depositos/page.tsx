@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import {
-  ArrowDownToLine, DollarSign, CheckCircle2, Receipt, RefreshCw, Search,
+  ArrowDownToLine, DollarSign, CheckCircle2, Receipt, RefreshCw, Search, Trash2,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -79,6 +79,27 @@ export default function AdminDepositsPage() {
 
   useEffect(() => { setPage(1) }, [debouncedSearch, status])
   useEffect(() => { load() }, [load])
+
+  // Só PENDING/CANCELLED — o backend recusa PAID (creditou saldo). Serve
+  // pra limpar QR codes gerados e abandonados; nada de dinheiro envolvido.
+  async function deleteDeposit(dep: DepositRow) {
+    if (busyId || (dep.status !== 'PENDING' && dep.status !== 'CANCELLED')) return
+    if (!confirm(`Excluir o depósito de R$ ${parseFloat(dep.amount).toFixed(2)} de ${dep.userEmail}?
+
+Ele some da lista. Nenhum saldo é alterado.`)) return
+    setBusyId(dep.id)
+    try {
+      await api.delete(`/admin/deposits/${dep.id}`)
+      await load()
+    } catch (err: any) {
+      const code = err?.response?.data?.error
+      if      (code === 'DEPOSIT_NOT_DELETABLE') alert('Só depósitos pendentes ou cancelados podem ser excluídos.')
+      else if (code === 'DEPOSIT_NOT_FOUND')     alert('Depósito não encontrado — talvez já tenha sido excluído.')
+      else                                        alert('Erro ao excluir o depósito.')
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   async function markPaid(dep: DepositRow) {
     if (busyId || dep.status !== 'PENDING') return
@@ -253,14 +274,19 @@ export default function AdminDepositsPage() {
                           <CheckCircle2 size={16} className="text-emerald-400" fill="currentColor" stroke="#0e1116" />
                         </span>
                       ) : d.status === 'PENDING' ? (
-                        <button
-                          onClick={() => markPaid(d)}
-                          disabled={busyId === d.id}
-                          title="Confirmar recebimento manual (credita saldo + bônus)"
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-emerald-500/40 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/15 disabled:opacity-30 transition-colors"
-                        >
-                          Confirmar
-                        </button>
+                        <span className="inline-flex items-center gap-1.5">
+                          <button
+                            onClick={() => markPaid(d)}
+                            disabled={busyId === d.id}
+                            title="Confirmar recebimento manual (credita saldo + bônus)"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-emerald-500/40 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/15 disabled:opacity-30 transition-colors"
+                          >
+                            Confirmar
+                          </button>
+                          <BotaoExcluir onClick={() => deleteDeposit(d)} disabled={busyId === d.id} />
+                        </span>
+                      ) : d.status === 'CANCELLED' ? (
+                        <BotaoExcluir onClick={() => deleteDeposit(d)} disabled={busyId === d.id} />
                       ) : (
                         <span className="text-[#8b8f9a]">—</span>
                       )}
@@ -368,4 +394,19 @@ function formatDateTime(iso: string) {
   const hh = String(d.getHours()).padStart(2, '0')
   const mi = String(d.getMinutes()).padStart(2, '0')
   return `${dd}/${mm}/${yyyy} ${hh}:${mi}`
+}
+
+// Lixeira discreta — ação sem dinheiro envolvido, mas irreversível na
+// lista, por isso o confirm() no handler.
+function BotaoExcluir({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title="Excluir este depósito da lista (não altera saldo)"
+      className="inline-flex items-center justify-center w-7 h-7 rounded border border-red-500/30 text-red-400 hover:bg-red-500/15 disabled:opacity-30 transition-colors"
+    >
+      <Trash2 size={13} />
+    </button>
+  )
 }
