@@ -1089,6 +1089,46 @@ function MinhaContaTab() {
     }
   }
 
+  // ── Excluir minha conta ──────────────────────────────────────────────
+  // Exclusão SOFT no backend (DELETE /auth/me): o histórico fica pro
+  // admin, só o login para de funcionar. Pede a senha de novo porque é
+  // irreversível pro usuário. O backend recusa se ainda houver saldo real,
+  // operação aberta ou saque em andamento — os erros abaixo explicam.
+  const [delOpen,     setDelOpen]     = useState(false)
+  const [delPassword, setDelPassword] = useState('')
+  const [delError,    setDelError]    = useState('')
+  const [delLoading,  setDelLoading]  = useState(false)
+
+  function openDeleteModal() {
+    setDelPassword(''); setDelError(''); setDelOpen(true)
+  }
+
+  async function submitDeleteAccount() {
+    if (delLoading) return
+    setDelError('')
+    if (!delPassword) { setDelError('Informe sua senha para confirmar.'); return }
+    setDelLoading(true)
+    try {
+      await api.delete('/auth/me', { data: { password: delPassword } })
+      // Sessão já foi invalidada no servidor. Limpa o cliente e manda pro
+      // login com o aviso — reload completo pra não sobrar estado.
+      await authStore.logout().catch(() => {})
+      window.location.href = '/login?conta=excluida'
+    } catch (err: any) {
+      const code = err?.response?.data?.error
+      const msg: Record<string, string> = {
+        INVALID_PASSWORD:         'Senha incorreta.',
+        HAS_REAL_BALANCE:         'Você ainda tem saldo na conta real. Faça a retirada antes de excluir.',
+        HAS_OPEN_OPERATIONS:      'Você tem operações em aberto. Aguarde elas encerrarem antes de excluir.',
+        HAS_PENDING_WITHDRAWALS:  'Você tem uma retirada em andamento. Aguarde a conclusão antes de excluir.',
+        ADMIN_CANNOT_SELF_DELETE: 'Contas de administrador não podem ser excluídas por aqui.',
+        ALREADY_DELETED:          'Esta conta já foi excluída.',
+      }
+      setDelError(msg[code] ?? 'Não foi possível excluir a conta. Tente novamente.')
+      setDelLoading(false)
+    }
+  }
+
   async function refreshUser() {
     try {
       const { data } = await api.get('/auth/me')
@@ -1217,6 +1257,67 @@ function MinhaContaTab() {
 
       {/* Change-password modal — current / new / confirm. Mirrors the 2FA
           modal styling so the security panel feels consistent. */}
+      {delOpen && (
+        <div
+          className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => { if (!delLoading) setDelOpen(false) }}
+        >
+          <div
+            className="w-full max-w-[420px] bg-[#13161f] border border-red-500/30 rounded-2xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#1f232e]">
+              <h2 className="text-sm font-bold text-red-400">Excluir minha conta</h2>
+              <button
+                onClick={() => { if (!delLoading) setDelOpen(false) }}
+                className="text-[#8b8f9a] hover:text-white"
+                aria-label="Fechar"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="px-5 py-5 flex flex-col gap-3">
+              <p className="text-xs text-[#c5c8d1] leading-relaxed">
+                Esta ação é <span className="font-bold text-white">irreversível</span>. Você não
+                conseguirá mais entrar nesta conta nem usar este e-mail para criar outra.
+              </p>
+              <p className="text-xs text-[#8b8f9a] leading-relaxed">
+                Se ainda tiver saldo na conta real, faça a retirada antes. Operações em aberto e
+                retiradas em andamento precisam ser concluídas.
+              </p>
+              <label className="flex flex-col gap-1 mt-1">
+                <span className="text-[11px] text-[#8b8f9a]">Digite sua senha para confirmar</span>
+                <input
+                  autoFocus
+                  type="password"
+                  value={delPassword}
+                  onChange={(e) => setDelPassword(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') submitDeleteAccount() }}
+                  className="w-full bg-[#1a1e2a] border border-[#1f232e] rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-red-500/60"
+                />
+              </label>
+              {delError && <p className="text-xs text-red-400">{delError}</p>}
+              <div className="flex gap-2 mt-1">
+                <button
+                  onClick={() => { if (!delLoading) setDelOpen(false) }}
+                  disabled={delLoading}
+                  className="flex-1 py-2.5 rounded-lg text-sm font-semibold bg-[#1a1e2a] text-white hover:bg-[#222736] transition-colors disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={submitDeleteAccount}
+                  disabled={delLoading}
+                  className="flex-1 py-2.5 rounded-lg text-sm font-bold bg-red-500 text-white hover:bg-red-400 transition-colors disabled:opacity-50"
+                >
+                  {delLoading ? 'Excluindo…' : 'Excluir definitivamente'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {pwOpen && (
         <div
           className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
@@ -1482,7 +1583,7 @@ function MinhaContaTab() {
             </div>
           </div>
 
-          <button className="flex items-center gap-2 text-red-400 hover:text-red-300 transition-colors">
+          <button onClick={openDeleteModal} className="flex items-center gap-2 text-red-400 hover:text-red-300 transition-colors">
             <X size={14} />
             <span className="text-sm font-semibold">Excluir minha conta</span>
           </button>

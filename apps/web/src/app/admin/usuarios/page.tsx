@@ -18,6 +18,7 @@ interface UserRow {
   role:             'USER' | 'ADMIN'
   kycStatus:        string
   blocked:          boolean
+  deletedAt:        string | null   // "Excluir minha conta" (exclusão soft)
   isFake:           boolean
   twoFactorEnabled: boolean
   createdAt:        string
@@ -178,7 +179,7 @@ export default function AdminUsersPage() {
 
               <RoleBadge   role={u.role} />
               <KycBadge    status={u.kycStatus} />
-              <BlockedBadge blocked={u.blocked} twoFactor={u.twoFactorEnabled} />
+              <BlockedBadge blocked={u.blocked} deleted={!!u.deletedAt} twoFactor={u.twoFactorEnabled} />
 
               <div className="text-right">
                 <div className="text-sm font-bold text-white">R$ {fmtBRL(u.realBalance)}</div>
@@ -386,7 +387,16 @@ function KycBadge({ status }: { status: string }) {
   )
 }
 
-function BlockedBadge({ blocked, twoFactor }: { blocked: boolean; twoFactor: boolean }) {
+function BlockedBadge({ blocked, deleted, twoFactor }: { blocked: boolean; deleted: boolean; twoFactor: boolean }) {
+  // Exclusão pelo próprio usuário. Tem precedência sobre "Bloqueado": a
+  // conta não volta mais, e o histórico continua acessível no detalhe.
+  if (deleted) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold w-fit bg-[#8b8f9a]/15 text-[#8b8f9a] border border-[#8b8f9a]/40">
+        <ShieldAlert size={9} /> Conta excluída
+      </span>
+    )
+  }
   if (blocked) {
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold w-fit bg-red-500/15 text-red-400 border border-red-500/40">

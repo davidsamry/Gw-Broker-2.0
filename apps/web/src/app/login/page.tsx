@@ -61,7 +61,13 @@ function LoginPageInner() {
   const [countrySearch, setCountrySearch] = useState('')
   const [countryOpen,   setCountryOpen]   = useState(false)
 
-  const [error,   setError]   = useState('')
+  // Chegou aqui vindo de "Excluir minha conta" — mostra a confirmação em
+  // vez de um form vazio sem explicação.
+  const [error,   setError]   = useState(
+    searchParams?.get('conta') === 'excluida'
+      ? 'Sua conta foi excluída. Obrigado por ter usado a VX Global.'
+      : '',
+  )
   const [loading, setLoading] = useState(false)
 
   const filteredCountries = COUNTRIES.filter(c =>
@@ -108,6 +114,8 @@ function LoginPageInner() {
         setTwoFA(false); setCode('')
       } else if (errCode === 'ACCOUNT_BLOCKED') {
         setError('Conta bloqueada. Entre em contato com o suporte.')
+      } else if (errCode === 'ACCOUNT_DELETED') {
+        setError('Esta conta foi excluída e não pode mais ser acessada.')
       } else if (errCode === 'RATE_LIMITED') {
         const retry = err.response?.data?.retryAfter
         const mins  = retry ? Math.ceil(retry / 60) : null

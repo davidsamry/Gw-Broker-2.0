@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { z } from 'zod'
 import { loginSchema, registerSchema, updateProfileSchema, twoFactorCodeSchema, kycSubmitSchema, changePasswordSchema } from './schema.js'
-import { changeUserPassword, getKycSubmission, getUserById, loginUser, recordLoginHistory, registerUser, submitKyc, updateUserProfile, verifyAdminStepUp } from './service.js'
+import { changeUserPassword, getKycSubmission, getUserById, loginUser, recordLoginHistory, registerUser, submitKyc, updateUserProfile, verifyAdminStepUp, deleteOwnAccount } from './service.js'
 import {
   TRUST_COOKIE_NAME,
   TRUST_COOKIE_MAX_AGE_SEC,
@@ -100,6 +100,9 @@ export async function authRoutes(app: FastifyInstance) {
       }
       if (err.message === 'ACCOUNT_BLOCKED') {
         return reply.status(403).send({ error: 'ACCOUNT_BLOCKED' })
+      }
+      if (err.message === 'ACCOUNT_DELETED') {
+        return reply.status(403).send({ error: 'ACCOUNT_DELETED' })
       }
       // 2FA: password OK but code missing — surface this so the frontend can
       // ask for it. Don't issue any token yet.
@@ -222,6 +225,14 @@ export async function authRoutes(app: FastifyInstance) {
     try {
       const decoded = await (req as any).refreshJwtVerify()
       const userId  = decoded.sub as string
+
+      // Conta excluída não renova sessão. O access token antigo morre em
+      // até 15min; sem isto o refresh cookie de 7 dias reviveria a conta.
+      const alive = await prisma.user.findUnique({ where: { id: userId }, select: { deletedAt: true } })
+      if (!alive || alive.deletedAt) {
+        reply.clearCookie(REFRESH_COOKIE, { path: '/' })
+        return reply.status(401).send({ error: 'INVALID_REFRESH' })
+      }
 
       // Mantém o step-up do admin através do refresh, quando o dispositivo
       // é confiável.
@@ -377,6 +388,36 @@ export async function authRoutes(app: FastifyInstance) {
   // Here the user is logged in and provides the current password as the
   // proof — no email needed. We do NOT rotate the session token after
   // success: the active access token stays valid until its 15min expiry.
+  // "Excluir minha conta". Exige a senha de novo (validação dupla — é
+  // irreversível pro usuário). Exclusão soft: ver deleteOwnAccount.
+  // Limpa o refresh cookie na hora; o access token expira sozinho.
+  app.delete('/me', { preHandler: [(app as any).authenticate] }, async (req, reply) => {
+    const parsed = z.object({ password: z.string().min(1) }).safeParse(req.body)
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'VALIDATION_ERROR', details: parsed.error.flatten() })
+    }
+    const userId = ((req as any).user.sub) as string
+    try {
+      await deleteOwnAccount(userId, parsed.data.password)
+      reply.clearCookie(REFRESH_COOKIE, { path: '/' })
+      return reply.send({ ok: true })
+    } catch (err: any) {
+      const mapa: Record<string, number> = {
+        USER_NOT_FOUND:           404,
+        ALREADY_DELETED:          409,
+        ADMIN_CANNOT_SELF_DELETE: 403,
+        INVALID_PASSWORD:         401,
+        HAS_REAL_BALANCE:         409,
+        HAS_OPEN_OPERATIONS:      409,
+        HAS_PENDING_WITHDRAWALS:  409,
+      }
+      const status = mapa[err.message]
+      if (status) return reply.status(status).send({ error: err.message })
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
   app.post('/change-password', { preHandler: [(app as any).authenticate] }, async (req, reply) => {
     const parsed = changePasswordSchema.safeParse(req.body)
     if (!parsed.success) {

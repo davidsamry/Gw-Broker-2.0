@@ -136,6 +136,11 @@ export async function loginUser(input: LoginInput) {
   if ((user as any).blocked) {
     throw new Error('ACCOUNT_BLOCKED')
   }
+  // Conta excluída pelo próprio usuário — mesma ideia do blocked, com
+  // mensagem própria na UI.
+  if ((user as any).deletedAt) {
+    throw new Error('ACCOUNT_DELETED')
+  }
 
   // 2026-06-01: Login normal (trader) NAO exige mais 2FA, mesmo pra admins.
   // Admins precisam fazer step-up (POST /auth/admin-step-up) com o code 2FA
@@ -344,3 +349,52 @@ export async function updateUserProfile(userId: string, input: UpdateProfileInpu
   }
 }
 
+
+// ── Excluir minha conta ──────────────────────────────────────────────────
+// Exclusão SOFT: marca deletedAt e nega login/refresh dali em diante. Nada
+// é apagado — o admin continua vendo depósitos, operações e saques, só que
+// com a etiqueta "Conta excluída".
+//
+// Recusa quando ainda há dinheiro ou pendência em jogo, porque excluir
+// deixaria o valor órfão sem ninguém conseguir sacar:
+//   • saldo na conta REAL (o demo não importa)
+//   • operação em aberto (vai liquidar depois e mexer no saldo)
+//   • saque PENDING/APPROVED (ainda em processamento)
+// Nesses casos o usuário precisa resolver antes — sacar, esperar a
+// operação expirar, ou aguardar o saque concluir.
+export async function deleteOwnAccount(userId: string, password: string) {
+  const user = await prisma.user.findUnique({
+    where:  { id: userId },
+    select: { password: true, role: true, deletedAt: true },
+  })
+  if (!user)           throw new Error('USER_NOT_FOUND')
+  if (user.deletedAt)  throw new Error('ALREADY_DELETED')
+  // Admin não se exclui por aqui — perderia o acesso ao painel sem
+  // ninguém pra reverter. Se precisar, é pelo banco.
+  if (user.role === 'ADMIN') throw new Error('ADMIN_CANNOT_SELF_DELETE')
+
+  const ok = await bcrypt.compare(password, user.password)
+  if (!ok) throw new Error('INVALID_PASSWORD')
+
+  const [pendencias] = await prisma.$queryRaw<Array<{
+    saldoReal: number; opsAbertas: number; saquesPendentes: number
+  }>>`
+    SELECT
+      COALESCE((SELECT SUM(balance)::float8 FROM accounts
+                 WHERE "userId" = ${userId} AND type = 'REAL'), 0)          AS "saldoReal",
+      (SELECT COUNT(*)::int FROM operations o
+         JOIN accounts a ON a.id = o."accountId"
+        WHERE a."userId" = ${userId} AND o.status = 'OPEN')               AS "opsAbertas",
+      (SELECT COUNT(*)::int FROM withdrawals w
+         JOIN accounts a ON a.id = w."accountId"
+        WHERE a."userId" = ${userId} AND w.status IN ('PENDING','APPROVED')) AS "saquesPendentes"
+  `
+  if (pendencias.saldoReal > 0)     throw new Error('HAS_REAL_BALANCE')
+  if (pendencias.opsAbertas > 0)    throw new Error('HAS_OPEN_OPERATIONS')
+  if (pendencias.saquesPendentes > 0) throw new Error('HAS_PENDING_WITHDRAWALS')
+
+  await prisma.user.update({
+    where: { id: userId },
+    data:  { deletedAt: new Date() },
+  })
+}

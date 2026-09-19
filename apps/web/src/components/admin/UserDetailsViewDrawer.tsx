@@ -36,6 +36,8 @@ interface UserSummary {
     cpf?:       string | null
     phone?:     string | null
     createdAt?: string | null
+    // "Excluir minha conta" — exclusão soft. Histórico segue todo aqui.
+    deletedAt?: string | null
   }
   accounts: Array<{
     id:               string
@@ -355,6 +357,11 @@ export function UserDetailsViewDrawer({ userId, onClose, onChanged }: Props) {
               Detalhes do Usuário: {(summary?.user.name ?? '—').toUpperCase()}
             </h2>
             <div className="text-xs text-[#8b8f9a] mt-0.5 truncate">{summary?.user.email}</div>
+            {summary?.user.deletedAt && (
+              <div className="mt-1.5 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#8b8f9a]/15 text-[#8b8f9a] border border-[#8b8f9a]/40">
+                Conta excluída pelo usuário em {new Date(summary.user.deletedAt).toLocaleString('pt-BR')} — histórico preservado, login bloqueado
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {/* Exporta o extrato COMPLETO da conta REAL (não só a página

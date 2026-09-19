@@ -197,6 +197,11 @@ model User {
   blocked          Boolean   @default(false)
   blockedAt        DateTime?
   blockedReason    String?
+  // Exclusão pelo próprio usuário ("Excluir minha conta"). É SOFT: a linha
+  // e todo o histórico (depósitos, operações, saques) ficam intactos para
+  // o admin — só o login e o refresh passam a ser negados. Nunca apagar
+  // de verdade: plataforma de dinheiro real precisa do rastro.
+  deletedAt        DateTime?
   // ── Admin-side toggles ──────────────────────────────────────────────────
   // isFake          → user is a demo/test account; doesn't affect KPIs.
   //                   Also forces every operation to resolve WON (see
