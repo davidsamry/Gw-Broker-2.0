@@ -51,7 +51,10 @@ export function ImpersonationBanner() {
   if (pathname?.startsWith('/login'))      return null
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-[200] bg-red-600 text-white shadow-lg">
+    // Embaixo, pra não cobrir as abas de ativos e o cabeçalho. No mobile
+    // (< md) a navegação inferior ocupa ~52px, então a faixa fica logo
+    // acima dela em vez de tampar os botões.
+    <div className="fixed bottom-[52px] md:bottom-0 left-0 right-0 z-[200] bg-red-600 text-white shadow-lg">
       <div className="px-4 py-2 flex items-center justify-between gap-3 text-xs sm:text-sm">
         <div className="flex items-center gap-2 min-w-0">
           <AlertTriangle size={16} className="shrink-0 animate-pulse" />
