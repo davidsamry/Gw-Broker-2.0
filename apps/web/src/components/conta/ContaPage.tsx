@@ -1092,8 +1092,8 @@ function MinhaContaTab() {
   // ── Excluir minha conta ──────────────────────────────────────────────
   // Exclusão SOFT no backend (DELETE /auth/me): o histórico fica pro
   // admin, só o login para de funcionar. Pede a senha de novo porque é
-  // irreversível pro usuário. O backend recusa se ainda houver saldo real,
-  // operação aberta ou saque em andamento — os erros abaixo explicam.
+  // irreversível pro usuário. Saldo que sobrar é zerado (fica registrado
+  // no admin). Operação aberta ou saque em andamento ainda barram.
   const [delOpen,     setDelOpen]     = useState(false)
   const [delPassword, setDelPassword] = useState('')
   const [delError,    setDelError]    = useState('')
@@ -1118,7 +1118,6 @@ function MinhaContaTab() {
       const code = err?.response?.data?.error
       const msg: Record<string, string> = {
         INVALID_PASSWORD:         'Senha incorreta.',
-        HAS_REAL_BALANCE:         'Você ainda tem saldo na conta real. Faça a retirada antes de excluir.',
         HAS_OPEN_OPERATIONS:      'Você tem operações em aberto. Aguarde elas encerrarem antes de excluir.',
         HAS_PENDING_WITHDRAWALS:  'Você tem uma retirada em andamento. Aguarde a conclusão antes de excluir.',
         ADMIN_CANNOT_SELF_DELETE: 'Contas de administrador não podem ser excluídas por aqui.',
@@ -1282,8 +1281,9 @@ function MinhaContaTab() {
                 conseguirá mais entrar nesta conta nem usar este e-mail para criar outra.
               </p>
               <p className="text-xs text-[#8b8f9a] leading-relaxed">
-                Se ainda tiver saldo na conta real, faça a retirada antes. Operações em aberto e
-                retiradas em andamento precisam ser concluídas.
+                Qualquer saldo que ainda exista na conta será <span className="text-white font-semibold">perdido</span>.
+                Se quiser sacar, faça a retirada antes. Operações em aberto e retiradas em andamento
+                precisam ser concluídas.
               </p>
               <label className="flex flex-col gap-1 mt-1">
                 <span className="text-[11px] text-[#8b8f9a]">Digite sua senha para confirmar</span>

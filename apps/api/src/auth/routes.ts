@@ -407,7 +407,6 @@ export async function authRoutes(app: FastifyInstance) {
         ALREADY_DELETED:          409,
         ADMIN_CANNOT_SELF_DELETE: 403,
         INVALID_PASSWORD:         401,
-        HAS_REAL_BALANCE:         409,
         HAS_OPEN_OPERATIONS:      409,
         HAS_PENDING_WITHDRAWALS:  409,
       }

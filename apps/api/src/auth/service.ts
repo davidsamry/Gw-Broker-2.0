@@ -355,13 +355,16 @@ export async function updateUserProfile(userId: string, input: UpdateProfileInpu
 // é apagado — o admin continua vendo depósitos, operações e saques, só que
 // com a etiqueta "Conta excluída".
 //
-// Recusa quando ainda há dinheiro ou pendência em jogo, porque excluir
-// deixaria o valor órfão sem ninguém conseguir sacar:
-//   • saldo na conta REAL (o demo não importa)
-//   • operação em aberto (vai liquidar depois e mexer no saldo)
-//   • saque PENDING/APPROVED (ainda em processamento)
-// Nesses casos o usuário precisa resolver antes — sacar, esperar a
-// operação expirar, ou aguardar o saque concluir.
+// SALDO NÃO BARRA a exclusão (decisão do fundador, 2026-09-19): se
+// houver saldo na conta REAL, ele é ZERADO junto. Mas o número não some:
+//   • users.deletedBalance guarda quanto havia
+//   • um lançamento ADJUSTMENT negativo entra no extrato da conta
+// Assim o admin vê depósitos, saldo e histórico intactos.
+//
+// Só duas pendências ainda barram, porque zerar no meio delas corrompe
+// o dinheiro em trânsito:
+//   • operação em aberto (vai liquidar depois e creditar numa conta morta)
+//   • saque PENDING/APPROVED (pode ser pago depois de o saldo sumir)
 export async function deleteOwnAccount(userId: string, password: string) {
   const user = await prisma.user.findUnique({
     where:  { id: userId },
@@ -377,11 +380,9 @@ export async function deleteOwnAccount(userId: string, password: string) {
   if (!ok) throw new Error('INVALID_PASSWORD')
 
   const [pendencias] = await prisma.$queryRaw<Array<{
-    saldoReal: number; opsAbertas: number; saquesPendentes: number
+    opsAbertas: number; saquesPendentes: number
   }>>`
     SELECT
-      COALESCE((SELECT SUM(balance)::float8 FROM accounts
-                 WHERE "userId" = ${userId} AND type = 'REAL'), 0)          AS "saldoReal",
       (SELECT COUNT(*)::int FROM operations o
          JOIN accounts a ON a.id = o."accountId"
         WHERE a."userId" = ${userId} AND o.status = 'OPEN')               AS "opsAbertas",
@@ -389,12 +390,36 @@ export async function deleteOwnAccount(userId: string, password: string) {
          JOIN accounts a ON a.id = w."accountId"
         WHERE a."userId" = ${userId} AND w.status IN ('PENDING','APPROVED')) AS "saquesPendentes"
   `
-  if (pendencias.saldoReal > 0)     throw new Error('HAS_REAL_BALANCE')
-  if (pendencias.opsAbertas > 0)    throw new Error('HAS_OPEN_OPERATIONS')
+  if (pendencias.opsAbertas > 0)      throw new Error('HAS_OPEN_OPERATIONS')
   if (pendencias.saquesPendentes > 0) throw new Error('HAS_PENDING_WITHDRAWALS')
 
-  await prisma.user.update({
-    where: { id: userId },
-    data:  { deletedAt: new Date() },
+  // Tudo numa transação: ler o saldo, zerar, lançar no extrato e marcar
+  // a exclusão. Se qualquer passo falhar, nada muda.
+  await prisma.$transaction(async (tx) => {
+    const real = await tx.account.findFirst({
+      where:  { userId, type: 'REAL' },
+      select: { id: true, balance: true },
+    })
+    const saldo = real ? Number(real.balance) : 0
+
+    if (real && saldo !== 0) {
+      await tx.account.update({
+        where: { id: real.id },
+        data:  { balance: 0 },
+      })
+      await tx.transaction.create({
+        data: {
+          accountId:   real.id,
+          type:        'ADJUSTMENT',
+          amount:      -saldo,
+          description: 'Saldo zerado na exclusão da conta pelo usuário',
+        },
+      })
+    }
+
+    await tx.user.update({
+      where: { id: userId },
+      data:  { deletedAt: new Date(), deletedBalance: saldo },
+    })
   })
 }

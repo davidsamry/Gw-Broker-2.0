@@ -202,6 +202,10 @@ model User {
   // o admin — só o login e o refresh passam a ser negados. Nunca apagar
   // de verdade: plataforma de dinheiro real precisa do rastro.
   deletedAt        DateTime?
+  // Saldo da conta REAL no momento da exclusão. O saldo em si é zerado
+  // (com um lançamento ADJUSTMENT no extrato), mas o número fica aqui
+  // para o admin ver quanto havia sem precisar somar o extrato.
+  deletedBalance   Decimal?  @db.Decimal(18, 2)
   // ── Admin-side toggles ──────────────────────────────────────────────────
   // isFake          → user is a demo/test account; doesn't affect KPIs.
   //                   Also forces every operation to resolve WON (see

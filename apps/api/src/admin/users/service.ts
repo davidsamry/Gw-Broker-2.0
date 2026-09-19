@@ -16,6 +16,7 @@ export interface UserListRow {
   kycStatus:        string
   blocked:          boolean
   deletedAt:        Date | null   // "Excluir minha conta" — exclusão soft
+  deletedBalance:   string | null // saldo REAL que havia na hora (Decimal)
   isFake:           boolean
   twoFactorEnabled: boolean
   createdAt:        Date
@@ -121,7 +122,7 @@ export async function listUsers(params: ListUsersParams): Promise<UserListRespon
       WITH page_users AS (
         SELECT u.id, u.name, u.email, u.role::text AS role,
                u."kycStatus"::text AS "kycStatus",
-               u.blocked, u."deletedAt", u."isFake", u."twoFactorEnabled", u."createdAt"
+               u.blocked, u."deletedAt", u."deletedBalance", u."isFake", u."twoFactorEnabled", u."createdAt"
         FROM users u
         ${whereSql}
         ORDER BY u."createdAt" DESC
@@ -180,7 +181,7 @@ export async function getUserDetail(userId: string) {
   const userRows = await prisma.$queryRaw<Array<{
     id: string; name: string; email: string; role: string; kycStatus: string
     blocked: boolean; blockedAt: Date | null; blockedReason: string | null
-    deletedAt: Date | null
+    deletedAt: Date | null; deletedBalance: string | null
     twoFactorEnabled: boolean
     nickname: string | null; lastName: string | null; birthDate: Date | null
     cpf: string | null; phone: string | null; country: string | null; address: string | null
@@ -192,7 +193,7 @@ export async function getUserDetail(userId: string) {
     createdAt: Date; updatedAt: Date
   }>>`
     SELECT id, name, email, role::text AS role, "kycStatus"::text AS "kycStatus",
-           blocked, "blockedAt", "blockedReason", "deletedAt", "twoFactorEnabled",
+           blocked, "blockedAt", "blockedReason", "deletedAt", "deletedBalance", "twoFactorEnabled",
            nickname, "lastName", "birthDate", cpf, phone, country, address,
            "isFake", "copyTraderEnabled", "liquidityMode",
            "payoutOverrideForex", "payoutOverrideOtc", "payoutOverrideCrypto",
