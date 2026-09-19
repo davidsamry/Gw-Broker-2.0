@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
+import { notifyBalanceChanged } from '../operations/events.js'
 
 // ── Copy Trading — módulo isolado ──────────────────────────────────────────
 // As "operações copiadas" (copy_trade_operations) NÃO contam rollover/ranking
@@ -339,6 +340,7 @@ export async function copyTrader(userId: string, traderId: string): Promise<Copy
     console.error('[copy] generateCopyOps falhou (non-fatal)', { userId, traderId, err })
   }
 
+  notifyBalanceChanged({ userId })
   return {
     subscriptionId: subId,
     paid:           trader.paid,
@@ -387,6 +389,7 @@ export async function settleCopyOp(opId: string, result: string, traderName: str
     SELECT ${txId}, op.account_id, 'COPY_RESULT'::"TransactionType", op.pnl, ${desc}, NOW()
       FROM op
   `
+  notifyBalanceChanged({ copyOpId: opId })
 }
 
 // Cancela a cópia. Sem refund. ANTI-EXPLOIT (2026-06-14): NÃO descarta as

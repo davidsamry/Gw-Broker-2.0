@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../prisma.js'
 import { sendEmailAsync } from '../../email/service.js'
+import { notifyBalanceChanged } from '../../operations/events.js'
 
 // Admin withdrawals management. Raw SQL (consistent with other admin modules).
 // User-side cancel still lives in apps/api/src/withdrawals/service.ts — this
@@ -201,6 +202,7 @@ export async function rejectWithdrawal(adminId: string, withdrawalId: string, re
     SELECT id FROM upd_wd
   `
   if (rows.length === 0) throw new Error('WITHDRAWAL_NOT_PENDING')
+  notifyBalanceChanged({ withdrawalId })
   await notifyWithdrawalResult(withdrawalId, 'REJECTED', reason)
 }
 

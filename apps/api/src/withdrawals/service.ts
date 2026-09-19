@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
 import type { CreateWithdrawalInput } from './schema.js'
+import { notifyBalanceChanged } from '../operations/events.js'
 
 // Thrown by createWithdrawal when the REAL account hasn't satisfied its
 // rollover requirement yet. Route handler maps to HTTP 400 with the
@@ -124,6 +125,7 @@ export async function createWithdrawal(userId: string, input: CreateWithdrawalIn
     throw new Error('INSUFFICIENT_BALANCE')
   }
 
+  notifyBalanceChanged({ userId })
   return rows[0]
 }
 
@@ -183,4 +185,5 @@ export async function cancelWithdrawal(userId: string, withdrawalId: string) {
   if (rows.length === 0) {
     throw new Error('WITHDRAWAL_NOT_CANCELLABLE')
   }
+  notifyBalanceChanged({ userId })
 }

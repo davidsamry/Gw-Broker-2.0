@@ -9,6 +9,7 @@
 
 import { Prisma } from '@prisma/client'
 import { prisma } from '../prisma.js'
+import { notifyBalanceChanged } from '../operations/events.js'
 
 export interface ValidatedBonus {
   id:         string
@@ -166,6 +167,7 @@ export async function activateForPaidDeposit(depositId: string): Promise<number>
     }),
   ])
 
+  notifyBalanceChanged({ accountId: deposit.accountId })
   return bonusAmount
 }
 

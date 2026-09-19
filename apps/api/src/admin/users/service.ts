@@ -431,6 +431,7 @@ export async function updateUserBonus(targetUserId: string, input: UpdateBonusIn
     RETURNING id
   `
   if (rows.length === 0) throw new Error('ACCOUNT_NOT_FOUND')
+  notifyBalanceChanged({ userId: targetUserId })
 
   return getUserDetail(targetUserId)
 }
@@ -442,6 +443,7 @@ export async function updateUserBonus(targetUserId: string, input: UpdateBonusIn
 // password to the user out-of-band.
 
 import { hash } from 'bcryptjs'
+import { notifyBalanceChanged } from '../../operations/events.js'
 
 export async function resetUserPassword(targetUserId: string, newPassword: string) {
   if (newPassword.length < 6) throw new Error('PASSWORD_TOO_SHORT')
@@ -696,6 +698,7 @@ export async function adjustUserBalance(
     throw new Error('INSUFFICIENT_BALANCE')
   }
 
+  notifyBalanceChanged({ userId: targetUserId })
   return {
     accountId:  rows[0].id,
     newBalance: rows[0].balance.toString(),

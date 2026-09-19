@@ -68,3 +68,73 @@ export function subscribeToUserOperations(
   bus.on('op', wrapper)
   return () => { bus.off('op', wrapper) }
 }
+
+// ── Evento de saldo ──────────────────────────────────────────────────────
+// Emitido por QUALQUER rota que altere o saldo de uma conta fora do fluxo
+// da própria operação (que já chega via 'created'/'resolved'): ajuste do
+// admin, depósito confirmado, saque debitado/estornado, bônus, compra de
+// copy. A aba do usuário recebe e chama /accounts — o servidor continua
+// sendo a fonte da verdade; o evento só diz "vai buscar de novo".
+//
+// Sem isto, o header ficava com o saldo velho até o reload ou a próxima
+// operação. Era o que acontecia quando o admin mudava o saldo.
+//
+// ATENÇÃO: barramento em memória. Funciona porque a API roda num
+// container só. Se escalar para várias instâncias, este emit precisa
+// passar pelo Redis (pub/sub) para alcançar a instância que segura a
+// conexão SSE do usuário.
+export function publishBalanceEvent(userId: string): void {
+  bus.emit('balance', { userId })
+}
+
+export function subscribeToUserBalance(
+  userId:   string,
+  listener: () => void,
+): () => void {
+  const wrapper = (e: { userId: string }) => {
+    if (e.userId !== userId) return
+    listener()
+  }
+  bus.on('balance', wrapper)
+  return () => { bus.off('balance', wrapper) }
+}
+
+// Atalho para os pontos que alteram saldo. Aceita o que estiver à mão
+// naquele ponto do código — userId, accountId, ou o id do depósito /
+// saque / operação — e resolve o dono com uma consulta. Best-effort e
+// sem await: nunca pode falhar a operação de dinheiro por causa de um
+// aviso de UI.
+export function notifyBalanceChanged(ref: {
+  userId?:       string | null
+  accountId?:    string | null
+  depositId?:    string | null
+  withdrawalId?: string | null
+  operationId?:  string | null
+  copyOpId?:     string | null
+}): void {
+  void (async () => {
+    try {
+      let userId = ref.userId ?? null
+      if (!userId) {
+        const { prisma } = await import('../prisma.js')
+        const rows = await prisma.$queryRaw<Array<{ userId: string }>>`
+          SELECT a."userId" FROM accounts a
+          WHERE a.id = COALESCE(
+            ${ref.accountId ?? null},
+            (SELECT "accountId" FROM deposits    WHERE id = ${ref.depositId    ?? null}),
+            (SELECT "accountId" FROM withdrawals WHERE id = ${ref.withdrawalId ?? null}),
+            (SELECT "accountId" FROM operations  WHERE id = ${ref.operationId  ?? null}),
+            (SELECT a2.id FROM copy_trade_operations co
+               JOIN accounts a2 ON a2."userId" = co."userId" AND a2.type = 'REAL'
+              WHERE co.id = ${ref.copyOpId ?? null})
+          )
+          LIMIT 1
+        `
+        userId = rows[0]?.userId ?? null
+      }
+      if (userId) publishBalanceEvent(userId)
+    } catch (err) {
+      console.error('[balance-event] falhou (não-fatal)', err)
+    }
+  })()
+}

@@ -1,4 +1,5 @@
 import { prisma } from '../prisma.js'
+import { notifyBalanceChanged } from '../operations/events.js'
 
 const DEMO_BALANCE = Number(process.env.DEMO_INITIAL_BALANCE ?? 10000)
 
@@ -49,5 +50,6 @@ export async function resetDemoAccount(userId: string) {
     }),
   ])
 
+  notifyBalanceChanged({ userId })
   return { ok: true, balance: DEMO_BALANCE.toString() }
 }

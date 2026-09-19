@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../prisma.js'
+import { notifyBalanceChanged } from '../../operations/events.js'
 
 // Admin deposits management. Raw SQL throughout (consistent with other
 // admin services + tolerant of stale Prisma client during schema iterations).
@@ -190,6 +191,7 @@ export async function markDepositPaid(adminId: string, depositId: string) {
   `
 
   if (rows.length === 0) throw new Error('DEPOSIT_NOT_PAYABLE')
+  notifyBalanceChanged({ depositId })
 }
 
 export async function toggleDepositFake(depositId: string, isFake: boolean) {

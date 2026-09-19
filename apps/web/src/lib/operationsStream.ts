@@ -28,6 +28,9 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 export function openOperationsStream(
   token:   string,
   onEvent: (event: { kind: 'created' | 'resolved'; op: ApiOperation }) => void,
+  // Saldo mudou fora do fluxo de operação (admin ajustou, depósito
+  // confirmado, saque, bônus). Sem payload — quem recebe vai ao /accounts.
+  onBalance?: () => void,
 ): () => void {
   const url = `${API_URL.replace(/\/$/, '')}/operations/stream?token=${encodeURIComponent(token)}`
   const es  = new EventSource(url)
@@ -41,8 +44,11 @@ export function openOperationsStream(
     catch { /* malformed payload — ignore */ }
   }
 
+  const handleBalance = () => { onBalance?.() }
+
   es.addEventListener('created',  handleCreated)
   es.addEventListener('resolved', handleResolved)
+  es.addEventListener('balance',  handleBalance)
 
   // No explicit reconnect logic — EventSource auto-reconnects with a
   // backoff that respects the server's `retry:` field (default 3s).
@@ -50,6 +56,7 @@ export function openOperationsStream(
   return () => {
     es.removeEventListener('created',  handleCreated)
     es.removeEventListener('resolved', handleResolved)
+    es.removeEventListener('balance',  handleBalance)
     es.close()
   }
 }
@@ -98,6 +105,10 @@ export function useOperationsStream() {
       //   (b) another device — handled by `kind === 'created'` here
       //   (c) a bot via /bot/v1/trade — handled here too
       // Refreshing on every event is the simplest correct behavior.
+      scheduleRefresh()
+    }, () => {
+      // Evento 'balance': o servidor avisou que o saldo mudou por fora
+      // (admin, depósito, saque, bônus). Mesmo debounce das operações.
       scheduleRefresh()
     })
 

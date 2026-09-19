@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { createOperationSchema } from './schema.js'
 import { createOperation, getOperation, listOperations } from './service.js'
-import { subscribeToUserOperations } from './events.js'
+import { subscribeToUserOperations, subscribeToUserBalance } from './events.js'
 
 const listQuerySchema = z.object({
   accountId: z.string().cuid().optional(),
@@ -63,12 +63,20 @@ export async function operationRoutes(app: FastifyInstance) {
         reply.raw.write(`event: ${event.kind}\ndata: ${JSON.stringify(event.op)}\n\n`)
       } catch { /* client gone — disconnect handler cleans up */ }
     })
+    // Saldo mudou fora do fluxo de operação (admin, depósito, saque,
+    // bônus). Sem payload: a aba chama /accounts e pega o valor real.
+    const unsubscribeBalance = subscribeToUserBalance(userId, () => {
+      try {
+        reply.raw.write('event: balance\ndata: {}\n\n')
+      } catch { /* client gone */ }
+    })
 
     // Cleanup on client disconnect — covers both clean close and
     // network drop (Node fires 'close' for both).
     req.raw.on('close', () => {
       clearInterval(heartbeat)
       unsubscribe()
+      unsubscribeBalance()
     })
   })
 

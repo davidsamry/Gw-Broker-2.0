@@ -9,6 +9,7 @@ import type { CreatePixDepositInput } from './schema.js'
 import {
   validateCodeForUser, createPendingGrantForDeposit, activateForPaidDeposit,
 } from '../bonuses/service.js'
+import { notifyBalanceChanged } from '../operations/events.js'
 
 export interface CreatedDeposit {
   id:         string
@@ -602,5 +603,6 @@ export async function confirmDepositById(depositId: string) {
     console.error(`[meta] Purchase enqueue failed for deposit=${depositId} (non-fatal)`, err)
   }
 
+  notifyBalanceChanged({ depositId })
   return true
 }

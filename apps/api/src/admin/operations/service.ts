@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../prisma.js'
 import { buildUserSearchSql } from '../users/service.js'
+import { notifyBalanceChanged } from '../../operations/events.js'
 
 // Admin-side operations management. Raw SQL throughout to keep parity with
 // the rest of the admin module (and to avoid coupling to the generated
@@ -264,6 +265,7 @@ export async function cancelAdminOperation(adminId: string, operationId: string)
   `
 
   if (rows.length === 0) throw new Error('OPERATION_NOT_CANCELLABLE')
+  notifyBalanceChanged({ operationId })
 }
 
 // ── Delete operation (hard delete + balance reversal) ─────────────────────
@@ -359,6 +361,7 @@ export async function deleteAdminOperation(adminId: string, operationId: string)
     `
   }
 
+  notifyBalanceChanged({ accountId: op.accountId })
   return { balanceDelta: delta.toString(), status: op.status }
 }
 
@@ -451,6 +454,7 @@ export async function deleteAllUserOperations(
     `
   })
 
+  notifyBalanceChanged({ userId })
   return {
     deletedCount:      ops.length,
     totalBalanceDelta: totalDelta.toString(),
