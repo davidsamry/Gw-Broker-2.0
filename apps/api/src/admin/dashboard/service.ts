@@ -11,7 +11,7 @@ export interface DashboardKpis {
   avgTicket:            number  // average deposit value in window
   netFlow:              number  // deposits - withdrawals
   userBalance:          number  // sum of REAL accounts balance
-  userBonus:            number  // sum of BONUS transactions (all-time)
+  userBonus:            number  // bônus ATUAL nas contas REAL (accounts.bonusBalance)
   userBalancePlusBonus: number
   totalUsers:           number
   newUsersToday:        number
@@ -113,10 +113,17 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
       _sum: { balance: true },
       where: { type: 'REAL', user: { is: { isFake: false } } as any },
     }),
-    // KPI: total BONUS credited to REAL accounts (all-time, non-fake)
-    prisma.transaction.aggregate({
-      _sum: { amount: true },
-      where: { type: 'BONUS', ...realNonFakeAccount },
+    // KPI: bônus ATUAL nas contas REAL (non-fake). Mesma fonte e mesmo
+    // filtro do card de saldo ao lado, pra "Saldo + Bônus" fazer sentido.
+    //
+    // Antes somava as transações BONUS de toda a história — quanto já foi
+    // DADO de bônus, não quanto existe. Mostrava R$ 126 mil quando o
+    // bônus real nas contas era R$ 17 mil; o resto tinha sido consumido
+    // em operações/rollover. E não mexia quando o saldo era zerado por
+    // ajuste (que é ADJUSTMENT, não BONUS).
+    prisma.account.aggregate({
+      _sum: { bonusBalance: true },
+      where: { type: 'REAL', user: { is: { isFake: false } } as any },
     }),
     // KPI: total users CREATED in the dashboard's filter window. Every
     // other KPI on this page (deposits, withdrawals, wagered, etc.) is
@@ -207,7 +214,7 @@ export async function getDashboard(from: Date, to: Date): Promise<DashboardRespo
   const totalWithdrawals = Math.abs(decimalToNumber(wdAgg._sum.amount))
   const avgTicket        = decimalToNumber(depAgg._avg.amount)
   const userBalance      = decimalToNumber(balanceAgg._sum.balance)
-  const userBonus        = decimalToNumber(bonusAgg._sum.amount)
+  const userBonus        = decimalToNumber(bonusAgg._sum.bonusBalance)
   const totalWagered     = decimalToNumber(wageredAgg._sum.amount)
   const platformLoss     = decimalToNumber(wonOps._sum.profit)
   const platformProfit   = decimalToNumber(lostOps._sum.amount)
