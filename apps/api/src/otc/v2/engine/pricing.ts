@@ -299,9 +299,36 @@ export function maybeTransitionRegime(s: OtcAssetState, nowMs: number, rand: () 
 // ── Liquidity update ───────────────────────────────────────────────────
 // Slow random walk — called every ~10s by the runtime. Keeps the order-
 // book "feel" alive without per-tick churn.
+//
+// 2026-09-22: buyPressure ganhou reversão à média. Era um passeio
+// aleatório PURO dentro de [0,3 - 0,7], e o runtime só o atualiza a cada
+// 10s (LIQUIDITY_UPDATE_INTERVAL_MS em runtime/boot.ts) — ou seja, 6
+// passos por vela de 1min. Com passo de ±0,025 num intervalo de largura
+// 0,4, atravessar a faixa levava ~2 HORAS. Na prática a pressão era uma
+// constante ao longo de dezenas de velas.
+//
+// Como liquidityBias = peso × (buy − sell) × effectiveVol vale até 10× o
+// ruído por minuto, isso virava um empurrão direcional fixo por dezenas
+// de minutos: o gráfico saía em ondas suaves em vez de serrilhado.
+//
+// MEDIDO (autocorrelação lag-1 dos retornos de 1min — mercado real ~0):
+//   BTC/USDT real na Binance      0,029
+//   gold-otc em produção          0,364   ← a onda
+//   simulação reproduzindo prod   0,430   (valida o diagnóstico)
+//   com PRESSURE_MEMORY=0,85      0,030   (3 rodadas: 0,023/0,055/0,013)
+//
+// 0,85 a cada 10s = ~67s de memória, ≈ uma vela. A pressão decorrelaciona
+// DENTRO da vela, então uma vela não puxa mais a seguinte. O passo (0,05)
+// não mudou: aumentá-lo junto inflava a amplitude.
+//
+// Se mexer aqui, RE-MEÇA a autocorrelação em produção — foi ela que
+// revelou o problema, não a inspeção visual do gráfico.
+const PRESSURE_MEMORY = 0.85
+
 export function stepLiquidity(s: OtcAssetState, rand: () => number = Math.random): void {
   s.spread       = clamp(s.spread       + (rand() - 0.5) * 0.00003, 0.00005, 0.001)
-  s.buyPressure  = clamp(s.buyPressure  + (rand() - 0.5) * 0.05,    0.3,     0.7)
+  s.buyPressure  = clamp(0.5 + (s.buyPressure - 0.5) * PRESSURE_MEMORY
+                             + (rand() - 0.5) * 0.05,               0.3,     0.7)
   s.sellPressure = 1 - s.buyPressure  // mirror
   s.volume       = clamp(s.volume       + (rand() - 0.5) * 0.1,     0.5,     2.0)
   s.depth        = clamp(s.depth        + (rand() - 0.5) * 0.05,    0.5,     2.0)
