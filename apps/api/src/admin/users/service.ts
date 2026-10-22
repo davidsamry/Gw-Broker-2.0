@@ -347,6 +347,8 @@ export async function updateUserByAdmin(
     sets.push(Prisma.sql`role = ${input.role}::"UserRole"`)
   }
   if (input.blocked !== undefined) {
+    // Derruba a sessão aberta na hora, sem esperar o TTL do cache.
+    invalidateSessionState(targetUserId)
     sets.push(Prisma.sql`blocked = ${input.blocked}`)
     sets.push(input.blocked
       ? Prisma.sql`"blockedAt" = NOW()`
@@ -444,6 +446,7 @@ export async function updateUserBonus(targetUserId: string, input: UpdateBonusIn
 
 import { hash } from 'bcryptjs'
 import { notifyBalanceChanged } from '../../operations/events.js'
+import { invalidateSessionState } from '../../auth/sessionGuard.js'
 
 export async function resetUserPassword(targetUserId: string, newPassword: string) {
   if (newPassword.length < 6) throw new Error('PASSWORD_TOO_SHORT')

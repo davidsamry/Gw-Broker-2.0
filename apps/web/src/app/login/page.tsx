@@ -61,13 +61,16 @@ function LoginPageInner() {
   const [countrySearch, setCountrySearch] = useState('')
   const [countryOpen,   setCountryOpen]   = useState(false)
 
-  // Chegou aqui vindo de "Excluir minha conta" — mostra a confirmação em
-  // vez de um form vazio sem explicação.
-  const [error,   setError]   = useState(
-    searchParams?.get('conta') === 'excluida'
-      ? 'Sua conta foi excluída. Obrigado por ter usado a VX Global.'
-      : '',
-  )
+  // Chegou aqui deslogado à força — "Excluir minha conta", ou conta
+  // bloqueada/excluída pelo admin com a sessão ainda aberta (o
+  // interceptor derruba no 403). Mostra o motivo em vez de um form
+  // vazio sem explicação.
+  const [error,   setError]   = useState(() => {
+    const motivo = searchParams?.get('conta')
+    if (motivo === 'excluida')  return 'Sua conta foi excluída. Obrigado por ter usado a VX Global.'
+    if (motivo === 'bloqueada') return 'Sua conta foi bloqueada. Entre em contato com o suporte.'
+    return ''
+  })
   const [loading, setLoading] = useState(false)
 
   const filteredCountries = COUNTRIES.filter(c =>

@@ -24,6 +24,7 @@ import { publicRoutes } from './public/routes.js'
 import { metricsRoute } from './metrics/route.js'
 import { httpRequestDurationSeconds } from './metrics/registry.js'
 import { prisma } from './prisma.js'
+import { getSessionState } from './auth/sessionGuard.js'
 
 // ── Sec O1.1: JWT secrets — fail-fast em produção ─────────────────────────
 // Antes esses tinham fallback `dev-secret-change-me` / `dev-refresh-secret-
@@ -125,7 +126,19 @@ export async function buildApp() {
     try {
       await req.jwtVerify()
     } catch {
-      reply.status(401).send({ error: 'UNAUTHORIZED' })
+      return reply.status(401).send({ error: 'UNAUTHORIZED' })
+    }
+    // Token válido não basta: conta bloqueada ou excluída perde acesso na
+    // hora. Sem isto, bloquear um usuário não derrubava quem já estava
+    // logado — o access token valia 15min e o refresh renovava por 7
+    // dias. Cache de 30s em sessionGuard mantém isto fora do caminho
+    // quente; o admin invalida ao bloquear, então o corte é imediato.
+    const userId = req.user?.sub as string | undefined
+    if (userId) {
+      const estado = await getSessionState(userId)
+      if (estado === 'BLOCKED')   return reply.status(403).send({ error: 'ACCOUNT_BLOCKED' })
+      if (estado === 'DELETED')   return reply.status(403).send({ error: 'ACCOUNT_DELETED' })
+      if (estado === 'NOT_FOUND') return reply.status(401).send({ error: 'UNAUTHORIZED' })
     }
   })
 

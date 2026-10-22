@@ -16,6 +16,7 @@ import { listWithdrawals } from '../withdrawals/service.js'
 import { listTransactions } from '../transactions/service.js'
 import { generateSecret, otpauthUrl, qrCodeDataUrl, verifyTotp } from './twoFactor.js'
 import { prisma } from '../prisma.js'
+import { getSessionState } from './sessionGuard.js'
 
 const KYC_BODY_LIMIT = 36 * 1024 * 1024  // 36MB for the 3 base64 images (8MB raw each + base64 overhead + margin)
 
@@ -226,10 +227,11 @@ export async function authRoutes(app: FastifyInstance) {
       const decoded = await (req as any).refreshJwtVerify()
       const userId  = decoded.sub as string
 
-      // Conta excluída não renova sessão. O access token antigo morre em
-      // até 15min; sem isto o refresh cookie de 7 dias reviveria a conta.
-      const alive = await prisma.user.findUnique({ where: { id: userId }, select: { deletedAt: true } })
-      if (!alive || alive.deletedAt) {
+      // Conta excluída OU bloqueada não renova sessão. Sem isto o cookie
+      // de 7 dias reviveria a sessão a cada 15min pra sempre — foi o que
+      // deixou um usuário bloqueado acessando a conta por dias.
+      const estado = await getSessionState(userId)
+      if (estado !== 'OK') {
         reply.clearCookie(REFRESH_COOKIE, { path: '/' })
         return reply.status(401).send({ error: 'INVALID_REFRESH' })
       }

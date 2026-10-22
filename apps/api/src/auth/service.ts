@@ -4,6 +4,7 @@ import { prisma } from '../prisma.js'
 import type { LoginInput, RegisterInput, UpdateProfileInput, KycSubmitInput, ChangePasswordInput } from './schema.js'
 import { verifyTotp } from './twoFactor.js'
 import { sendEmailAsync } from '../email/service.js'
+import { invalidateSessionState } from './sessionGuard.js'
 
 const DEMO_BALANCE = Number(process.env.DEMO_INITIAL_BALANCE ?? 10000)
 
@@ -422,4 +423,7 @@ export async function deleteOwnAccount(userId: string, password: string) {
       data:  { deletedAt: new Date(), deletedBalance: saldo },
     })
   })
+
+  // Derruba a sessão aberta na hora (o guarda tem cache de 30s).
+  invalidateSessionState(userId)
 }

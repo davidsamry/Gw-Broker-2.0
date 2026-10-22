@@ -63,6 +63,20 @@ api.interceptors.response.use(
       url.startsWith('/auth/register') ||
       url.startsWith('/auth/refresh')
 
+    // Conta bloqueada ou excluída enquanto a sessão estava aberta: o
+    // backend passa a responder 403 em TODA rota autenticada. Derruba a
+    // sessão local e manda pro login com a mensagem certa — sem isto o
+    // usuário ficaria preso numa tela de erros repetidos.
+    const codigo = err.response?.data?.error
+    if (err.response?.status === 403 && (codigo === 'ACCOUNT_BLOCKED' || codigo === 'ACCOUNT_DELETED')) {
+      clearEffectiveToken()
+      if (typeof window !== 'undefined') {
+        const motivo = codigo === 'ACCOUNT_BLOCKED' ? 'bloqueada' : 'excluida'
+        window.location.href = `/login?conta=${motivo}`
+      }
+      return Promise.reject(err)
+    }
+
     if (err.response?.status === 401 && !isAuthAttempt && !original._retry) {
       original._retry = true
       try {
