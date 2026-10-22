@@ -12,9 +12,11 @@ export interface KycRow {
   userName:         string
   userEmail:        string
   realBalance:      string
-  documentFrontUrl: string
-  documentBackUrl:  string
-  selfieUrl:        string
+  // As 3 imagens NÃO vêm na listagem — são base64 de até 8MB cada, e o
+  // admin só olha as de um envio por vez. Com 20 linhas por página isso
+  // chegava a centenas de MB por carregamento da página.
+  // Busque-as sob demanda com getKycDocuments(id) quando o modal abrir.
+  hasDocuments:     boolean
   status:           'PENDING' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'
   reason:           string | null
   submittedAt:      Date
@@ -69,7 +71,7 @@ export async function listKycSubmissions(params: ListKycParams): Promise<ListKyc
         u.name  AS "userName",
         u.email AS "userEmail",
         COALESCE(a.balance, 0) AS "realBalance",
-        k."documentFrontUrl", k."documentBackUrl", k."selfieUrl",
+        (k."documentFrontUrl" <> '' OR k."selfieUrl" <> '') AS "hasDocuments",
         k.status::text AS status,
         k.reason, k."submittedAt", k."reviewedAt", k."reviewedBy"
       FROM kyc_submissions k
@@ -218,4 +220,28 @@ async function notifyKycResult(submissionId: string, outcome: 'APPROVED' | 'REJE
   } catch (err) {
     console.error(`[admin/kyc] notify ${outcome} email lookup failed`, err)
   }
+}
+
+/**
+ * Imagens de UMA submissão, sob demanda. Separado da listagem de
+ * propósito: são 3 base64 de até 8MB cada e o admin abre um envio por
+ * vez — trazê-las na lista fazia a página levar centenas de MB.
+ *
+ * Retorna null quando a submissão não existe. Strings vazias são o
+ * normal em envio já APROVADO: approveKyc limpa as imagens (os
+ * documentos são descartados depois da verificação) e a linha fica só
+ * com o histórico.
+ */
+export async function getKycDocuments(submissionId: string): Promise<{
+  documentFrontUrl: string
+  documentBackUrl:  string
+  selfieUrl:        string
+} | null> {
+  const rows = await prisma.$queryRaw<Array<{
+    documentFrontUrl: string; documentBackUrl: string; selfieUrl: string
+  }>>`
+    SELECT "documentFrontUrl", "documentBackUrl", "selfieUrl"
+    FROM kyc_submissions WHERE id = ${submissionId} LIMIT 1
+  `
+  return rows[0] ?? null
 }

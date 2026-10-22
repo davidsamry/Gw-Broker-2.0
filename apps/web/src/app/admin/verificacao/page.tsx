@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   ShieldCheck, Search, RefreshCw, Eye, X, Clock, CheckCircle2, XCircle, ChevronDown,
-  Undo2,
+  Undo2, Loader2,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -16,9 +16,9 @@ interface KycRow {
   userName:         string
   userEmail:        string
   realBalance:      string
-  documentFrontUrl: string
-  documentBackUrl:  string
-  selfieUrl:        string
+  // A listagem não traz mais as imagens (3 base64 de até 8MB cada). O
+  // modal busca em /admin/kyc/:id/documents quando abre.
+  hasDocuments:     boolean
   status:           'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'PENDING'
   reason:           string | null
   submittedAt:      string
@@ -225,6 +225,19 @@ function DocumentsModal({
   // Two "compose-a-reason" modes — both reuse the same textarea below.
   // 'reject' = decide on a SUBMITTED case;
   // 'revert' = downgrade a previously APPROVED case to REJECTED.
+  // Documentos sob demanda — é o que tirou a lentidão da página: antes
+  // as 3 imagens de TODOS os 20 envios vinham no payload da listagem.
+  const [docs, setDocs] = useState<{ documentFrontUrl: string; documentBackUrl: string; selfieUrl: string } | null>(null)
+  const [docsErro, setDocsErro] = useState('')
+  useEffect(() => {
+    let cancelado = false
+    setDocs(null); setDocsErro('')
+    api.get(`/admin/kyc/${submission.id}/documents`)
+      .then((r) => { if (!cancelado) setDocs(r.data) })
+      .catch(() => { if (!cancelado) setDocsErro('Não foi possível carregar os documentos.') })
+    return () => { cancelado = true }
+  }, [submission.id])
+
   const [mode, setMode]     = useState<null | 'reject' | 'revert'>(null)
   const [reason, setReason] = useState('')
   const [loading, setLoading] = useState<'approve' | 'reject' | 'revert' | null>(null)
@@ -287,11 +300,20 @@ function DocumentsModal({
 
         {/* Body */}
         <div className="overflow-y-auto px-5 py-5">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <DocPreview label="Documento (Frente)"  url={submission.documentFrontUrl} />
-            <DocPreview label="Documento (Verso)"   url={submission.documentBackUrl}  />
-            <DocPreview label="Selfie com Documento" url={submission.selfieUrl}       />
-          </div>
+          {docsErro ? (
+            <div className="py-10 text-center text-sm text-red-400">{docsErro}</div>
+          ) : !docs ? (
+            <div className="py-10 flex flex-col items-center gap-2 text-[#8b8f9a]">
+              <Loader2 size={22} className="animate-spin" />
+              <span className="text-xs">Carregando documentos…</span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <DocPreview label="Documento (Frente)"  url={docs.documentFrontUrl} />
+              <DocPreview label="Documento (Verso)"   url={docs.documentBackUrl}  />
+              <DocPreview label="Selfie com Documento" url={docs.selfieUrl}       />
+            </div>
+          )}
 
           {/* User info */}
           <div className="mt-5 grid grid-cols-2 gap-3 text-xs">

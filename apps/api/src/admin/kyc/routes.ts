@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { approveKyc, listKycSubmissions, rejectKyc, revertKycToRejected } from './service.js'
+import { approveKyc, getKycDocuments, listKycSubmissions, rejectKyc, revertKycToRejected } from './service.js'
 import { recordAdminAction } from '../auditLog.js'
 
 const listQuerySchema = z.object({
@@ -15,6 +15,20 @@ const rejectSchema = z.object({
 })
 
 export async function kycAdminRoutes(app: FastifyInstance) {
+  // Imagens de UMA submissão, sob demanda. A listagem não as traz mais
+  // (são 3 base64 de até 8MB cada); o painel busca aqui ao abrir o modal.
+  app.get('/:id/documents', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    try {
+      const docs = await getKycDocuments(id)
+      if (!docs) return reply.status(404).send({ error: 'SUBMISSION_NOT_FOUND' })
+      return reply.send(docs)
+    } catch (err: any) {
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
   app.get('/', async (req, reply) => {
     const parsed = listQuerySchema.safeParse(req.query)
     if (!parsed.success) {
