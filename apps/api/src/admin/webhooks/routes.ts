@@ -88,7 +88,7 @@ export async function webhooksAdminRoutes(app: FastifyInstance) {
       cfg.key === 'REGISTRATION'
         ? { event_name: 'Registration',  ...sampleUser }
         : cfg.key === 'KYC_SUBMITTED'
-          ? { event_name: 'KycSubmitted', ...sampleUser }
+          ? { event_name: 'KycSubmitted', balance: 250.00, bonus_balance: 500.00, ...sampleUser }
           : cfg.key === 'FIRST_DEPOSIT'
             ? { event_name: 'FirstDeposit', value: 100.00, ...sampleUser }
             : { event_name: 'Deposit',      value: 250.00, ...sampleUser }

@@ -257,9 +257,18 @@ export function sendSubsequentDepositWebhook(user: WebhookUserData, value: numbe
  *
  *  Dispara no ENVIO, não na aprovação. Quem quiser reagir à aprovação
  *  precisa de outra chave — esta é só "o usuário mandou os documentos". */
-export function sendKycSubmittedWebhook(user: WebhookUserData): void {
+export function sendKycSubmittedWebhook(
+  user: WebhookUserData,
+  saldo: { balance: number; bonusBalance: number },
+): void {
   sendWebhookAsync('KYC_SUBMITTED', {
     event_name: 'KycSubmitted',
+    // Saldo no momento do envio — o destino usa pra priorizar a fila de
+    // análise (quem tem saldo parado esperando verificação vem antes).
+    // Vai no payload porque o /bot/balance exige token do próprio
+    // usuário, que um serviço externo não tem.
+    balance:       saldo.balance,
+    bonus_balance: saldo.bonusBalance,
     ...buildIdentityFields(user),
   })
 }

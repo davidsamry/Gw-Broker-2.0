@@ -300,9 +300,11 @@ export async function submitKyc(userId: string, input: KycSubmitInput) {
         select: {
           email: true, name: true, lastName: true, phone: true,
           country: true, city: true, state: true, zip: true,
+          accounts: { where: { type: 'REAL' }, select: { balance: true, bonusBalance: true }, take: 1 },
         },
       })
       if (!u) return
+      const real = u.accounts[0]
       const { sendKycSubmittedWebhook } = await import('../webhooks/service.js')
       sendKycSubmittedWebhook({
         id:       userId,
@@ -314,6 +316,9 @@ export async function submitKyc(userId: string, input: KycSubmitInput) {
         city:     u.city,
         state:    u.state,
         zip:      u.zip,
+      }, {
+        balance:      Number(real?.balance ?? 0),
+        bonusBalance: Number(real?.bonusBalance ?? 0),
       })
     } catch (err) {
       console.error('[webhook] KYC_SUBMITTED enqueue falhou (não-fatal)', err)
