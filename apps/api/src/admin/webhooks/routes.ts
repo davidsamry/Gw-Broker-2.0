@@ -77,7 +77,13 @@ export async function webhooksAdminRoutes(app: FastifyInstance) {
       first_name:         'Teste',
       last_name:          'VX Global',
       full_name:          'Teste VX Global',
-      external_id:        'sck_test_click_0001',   // = sck (click_id) em produção
+      // Único a cada envio. Era fixo ('sck_test_click_0001') e isso
+      // quebrava o teste repetido: o TrackFlow descarta o mesmo
+      // external_id por 10 min, então o 2º clique em "Enviar teste"
+      // voltava 200 mas não gerava notificação — parecia que tinha
+      // funcionado quando nada chegava. Em produção este campo é o sck
+      // (click_id) ou o ID do usuário.
+      external_id:        `teste_${Date.now()}`,
       country:            'Brasil',
       fbp:                'fb.1.1700000000000.1234567890',
       fbc:                'fb.1.1700000000000.AbCdEfGh',
