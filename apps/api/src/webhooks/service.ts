@@ -19,7 +19,7 @@ import { prisma } from '../prisma.js'
 
 // Canonical event keys — kept here (not in DB) so a typo in the admin UI
 // can't accidentally create a fourth row. Service rejects unknown keys.
-export type WebhookKey = 'REGISTRATION' | 'FIRST_DEPOSIT' | 'SUBSEQUENT_DEPOSIT'
+export type WebhookKey = 'REGISTRATION' | 'FIRST_DEPOSIT' | 'SUBSEQUENT_DEPOSIT' | 'KYC_SUBMITTED'
 
 export interface WebhookConfig {
   id:        string
@@ -244,6 +244,22 @@ export function sendSubsequentDepositWebhook(user: WebhookUserData, value: numbe
   sendWebhookAsync('SUBSEQUENT_DEPOSIT', {
     event_name: 'Deposit',
     value,
+    ...buildIdentityFields(user),
+  })
+}
+
+/** Envio de documentação KYC — disparado em auth/service.ts quando o
+ *  usuário sobe os documentos (status do envio vai pra SUBMITTED).
+ *
+ *  NÃO manda as imagens: são base64 de até 8MB cada e nenhum destino de
+ *  tracking tem o que fazer com elas. Vai só o fato do envio, com a
+ *  mesma identidade dos outros eventos, pra casar o lead no destino.
+ *
+ *  Dispara no ENVIO, não na aprovação. Quem quiser reagir à aprovação
+ *  precisa de outra chave — esta é só "o usuário mandou os documentos". */
+export function sendKycSubmittedWebhook(user: WebhookUserData): void {
+  sendWebhookAsync('KYC_SUBMITTED', {
+    event_name: 'KycSubmitted',
     ...buildIdentityFields(user),
   })
 }

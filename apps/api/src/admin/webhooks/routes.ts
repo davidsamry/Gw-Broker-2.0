@@ -4,7 +4,7 @@ import {
   listWebhookConfigs, updateWebhookConfig, getWebhookConfig, type WebhookKey,
 } from '../../webhooks/service.js'
 
-const WEBHOOK_KEYS = ['REGISTRATION', 'FIRST_DEPOSIT', 'SUBSEQUENT_DEPOSIT'] as const
+const WEBHOOK_KEYS = ['REGISTRATION', 'FIRST_DEPOSIT', 'SUBSEQUENT_DEPOSIT', 'KYC_SUBMITTED'] as const
 
 // PATCH body — both fields optional so the UI can toggle active without
 // retyping the URL, or update URL without changing active. URL accepts
@@ -87,9 +87,11 @@ export async function webhooksAdminRoutes(app: FastifyInstance) {
     const samplePayload =
       cfg.key === 'REGISTRATION'
         ? { event_name: 'Registration',  ...sampleUser }
-        : cfg.key === 'FIRST_DEPOSIT'
-          ? { event_name: 'FirstDeposit', value: 100.00, ...sampleUser }
-          : { event_name: 'Deposit',      value: 250.00, ...sampleUser }
+        : cfg.key === 'KYC_SUBMITTED'
+          ? { event_name: 'KycSubmitted', ...sampleUser }
+          : cfg.key === 'FIRST_DEPOSIT'
+            ? { event_name: 'FirstDeposit', value: 100.00, ...sampleUser }
+            : { event_name: 'Deposit',      value: 250.00, ...sampleUser }
 
     const startedAt = Date.now()
     try {

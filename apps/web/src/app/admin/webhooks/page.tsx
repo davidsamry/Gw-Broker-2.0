@@ -6,11 +6,11 @@
 // URL input, save on blur/Enter, status feedback.
 
 import { useCallback, useEffect, useState } from 'react'
-import { Webhook, DollarSign, ArrowRightLeft, UserPlus, RefreshCw, Check, Send, X as XIcon } from 'lucide-react'
+import { Webhook, DollarSign, ArrowRightLeft, UserPlus, ShieldCheck, RefreshCw, Check, Send, X as XIcon } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
-type WebhookKey = 'REGISTRATION' | 'FIRST_DEPOSIT' | 'SUBSEQUENT_DEPOSIT'
+type WebhookKey = 'REGISTRATION' | 'FIRST_DEPOSIT' | 'SUBSEQUENT_DEPOSIT' | 'KYC_SUBMITTED'
 
 interface WebhookConfig {
   id:        string
@@ -55,6 +55,13 @@ const CARDS: Array<{
     desc:   'Disparado quando um novo usuário se cadastra na plataforma',
     icon:   <UserPlus size={18} />,
     accent: 'text-purple-400',
+  },
+  {
+    key:    'KYC_SUBMITTED',
+    title:  'Documentos KYC Enviados',
+    desc:   'Disparado quando o usuário envia os documentos de verificação (não inclui as imagens)',
+    icon:   <ShieldCheck size={18} />,
+    accent: 'text-amber-400',
   },
 ]
 

@@ -288,6 +288,38 @@ export async function submitKyc(userId: string, input: KycSubmitInput) {
       UPDATE users SET "kycStatus" = 'SUBMITTED'::"KycStatus" WHERE id = ${userId}
     `
   })
+
+  // Webhook de envio de KYC — fire-and-forget, DEPOIS da transação (só
+  // dispara se o envio realmente gravou). Nunca bloqueia nem derruba o
+  // fluxo: o serviço engole todos os erros, e o try/catch cobre a leitura
+  // do usuário. Sem imagens no payload, por decisão — ver o sender.
+  void (async () => {
+    try {
+      const u = await prisma.user.findUnique({
+        where:  { id: userId },
+        select: {
+          email: true, name: true, lastName: true, phone: true,
+          country: true, city: true, state: true, zip: true,
+        },
+      })
+      if (!u) return
+      const { sendKycSubmittedWebhook } = await import('../webhooks/service.js')
+      sendKycSubmittedWebhook({
+        id:       userId,
+        email:    u.email,
+        name:     u.name,
+        lastName: u.lastName,
+        phone:    u.phone,
+        country:  u.country,
+        city:     u.city,
+        state:    u.state,
+        zip:      u.zip,
+      })
+    } catch (err) {
+      console.error('[webhook] KYC_SUBMITTED enqueue falhou (não-fatal)', err)
+    }
+  })()
+
   return getKycSubmission(userId)
 }
 
