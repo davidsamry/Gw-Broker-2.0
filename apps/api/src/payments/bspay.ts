@@ -300,3 +300,15 @@ export async function getBrlToUsdtRate(): Promise<number> {
 export function isConfigured(): boolean {
   return !!(process.env.BSPAY_CLIENT_ID && process.env.BSPAY_CLIENT_SECRET)
 }
+
+/**
+ * Pede um token só pra conferir se a credencial presta. Usado pelo botão
+ * "Testar credenciais" do admin.
+ *
+ * Idempotente e sem efeito financeiro: emitir token não cria nem move
+ * dinheiro. Lança o mesmo erro de sempre (BSPAY_AUTH_FAILED:<status>) pra
+ * quem chamar classificar.
+ */
+export async function pingAuth(): Promise<void> {
+  await fetchAccessToken()
+}

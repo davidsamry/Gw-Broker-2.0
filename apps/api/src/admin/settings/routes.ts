@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { getSettings, updateSettings } from '../../settings/service.js'
 import { recordAdminAction } from '../auditLog.js'
+import { GATEWAY_IDS, testGatewayCredentials, type GatewayId } from '../../payments/gateway.js'
 
 // All routes here sit behind requireAdmin (attached at /admin root).
 
@@ -47,6 +48,26 @@ const updateSchema = z.object({
 export async function settingsAdminRoutes(app: FastifyInstance) {
   app.get('/', async (_req, reply) => {
     return reply.send({ settings: getSettings() })
+  })
+
+  // POST /admin/settings/gateways/:id/test
+  //
+  // Confere a credencial do gateway SEM criar cobrança. Até existir isto, o
+  // primeiro sinal de credencial errada era um usuário real levando
+  // "Falhou" — agora dá pra validar logo depois de mexer nas variáveis de
+  // ambiente, antes de tornar o gateway ativo.
+  //
+  // Funciona em qualquer gateway, não só no ativo: é assim que se valida um
+  // provedor novo antes de apontar os depósitos pra ele.
+  app.post('/gateways/:id/test', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    if (!GATEWAY_IDS.includes(id as GatewayId)) {
+      return reply.status(400).send({ error: 'INVALID_GATEWAY' })
+    }
+    // testGatewayCredentials nunca lança — sempre devolve resultado legível.
+    const result = await testGatewayCredentials(id as GatewayId)
+    req.log.info({ gateway: id, ok: result.ok, code: result.code }, 'Teste de credencial de gateway')
+    return reply.send(result)
   })
 
   app.patch('/', async (req, reply) => {

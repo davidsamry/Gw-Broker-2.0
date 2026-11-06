@@ -178,3 +178,100 @@ export function getProvider(id: GatewayId): PaymentProvider {
 export function getActiveProvider(): PaymentProvider {
   return PROVIDERS[getActiveGateway()]
 }
+
+// ── Teste de credenciais ───────────────────────────────────────────────────
+//
+// Até aqui, credencial errada só aparecia quando um usuário real tentava
+// depositar e levava "Falhou" na cara. Isto dá ao admin uma verificação
+// antes, pelo painel.
+//
+// Em todos os três a chamada é SEM EFEITO FINANCEIRO:
+//   bspay    — pede um token (emitir token não cria nem move dinheiro)
+//   versell  — consulta uma cobrança que não existe
+//   skalapay — consulta uma transação que não existe
+//
+// Nos dois últimos, "não encontrado" é justamente o resultado BOM: significa
+// que o gateway nos autenticou e só não achou o registro.
+
+export interface GatewayTestResult {
+  gateway:    GatewayId
+  ok:         boolean
+  /** OK | NOT_CONFIGURED | UNAUTHORIZED | TIMEOUT | NETWORK_ERROR | ERROR */
+  code:       string
+  message:    string
+  durationMs: number
+}
+
+/** Traduz o erro de qualquer um dos clientes para uma causa comum. */
+function classificarFalha(err: any): { code: string; message: string } {
+  const code = String(err?.code ?? '')
+  const msg  = String(err?.message ?? '')
+  const http = Number(err?.httpStatus ?? NaN)
+
+  if (code.endsWith('_NOT_CONFIGURED')) {
+    return { code: 'NOT_CONFIGURED', message: 'Credenciais não preenchidas nas variáveis de ambiente.' }
+  }
+  if (code.endsWith('_TIMEOUT') || err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+    return { code: 'TIMEOUT', message: 'O gateway não respondeu a tempo. Pode estar fora do ar ou bloqueando nosso IP.' }
+  }
+  if (code.endsWith('_UNAUTHORIZED') || code.endsWith('_FORBIDDEN') || http === 401 || http === 403
+      || /_AUTH_FAILED:4\d\d/.test(msg)) {
+    return { code: 'UNAUTHORIZED', message: 'Gateway recusou as credenciais (401/403). Confira id e secret.' }
+  }
+  if (code.endsWith('_NETWORK_ERROR') || code.endsWith('_MTLS_FAILED') || code.endsWith('_CERT_READ_FAILED')) {
+    return { code: 'NETWORK_ERROR', message: `Falha de conexão com o gateway: ${code || msg}`.slice(0, 200) }
+  }
+  return { code: 'ERROR', message: (code || msg || 'Erro desconhecido').slice(0, 200) }
+}
+
+async function executarTeste(id: GatewayId): Promise<{ code: string; message: string }> {
+  switch (id) {
+    case 'bspay': {
+      await bspay.pingAuth()
+      return { code: 'OK', message: 'Credenciais aceitas — token emitido com sucesso.' }
+    }
+    case 'versell': {
+      try {
+        // txid de formato válido (32 chars) que nunca vai existir.
+        await versell.getCharge('0'.repeat(32))
+      } catch (err: any) {
+        // 404 = autenticou e não achou. É o resultado esperado.
+        if (err?.code !== 'VERSELL_NOT_FOUND') throw err
+      }
+      return { code: 'OK', message: 'Credenciais e mTLS aceitos pela Versell.' }
+    }
+    case 'skalapay': {
+      try {
+        await skalapay.getCashinStatus('999999999')
+      } catch (err: any) {
+        if (Number(err?.httpStatus) !== 404) throw err
+      }
+      return { code: 'OK', message: 'Credenciais aceitas pela SkalaPay.' }
+    }
+  }
+}
+
+/**
+ * Testa a credencial de um gateway. Nunca lança: devolve sempre um
+ * resultado legível, porque quem chama é uma tela de admin.
+ */
+export async function testGatewayCredentials(id: GatewayId): Promise<GatewayTestResult> {
+  const t0 = Date.now()
+  const provider = PROVIDERS[id]
+
+  if (!provider.isConfigured()) {
+    return {
+      gateway: id, ok: false, code: 'NOT_CONFIGURED',
+      message: 'Credenciais não preenchidas nas variáveis de ambiente.',
+      durationMs: 0,
+    }
+  }
+
+  try {
+    const r = await executarTeste(id)
+    return { gateway: id, ok: true, ...r, durationMs: Date.now() - t0 }
+  } catch (err: any) {
+    const r = classificarFalha(err)
+    return { gateway: id, ok: false, ...r, durationMs: Date.now() - t0 }
+  }
+}

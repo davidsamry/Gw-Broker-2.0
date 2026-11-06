@@ -242,6 +242,34 @@ function GatewayCard({ value, onChange }: {
     { id: 'versell',  name: 'Versell',  desc: 'Pix via OAuth2 + mTLS' },
     { id: 'skalapay', name: 'SkalaPay', desc: 'Pix via header Client-Id/Secret' },
   ]
+
+  // Teste de credencial por gateway. A chamada do backend não cria cobrança
+  // nenhuma — pede um token (BSPay) ou consulta um registro inexistente
+  // (Versell/SkalaPay). Serve pra descobrir credencial errada aqui, e não
+  // através de um usuário real levando "Falhou" na tela de depósito.
+  const [testando, setTestando] = useState<GatewayId | null>(null)
+  const [testes, setTestes] = useState<Record<string, { ok: boolean; message: string }>>({})
+
+  async function testar(id: GatewayId) {
+    setTestando(id)
+    setTestes((t) => { const { [id]: _, ...resto } = t; return resto })
+    try {
+      const { data } = await api.post<{ ok: boolean; message: string }>(
+        `/admin/settings/gateways/${id}/test`,
+      )
+      setTestes((t) => ({ ...t, [id]: { ok: data.ok, message: data.message } }))
+    } catch (err: any) {
+      setTestes((t) => ({
+        ...t,
+        [id]: {
+          ok: false,
+          message: err?.response?.data?.error ?? 'Não foi possível falar com a API.',
+        },
+      }))
+    } finally {
+      setTestando(null)
+    }
+  }
   return (
     <div className="rounded-xl bg-[#1a1f2e] border border-[#2a2e3b] p-5 flex flex-col gap-4">
       <div className="flex items-start gap-3">
@@ -258,9 +286,10 @@ function GatewayCard({ value, onChange }: {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {OPTIONS.map((o) => {
           const active = value === o.id
+          const teste  = testes[o.id]
           return (
+            <div key={o.id} className="flex flex-col gap-1.5">
             <button
-              key={o.id}
               type="button"
               onClick={() => onChange(o.id)}
               className={cn(
@@ -288,6 +317,36 @@ function GatewayCard({ value, onChange }: {
               </div>
               <div className="text-[11px] text-[#8b8f9a] mt-1 ml-6">{o.desc}</div>
             </button>
+
+            <button
+              type="button"
+              onClick={() => testar(o.id)}
+              disabled={testando !== null}
+              className={cn(
+                'self-start inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold',
+                'text-[#8b8f9a] hover:text-white hover:bg-white/5 transition-colors',
+                'disabled:opacity-40 disabled:hover:bg-transparent disabled:cursor-not-allowed',
+              )}
+            >
+              {testando === o.id
+                ? <><Loader2 size={11} className="animate-spin" /> Testando…</>
+                : <><ShieldCheck size={11} /> Testar credenciais</>}
+            </button>
+
+            {teste && (
+              <div className={cn(
+                'flex items-start gap-1.5 px-2 py-1.5 rounded text-[10px] leading-relaxed',
+                teste.ok
+                  ? 'bg-emerald-500/10 text-emerald-300'
+                  : 'bg-red-500/10 text-red-300',
+              )}>
+                {teste.ok
+                  ? <Check size={11} className="flex-shrink-0 mt-0.5" />
+                  : <AlertCircle size={11} className="flex-shrink-0 mt-0.5" />}
+                <span>{teste.message}</span>
+              </div>
+            )}
+            </div>
           )
         })}
       </div>
