@@ -6,8 +6,9 @@ import { prisma } from '../prisma.js'
 // O QR code do PIX vence no gateway (na BSPay vira "Expirado" em ~1h). Do
 // nosso lado nada acontecia: a linha ficava PENDING pra sempre. Em 06/11/2026
 // havia 169 depósitos PENDING com mais de 6h, somando R$ 33.147 — o mais
-// antigo de 30/05/2026. Isso polui a lista do admin e infla o card
-// "Depósitos Gerados", que passa a contar dinheiro que nunca existiu.
+// antigo de 30/05/2026. Isso deixa a aba "Pendentes" do admin inútil: ela
+// mostrava 171 quando só 2 depósitos estavam de fato esperando pagamento.
+// (O card "Depósitos Gerados" conta todos os status e não muda com isso.)
 //
 // Até aqui a única coisa que limpava esses registros era o auto-cancel do
 // createPixDeposit, e só quando o MESMO usuário gerava outro PIX. Quem gerou
