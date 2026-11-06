@@ -202,6 +202,9 @@ export async function toggleDepositFake(depositId: string, isFake: boolean) {
   if (result === 0) throw new Error('DEPOSIT_NOT_FOUND')
 }
 
+// Status que podem ser excluídos: nenhum deles creditou saldo.
+const DELETAVEIS = new Set(['PENDING', 'CANCELLED', 'FAILED'])
+
 // Exclui um depósito que nunca virou dinheiro. Só PENDING ou CANCELLED —
 // um PAID creditou saldo e disparou webhook/Meta; apagar quebraria o
 // rastro contábil. Exclusão física mesmo: não há saldo envolvido e a
@@ -219,7 +222,11 @@ export async function deleteDeposit(depositId: string): Promise<{ status: string
     `
     const dep = rows[0]
     if (!dep) throw new Error('DEPOSIT_NOT_FOUND')
-    if (dep.status !== 'PENDING' && dep.status !== 'CANCELLED') {
+    // PENDING, CANCELLED e FAILED nunca creditaram saldo — só PAID fica
+    // de fora. FAILED (erro do gateway) entrou em 2026-11-05: tinha ficado
+    // fora na primeira versão sem motivo, e é o caso que mais polui a
+    // lista — o usuário tenta gerar o PIX, falha, e tenta de novo.
+    if (!DELETAVEIS.has(dep.status)) {
       throw new Error('DEPOSIT_NOT_DELETABLE')
     }
     await tx.$executeRaw`

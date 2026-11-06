@@ -47,6 +47,10 @@ interface ListResponse {
 }
 
 type StatusFilter = 'ALL' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED'
+// Status que o backend aceita excluir: nenhum deles creditou saldo.
+// Espelha DELETAVEIS em api/src/admin/deposits/service.ts.
+const DELETAVEIS = new Set<DepositRow['status']>(['PENDING', 'CANCELLED', 'FAILED'])
+
 const PAGE_SIZE = 25
 
 export default function AdminDepositsPage() {
@@ -83,7 +87,7 @@ export default function AdminDepositsPage() {
   // Só PENDING/CANCELLED — o backend recusa PAID (creditou saldo). Serve
   // pra limpar QR codes gerados e abandonados; nada de dinheiro envolvido.
   async function deleteDeposit(dep: DepositRow) {
-    if (busyId || (dep.status !== 'PENDING' && dep.status !== 'CANCELLED')) return
+    if (busyId || !DELETAVEIS.has(dep.status)) return
     if (!confirm(`Excluir o depósito de R$ ${parseFloat(dep.amount).toFixed(2)} de ${dep.userEmail}?
 
 Ele some da lista. Nenhum saldo é alterado.`)) return
@@ -93,7 +97,7 @@ Ele some da lista. Nenhum saldo é alterado.`)) return
       await load()
     } catch (err: any) {
       const code = err?.response?.data?.error
-      if      (code === 'DEPOSIT_NOT_DELETABLE') alert('Só depósitos pendentes ou cancelados podem ser excluídos.')
+      if      (code === 'DEPOSIT_NOT_DELETABLE') alert('Só depósitos pendentes, cancelados ou falhados podem ser excluídos.')
       else if (code === 'DEPOSIT_NOT_FOUND')     alert('Depósito não encontrado — talvez já tenha sido excluído.')
       else                                        alert('Erro ao excluir o depósito.')
     } finally {
@@ -285,7 +289,7 @@ Ele some da lista. Nenhum saldo é alterado.`)) return
                           </button>
                           <BotaoExcluir onClick={() => deleteDeposit(d)} disabled={busyId === d.id} />
                         </span>
-                      ) : d.status === 'CANCELLED' ? (
+                      ) : DELETAVEIS.has(d.status) ? (
                         <BotaoExcluir onClick={() => deleteDeposit(d)} disabled={busyId === d.id} />
                       ) : (
                         <span className="text-[#8b8f9a]">—</span>
