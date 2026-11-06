@@ -23,10 +23,11 @@ interface DepositRow {
   /** Gateway que originou o depósito. Antigos (pré multi-gateway) = 'bspay'. */
   paymentGateway?: string
   status:     'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED'
-  isFake:     boolean
   notes:      string | null
   createdAt:  string
   paidAt:     string | null
+  /** Cadastro do USUARIO, nao do deposito. */
+  userCreatedAt: string
 }
 
 interface Counts {
@@ -124,23 +125,6 @@ Ele some da lista. Nenhum saldo é alterado.`)) return
     }
   }
 
-  async function toggleFake(dep: DepositRow) {
-    if (busyId) return
-    setBusyId(dep.id)
-    try {
-      await api.patch(`/admin/deposits/${dep.id}/fake`, { isFake: !dep.isFake })
-      // Optimistic local update
-      setData((prev) => prev ? {
-        ...prev,
-        deposits: prev.deposits.map((d) => d.id === dep.id ? { ...d, isFake: !d.isFake } : d),
-      } : prev)
-    } catch {
-      alert('Erro ao atualizar.')
-    } finally {
-      setBusyId(null)
-    }
-  }
-
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1
   const counts = data?.counts
 
@@ -229,7 +213,7 @@ Ele some da lista. Nenhum saldo é alterado.`)) return
                 <th className="text-left  px-3 py-3">Gateway</th>
                 <th className="text-left  px-3 py-3">Status</th>
                 <th className="text-left  px-3 py-3">Data</th>
-                <th className="text-center px-3 py-3">Fake</th>
+                <th className="text-left  px-3 py-3">Cadastro</th>
                 <th className="text-center px-3 py-3">Recebido</th>
               </tr>
             </thead>
@@ -258,15 +242,8 @@ Ele some da lista. Nenhum saldo é alterado.`)) return
                     </td>
                     <td className="px-3 py-3"><StatusChip status={d.status} notes={d.notes} /></td>
                     <td className="px-3 py-3 text-[#8b8f9a]">{formatDateTime(d.createdAt)}</td>
-                    <td className="px-3 py-3 text-center">
-                      <input
-                        type="checkbox"
-                        checked={d.isFake}
-                        disabled={busyId === d.id}
-                        onChange={() => toggleFake(d)}
-                        className="w-4 h-4 accent-orange-500 cursor-pointer disabled:cursor-not-allowed"
-                        title="Marcar como depósito fake / teste"
-                      />
+                    <td className="px-3 py-3">
+                      <CadastroCell cadastro={d.userCreatedAt} deposito={d.createdAt} />
                     </td>
                     <td className="px-3 py-3 text-center">
                       {/* PAID: ícone preenchido verde, NÃO clicável — confirma
@@ -422,6 +399,42 @@ function formatDateTime(iso: string) {
   const hh = String(d.getHours()).padStart(2, '0')
   const mi = String(d.getMinutes()).padStart(2, '0')
   return `${dd}/${mm}/${yyyy} ${hh}:${mi}`
+}
+
+// Data de cadastro do usuario. Ocupa o lugar da antiga coluna "Fake"
+// (deposits.isFake), um marcador que o admin podia ligar mas que nenhuma
+// query lia — nao filtrava KPI, nao filtrava dashboard, nao fazia nada.
+//
+// O numero util aqui nao e' so' a data: e' a DISTANCIA entre o cadastro e
+// este deposito. Cadastro e deposito no mesmo minuto e' comportamento de
+// trafego pago convertendo na hora; meses de distancia e' usuario antigo
+// voltando. Por isso a segunda linha.
+function distanciaDoCadastro(cadastroIso: string, depositoIso: string): string | null {
+  const ms = new Date(depositoIso).getTime() - new Date(cadastroIso).getTime()
+  if (!Number.isFinite(ms)) return null
+  // Negativo nao deveria existir (deposito antes do cadastro). Se aparecer,
+  // e' dado torto — melhor nao mostrar nada do que mostrar "-3d".
+  if (ms < 0) return null
+
+  const min = Math.floor(ms / 60_000)
+  if (min < 1)      return 'na hora'
+  if (min < 60)     return `+${min}min`
+  const h = Math.floor(min / 60)
+  if (h < 48)       return `+${h}h`
+  const d = Math.floor(h / 24)
+  if (d < 60)       return `+${d}d`
+  return `+${Math.floor(d / 30)} meses`
+}
+
+function CadastroCell({ cadastro, deposito }: { cadastro?: string; deposito: string }) {
+  if (!cadastro) return <span className="text-[#8b8f9a]">—</span>
+  const dist = distanciaDoCadastro(cadastro, deposito)
+  return (
+    <div className="leading-tight" title={`Cadastro: ${formatDateTime(cadastro)}`}>
+      <div className="text-[#8b8f9a]">{formatDateTime(cadastro)}</div>
+      {dist && <div className="text-[10px] text-[#5f636e]">{dist} ate' depositar</div>}
+    </div>
+  )
 }
 
 // Lixeira discreta — ação sem dinheiro envolvido, mas irreversível na

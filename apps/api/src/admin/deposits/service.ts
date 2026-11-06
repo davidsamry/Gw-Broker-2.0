@@ -23,6 +23,10 @@ export interface DepositRow {
   notes:      string | null
   createdAt:  Date
   paidAt:     Date | null
+  /** Quando o USUARIO se cadastrou (users.createdAt), nao o deposito.
+   *  No admin isso mostra quanto tempo levou do cadastro ate' depositar —
+   *  substituiu a coluna "Fake", que era um marcador que nada lia. */
+  userCreatedAt: Date
 }
 
 export interface ListDepositsParams {
@@ -76,6 +80,7 @@ export async function listAdminDeposits(params: ListDepositsParams): Promise<Lis
       SELECT
         d.id, d."accountId",
         u.id AS "userId", u.name AS "userName", u.email AS "userEmail",
+        u."createdAt" AS "userCreatedAt",
         d.amount, d.bonus, d.method::text AS method,
         d."externalId",
         -- NULL = depósito anterior ao multi-gateway → BSPay (compatibilidade).
