@@ -35,6 +35,12 @@ function buildPostbackUrl(): string {
 // The user's balance is NOT credited here — it's credited by the webhook
 // when the gateway confirms payment.
 export async function createPixDeposit(userId: string, input: CreatePixDepositInput): Promise<CreatedDeposit> {
+  // Cronometro por fase. Sem isso so da' pra medir o trecho que fica entre o
+  // createdAt e o updatedAt da linha (a chamada ao gateway) — todo o resto
+  // ficava invisivel, e a conta nunca fechava com o tempo que o usuario diz
+  // esperar. Agora cada deposito registra onde o tempo foi.
+  const t0 = Date.now()
+
   // Gateway ativo (admin escolhe em /admin/configuracoes). SEM fallback:
   // se o selecionado não estiver configurado, o erro sobe — nunca caímos
   // silenciosamente no outro provedor.
@@ -144,6 +150,7 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
   // propaga o erro — nenhum fallback automático entre gateways.
   let qrcode:     string
   let providerId: string | null
+  const tPreparo = Date.now()
   try {
     const charge = await provider.createPixCharge({
       depositId,
@@ -168,15 +175,26 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
           notes = COALESCE(notes, '') || ${` [FALHOU: ${motivo}]`}
       WHERE id = ${depositId}
     `
-    console.error(`[${provider.id.toUpperCase()}] charge creation failed — deposit=${depositId} motivo=${motivo}`)
+    console.error(
+      `[${provider.id.toUpperCase()}] charge creation failed — deposit=${depositId} ` +
+      `motivo=${motivo} (preparo=${tPreparo - t0}ms gateway=${Date.now() - tPreparo}ms)`,
+    )
     throw err
   }
+
+  const tGateway = Date.now()
 
   // Store the gateway's id so the webhook can reconcile, and as audit trail.
   await prisma.$executeRaw`
     UPDATE deposits SET "externalId" = ${providerId}, "updatedAt" = NOW()
     WHERE id = ${depositId}
   `
+
+  console.log(
+    `[deposits] PIX gerado dep=${depositId} gw=${provider.id} ` +
+    `total=${Date.now() - t0}ms (preparo=${tPreparo - t0}ms ` +
+    `gateway=${tGateway - tPreparo}ms gravacao=${Date.now() - tGateway}ms)`,
+  )
 
   return {
     id:        depositId,
