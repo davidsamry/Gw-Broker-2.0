@@ -256,7 +256,7 @@ Ele some da lista. Nenhum saldo é alterado.`)) return
                     <td className="px-3 py-3">
                       <GatewayChip gateway={d.paymentGateway} externalId={d.externalId} />
                     </td>
-                    <td className="px-3 py-3"><StatusChip status={d.status} /></td>
+                    <td className="px-3 py-3"><StatusChip status={d.status} notes={d.notes} /></td>
                     <td className="px-3 py-3 text-[#8b8f9a]">{formatDateTime(d.createdAt)}</td>
                     <td className="px-3 py-3 text-center">
                       <input
@@ -360,7 +360,10 @@ function GatewayChip({ gateway, externalId }: { gateway?: string; externalId: st
   )
 }
 
-function StatusChip({ status }: { status: DepositRow['status'] }) {
+// O motivo da falha fica em notes (gravado pelo backend quando a cobranca
+// nao sobe: timeout no gateway, credencial, etc). Mostramos como tooltip
+// nativo — antes essa informacao so existia no log do container.
+function StatusChip({ status, notes }: { status: DepositRow['status']; notes?: string | null }) {
   const map: Record<DepositRow['status'], { label: string; tone: string }> = {
     PENDING:   { label: 'Pendente',  tone: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/40' },
     PAID:      { label: 'Recebido',  tone: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40' },
@@ -368,8 +371,16 @@ function StatusChip({ status }: { status: DepositRow['status'] }) {
     CANCELLED: { label: 'Cancelado', tone: 'bg-[#1a1e2a] text-[#8b8f9a] border-[#1f232e]' },
   }
   const cfg = map[status]
+  const motivo = notes?.trim() || undefined
   return (
-    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border w-fit', cfg.tone)}>
+    <span
+      title={motivo}
+      className={cn(
+        'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border w-fit',
+        cfg.tone,
+        motivo && 'cursor-help',
+      )}
+    >
       {cfg.label}
     </span>
   )

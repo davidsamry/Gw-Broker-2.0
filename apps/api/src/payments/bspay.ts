@@ -12,9 +12,29 @@
 
 const DEFAULT_BASE_URL = 'https://api.bspay.co'
 
-// ── Token cache (process-wide, refreshed when within 60s of expiry) ────────
+// ── Timeouts ───────────────────────────────────────────────────────────────
+// Medidos em producao (06/11/2026): um deposito saudavel leva ~3,9s ponta a
+// ponta. Das 71 falhas historicas, 43 eram timeout puro — 20 batendo exatos
+// 10,0s (o limite antigo do token) e 23 em ~15,0s (o limite antigo do cashin).
+// A BSPay revende a MagenPay, entao ha um salto a mais na cadeia e as
+// oscilacoes sao grandes. Preferimos o usuario esperar mais a ver erro: ele
+// ja esperava 15s e levava "falhou" do mesmo jeito.
+const TOKEN_TIMEOUT_MS  = 20_000
+const CASHIN_TIMEOUT_MS = 25_000
+
+// ── Token cache (process-wide) ─────────────────────────────────────────────
+// A renovacao antiga rodava DENTRO do request do usuario: a primeira pessoa a
+// depositar depois da expiracao pagava o custo do OAuth, e se ele travasse o
+// deposito dela morria (20 das 71 falhas). Agora renovamos 5 min antes do
+// vencimento em background e devolvemos o token atual na hora — ninguem
+// espera por OAuth a nao ser que o token ja esteja praticamente morto.
+const REFRESH_AHEAD_MS = 5 * 60_000
+const HARD_EXPIRY_MS   = 30_000
+
 let cachedToken:  string | null = null
 let cachedExpiry: number        = 0  // epoch ms
+// Single-flight: depositos simultaneos compartilham uma renovacao so.
+let inflightRefresh: Promise<string> | null = null
 
 function readConfig() {
   const baseUrl     = (process.env.BSPAY_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, '')
@@ -24,7 +44,16 @@ function readConfig() {
   return { baseUrl, clientId, clientSecret }
 }
 
-async function fetchAccessToken(): Promise<{ token: string; expiresIn: number }> {
+/** Timeout do AbortSignal chega como DOMException name='TimeoutError'. */
+function isTransient(err: any): boolean {
+  if (err?.name === 'TimeoutError' || err?.name === 'AbortError') return true
+  // Erro de rede (DNS, conexao recusada, socket cortado).
+  if (err?.name === 'TypeError' && /fetch/i.test(err?.message ?? '')) return true
+  // 5xx do lado deles vale nova tentativa; 4xx (credencial errada) nao.
+  return /^BSPAY_AUTH_FAILED:5\d\d/.test(err?.message ?? '')
+}
+
+async function requestAccessToken(): Promise<{ token: string; expiresIn: number }> {
   const { baseUrl, clientId, clientSecret } = readConfig()
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
 
@@ -35,7 +64,7 @@ async function fetchAccessToken(): Promise<{ token: string; expiresIn: number }>
       'Content-Type':  'application/x-www-form-urlencoded',
     },
     body: 'grant_type=client_credentials',
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
   })
 
   if (!res.ok) {
@@ -48,15 +77,56 @@ async function fetchAccessToken(): Promise<{ token: string; expiresIn: number }>
   return { token: json.access_token, expiresIn: json.expires_in ?? 3600 }
 }
 
-async function getAccessToken(): Promise<string> {
-  const now = Date.now()
-  // Refresh proactively 60s before actual expiry to avoid mid-request timeouts.
-  if (cachedToken && cachedExpiry - now > 60_000) return cachedToken
+/**
+ * Token novo, com UMA tentativa extra em falha transitoria.
+ *
+ * Retry aqui e seguro porque /oauth/token e idempotente: pedir dois tokens
+ * nao cobra nada de ninguem. Isso NAO vale pro cashin, que cria cobranca de
+ * verdade — ver o comentario em createCashin.
+ */
+async function fetchAccessToken(): Promise<{ token: string; expiresIn: number }> {
+  try {
+    return await requestAccessToken()
+  } catch (err: any) {
+    if (!isTransient(err)) throw err
+    console.warn(`[BSPAY] token falhou (${err?.name ?? err?.message}) — tentando mais uma vez`)
+    await new Promise((r) => setTimeout(r, 500))
+    return requestAccessToken()
+  }
+}
 
-  const { token, expiresIn } = await fetchAccessToken()
-  cachedToken  = token
-  cachedExpiry = now + expiresIn * 1000
-  return token
+function refreshToken(): Promise<string> {
+  if (inflightRefresh) return inflightRefresh
+  inflightRefresh = (async () => {
+    try {
+      const { token, expiresIn } = await fetchAccessToken()
+      cachedToken  = token
+      cachedExpiry = Date.now() + expiresIn * 1000
+      return token
+    } finally {
+      inflightRefresh = null
+    }
+  })()
+  return inflightRefresh
+}
+
+async function getAccessToken(): Promise<string> {
+  const restante = cachedExpiry - Date.now()
+
+  // Token folgado — usa direto.
+  if (cachedToken && restante > REFRESH_AHEAD_MS) return cachedToken
+
+  // Perto de vencer mas ainda valido: renova em background e devolve o atual,
+  // pro usuario nao esperar pelo OAuth.
+  if (cachedToken && restante > HARD_EXPIRY_MS) {
+    refreshToken().catch((err) => {
+      console.error('[BSPAY] renovacao de token em background falhou:', err?.message ?? err)
+    })
+    return cachedToken
+  }
+
+  // Sem token, ou vencendo agora: nao tem como escapar da espera.
+  return refreshToken()
 }
 
 // ── Cash-in (PIX deposit) ───────────────────────────────────────────────────
@@ -78,6 +148,19 @@ export interface CashinResponse {
   raw:         any      // full response for debugging
 }
 
+/**
+ * Cria a cobranca PIX.
+ *
+ * SEM RETRY, de proposito. Em 06/11/2026 encontramos duas cobrancas de R$100
+ * no painel da BSPay (2137c69d7f…, 8e02118251…) sem par no nosso banco: a
+ * chamada estourou o timeout do nosso lado, mas a BSPay processou o pedido
+ * 3-4 min depois e gerou o QR assim mesmo. Ou seja, timeout aqui NAO quer
+ * dizer "nao criou" — quer dizer "nao sei". Repetir o POST geraria duas
+ * cobrancas reais pro mesmo deposito.
+ *
+ * So da pra ligar retry depois que a BSPay confirmar por escrito que
+ * deduplica pelo external_id que mandamos.
+ */
 export async function createCashin(input: CashinInput): Promise<CashinResponse> {
   const { baseUrl } = readConfig()
   const token = await getAccessToken()
@@ -100,7 +183,7 @@ export async function createCashin(input: CashinInput): Promise<CashinResponse> 
         ? { payer: { document: input.payerDocument, name: input.payerName ?? undefined } }
         : {}),
     }),
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(CASHIN_TIMEOUT_MS),
   })
 
   if (!res.ok) {
@@ -160,7 +243,7 @@ export async function createCryptoCashin(input: CryptoCashinInput): Promise<Cryp
       external_id:  input.externalId,
       postback_url: input.postbackUrl,
     }),
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(CASHIN_TIMEOUT_MS),
   })
 
   if (!res.ok) {

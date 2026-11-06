@@ -30,6 +30,14 @@ export async function depositRoutes(app: FastifyInstance) {
         req.log.error({ err }, 'BSPay cashin failed')
         return reply.status(502).send({ error: 'PAYMENT_GATEWAY_ERROR' })
       }
+      // Timeout chega como DOMException TimeoutError e nao casava com
+      // nenhum if daqui — caia no 500 generico e o usuario lia "Erro ao
+      // gerar QR", como se fosse culpa dele. E problema do gateway, e a
+      // acao certa e tentar de novo em instantes.
+      if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+        req.log.error({ name: err.name }, 'Timeout no gateway ao criar cobranca PIX')
+        return reply.status(502).send({ error: 'PAYMENT_GATEWAY_ERROR' })
+      }
       // Erros da Versell (VersellError.code). Nunca logamos credenciais —
       // apenas code + detail já sanitizados pelo client.
       if (typeof err.code === 'string' && err.code.startsWith('VERSELL_')) {

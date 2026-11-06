@@ -156,11 +156,19 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
     qrcode     = charge.qrcode
     providerId = charge.providerId
   } catch (err: any) {
+    // Grava o motivo na propria linha. Antes so existia no log do container,
+    // e pra descobrir a causa das 71 falhas historicas foi preciso deduzir
+    // pelo intervalo createdAt→updatedAt. Agora aparece direto no admin.
+    const motivo = err?.name === 'TimeoutError' || err?.name === 'AbortError'
+      ? `timeout na ${provider.id.toUpperCase()} ao gerar a cobranca`
+      : String(err?.code ?? err?.message ?? err).slice(0, 180)
     await prisma.$executeRaw`
-      UPDATE deposits SET status = 'FAILED'::"DepositStatus", "updatedAt" = NOW()
+      UPDATE deposits
+      SET status = 'FAILED'::"DepositStatus", "updatedAt" = NOW(),
+          notes = COALESCE(notes, '') || ${` [FALHOU: ${motivo}]`}
       WHERE id = ${depositId}
     `
-    console.error(`[${provider.id.toUpperCase()}] charge creation failed — deposit=${depositId} code=${err?.code ?? err?.message?.slice(0, 60)}`)
+    console.error(`[${provider.id.toUpperCase()}] charge creation failed — deposit=${depositId} motivo=${motivo}`)
     throw err
   }
 
@@ -348,16 +356,49 @@ export async function confirmDepositById(depositId: string) {
   const currentRows = await prisma.$queryRaw<Array<{ status: string }>>`
     SELECT status::text AS status FROM deposits WHERE id = ${depositId}
   `
-  if (currentRows[0]?.status === 'CANCELLED') {
+  const currentStatus = currentRows[0]?.status ?? null
+
+  // Linha nao existe e o gateway esta confirmando pagamento. O dinheiro
+  // entrou na conta do gateway e nao temos a quem creditar — nem da pra
+  // descobrir sozinho, porque o accountId morreu junto com a linha.
+  // Unica saida e gritar no log pro admin conciliar pelo painel.
+  // Acontece se o admin apagar o deposito antes do webhook chegar.
+  if (!currentStatus) {
+    console.error(
+      `[deposits] ALERTA DE CONCILIACAO: gateway confirmou pagamento do deposito ` +
+      `${depositId}, que NAO existe no banco. O dinheiro entrou e NAO foi creditado ` +
+      `a ninguem. Conferir esse external_id no painel do gateway.`,
+    )
+    return false
+  }
+
+  // Reativa deposito que, pelo nosso estado, nao deveria receber pagamento —
+  // mas recebeu. A CTE la embaixo so enxerga linha PENDING, entao sem isso o
+  // pagamento seria ignorado em silencio. Dois caminhos chegam aqui:
+  //
+  //   CANCELLED — user gerou PIX2 (que auto-cancelou o PIX1) e pagou o PIX1.
+  //
+  //   FAILED    — a criacao da cobranca estourou o timeout do nosso lado, mas
+  //               o gateway processou o pedido atrasado e gerou o QR assim
+  //               mesmo. Confirmado em 06/11/2026: duas cobrancas de R$100
+  //               existiam na BSPay (2137c69d7f…, 8e02118251…) sem par no
+  //               nosso banco, criadas 3-4 min depois de desistirmos.
+  //               Hoje o usuario nunca ve esse QR (so devolvemos o QR quando
+  //               a chamada completa), entao na pratica ninguem paga. Mas se
+  //               um dia pagar, o dinheiro e real e tem que virar saldo.
+  if (currentStatus === 'CANCELLED' || currentStatus === 'FAILED') {
+    const motivo = currentStatus === 'CANCELLED'
+      ? 'confirmou apos auto-cancel'
+      : 'confirmou cobranca que falhou por timeout na criacao'
     await prisma.$executeRaw`
       UPDATE deposits
       SET status = 'PENDING'::"DepositStatus", "updatedAt" = NOW(),
-          notes = COALESCE(notes, '') || ' [REATIVADO: BSPay confirmou apos auto-cancel]'
-      WHERE id = ${depositId} AND status = 'CANCELLED'::"DepositStatus"
+          notes = COALESCE(notes, '') || ${` [REATIVADO: gateway ${motivo}]`}
+      WHERE id = ${depositId} AND status::text = ${currentStatus}
     `
     console.warn(
-      `[deposits] reativado por confirmacao BSPay deposit=${depositId} — ` +
-      `race condition: user pagou PIX antigo apos gerar novo`,
+      `[deposits] reativado por confirmacao do gateway deposit=${depositId} ` +
+      `status_anterior=${currentStatus} — ${motivo}`,
     )
   }
 
