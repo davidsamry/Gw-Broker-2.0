@@ -343,19 +343,32 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
 // Gateway que processou o depósito. Registros antigos vêm sem o campo e são
 // exibidos como BSPay (mesma regra do backend). O txid/id do provedor entra
 // no tooltip pra conciliação rápida.
+// Um gateway novo so' precisa de uma linha aqui. A versao anterior era um
+// ternario versell/BSPay, entao o primeiro deposito SkalaPay apareceu
+// rotulado como BSPay: o backend gravava certo, o rotulo e' que mentia.
+const GATEWAYS: Record<string, { label: string; tone: string }> = {
+  bspay:    { label: 'BSPay',    tone: 'bg-sky-500/15 text-sky-300 border-sky-500/40' },
+  versell:  { label: 'Versell',  tone: 'bg-violet-500/15 text-violet-300 border-violet-500/40' },
+  skalapay: { label: 'SkalaPay', tone: 'bg-amber-500/15 text-amber-300 border-amber-500/40' },
+}
+
+// Registros anteriores ao multi-gateway tem paymentGateway NULL e sao
+// BSPay por definicao. Valor desconhecido aparece como ele mesmo, em
+// cinza — melhor mostrar 'xpto' do que fingir que e' BSPay.
+const GATEWAY_DESCONHECIDO = { tone: 'bg-[#1a1e2a] text-[#8b8f9a] border-[#1f232e]' }
+
 function GatewayChip({ gateway, externalId }: { gateway?: string; externalId: string | null }) {
-  const isVersell = gateway === 'versell'
+  const key = gateway ?? 'bspay'
+  const cfg = GATEWAYS[key]
   return (
     <span
       title={externalId ? `ID no gateway: ${externalId}` : 'Sem ID do gateway'}
       className={cn(
         'inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border',
-        isVersell
-          ? 'bg-violet-500/15 text-violet-300 border-violet-500/40'
-          : 'bg-sky-500/15 text-sky-300 border-sky-500/40',
+        cfg?.tone ?? GATEWAY_DESCONHECIDO.tone,
       )}
     >
-      {isVersell ? 'Versell' : 'BSPay'}
+      {cfg?.label ?? key}
     </span>
   )
 }
