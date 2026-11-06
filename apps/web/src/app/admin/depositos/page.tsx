@@ -349,7 +349,7 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
 const GATEWAYS: Record<string, { label: string; tone: string }> = {
   bspay:    { label: 'BSPay',    tone: 'bg-sky-500/15 text-sky-300 border-sky-500/40' },
   versell:  { label: 'Versell',  tone: 'bg-violet-500/15 text-violet-300 border-violet-500/40' },
-  skalapay: { label: 'SkalaPay', tone: 'bg-amber-500/15 text-amber-300 border-amber-500/40' },
+  skalapay: { label: 'SkalaPay', tone: 'bg-blue-500/15 text-blue-300 border-blue-500/40' },
 }
 
 // Registros anteriores ao multi-gateway tem paymentGateway NULL e sao
