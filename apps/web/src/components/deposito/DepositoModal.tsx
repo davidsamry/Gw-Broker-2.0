@@ -584,9 +584,83 @@ function FormStep({
         )}
       >
         {loading
-          ? (<><Loader2 size={14} className="animate-spin" /> Gerando QR Code…</>)
+          ? (<><Loader2 size={14} className="animate-spin" /> Gerando seu PIX…</>)
           : (<><QrCode size={15} /> Gerar QR Code PIX</>)}
       </button>
+
+      {loading && <GerandoPix />}
+    </div>
+  )
+}
+
+// ── Passos durante a geração do PIX ────────────────────────────────────────
+//
+// ATENÇÃO: isto é baseado em TEMPO, não em evento real do backend. A API
+// responde uma vez só, no fim — não existe stream de progresso. Os tempos
+// vieram da medição de 06/11/2026: o preparo (conta + auto-cancel + insert)
+// leva ~0,3s e a chamada ao gateway leva 3s num dia bom, ~6s no comum e
+// estoura 15s quando a BSPay engasga.
+//
+// Por isso os rótulos descrevem o que de fato está acontecendo naquele
+// trecho, mas sem barra de porcentagem: fingir precisão que não temos
+// seria pior que o spinner mudo que havia antes.
+const PASSOS = [
+  { aos:    0, label: 'Validando seus dados'        },
+  { aos:  600, label: 'Criando a cobrança no banco' },
+  { aos: 3500, label: 'Montando o QR Code'          },
+] as const
+
+// Acima disso a espera deixou de ser normal. Avisar é o que impede o
+// usuário de achar que travou e gerar um segundo PIX por impaciência —
+// exatamente o que enchia a lista de depósitos abandonados.
+const AVISO_LENTO_MS = 8_000
+
+function GerandoPix() {
+  const [ms, setMs] = useState(0)
+
+  useEffect(() => {
+    const t0 = Date.now()
+    const id = setInterval(() => setMs(Date.now() - t0), 200)
+    return () => clearInterval(id)
+  }, [])
+
+  // Passo corrente = o último cujo tempo já passou.
+  const atual = PASSOS.reduce((acc, p, i) => (ms >= p.aos ? i : acc), 0)
+
+  return (
+    <div className="mt-1 px-3 py-2.5 rounded-xl bg-[#11141d] border border-[#1f232e] space-y-1.5">
+      {PASSOS.map((p, i) => {
+        const feito = i < atual
+        const agora = i === atual
+        return (
+          <div key={p.label} className="flex items-center gap-2">
+            {feito ? (
+              <Check size={12} className="text-emerald-400 flex-shrink-0" />
+            ) : agora ? (
+              <Loader2 size={12} className="animate-spin text-emerald-400 flex-shrink-0" />
+            ) : (
+              <span className="w-3 h-3 rounded-full border border-[#2a2e3b] flex-shrink-0" />
+            )}
+            <span
+              className={cn(
+                'text-[11px] transition-colors',
+                feito ? 'text-[#5f6575]' : agora ? 'text-white font-medium' : 'text-[#4d5266]',
+              )}
+            >
+              {p.label}
+            </span>
+          </div>
+        )
+      })}
+
+      {ms >= AVISO_LENTO_MS && (
+        <div className="flex items-start gap-2 pt-1.5 mt-1.5 border-t border-[#1f232e]">
+          <Clock size={12} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <span className="text-[11px] text-amber-300">
+            O banco está demorando mais que o normal. Não feche esta tela — o QR ainda vai aparecer.
+          </span>
+        </div>
+      )}
     </div>
   )
 }
