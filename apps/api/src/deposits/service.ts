@@ -51,8 +51,12 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
 
   // Find the user's REAL account + display name (BSPay shows the payer
   // name on the bank app side).
-  const accountRows = await prisma.$queryRaw<Array<{ id: string; name: string }>>`
-    SELECT a.id, u.name
+  // email/phone existem por causa da SkalaPay, que exige customer_data
+  // completo. BSPay e Versell simplesmente ignoram os campos extras.
+  const accountRows = await prisma.$queryRaw<Array<{
+    id: string; name: string; email: string; phone: string | null
+  }>>`
+    SELECT a.id, u.name, u.email, u.phone
     FROM accounts a
     INNER JOIN users u ON u.id = a."userId"
     WHERE a."userId" = ${userId} AND a.type = 'REAL'::"AccountType"
@@ -61,6 +65,8 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
   if (accountRows.length === 0) throw new Error('REAL_ACCOUNT_NOT_FOUND')
   const accountId  = accountRows[0].id
   const payerName  = accountRows[0].name
+  const payerEmail = accountRows[0].email
+  const payerPhone = accountRows[0].phone ?? undefined
 
   // ── Auto-cancel PIX/bonus PENDING orfaos do MESMO PIX abandonado ────
   // Quando user gera NOVO PIX, assume-se que abandonou o anterior. Limpa:
@@ -158,6 +164,8 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
       amount:        amountDec.toFixed(2),
       payerDocument: input.cpf,
       payerName,
+      payerEmail,
+      payerPhone,
       description:   'Depósito VX Global',
     })
     qrcode     = charge.qrcode

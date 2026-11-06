@@ -26,7 +26,7 @@ export interface PlatformSettings {
   // Gatilho alternativo (OR): % do rollover atingido que também dispara a
   // auto-Liquidez (mesmo sem lucro). Default 50%. 0 desativa.
   autoLiquidityRolloverPct: number
-  // Gateway usado para criar NOVAS cobranças PIX: 'bspay' | 'versell'.
+  // Gateway p/ criar NOVAS cobranças PIX: 'bspay' | 'versell' | 'skalapay'.
   // Não afeta depósitos já criados nem o processamento de webhooks.
   depositGateway:          string
   updatedAt:               Date
@@ -51,6 +51,10 @@ const DEFAULTS: PlatformSettings = {
   depositGateway:         'bspay',
   updatedAt:              new Date(0),
 }
+
+// Gateways aceitos. Valor desconhecido vindo do banco vira 'bspay', pra um
+// typo no admin nunca derrubar a criacao de deposito.
+const GATEWAYS_VALIDOS = new Set(['bspay', 'versell', 'skalapay'])
 
 let cache: PlatformSettings = DEFAULTS
 
@@ -80,7 +84,12 @@ export async function refreshSettingsCache(): Promise<PlatformSettings> {
       autoLiquidityRolloverPct: (row as any).autoLiquidityRolloverPct ?? 50,
       // Default 'bspay' preserva o comportamento de produção caso o client
       // Prisma esteja stale no primeiro deploy da migration.
-      depositGateway:         (row as any).depositGateway === 'versell' ? 'versell' : 'bspay',
+      // Normalizado aqui na mao, sem importar de payments/gateway.ts: aquele
+      // modulo importa getSettings DESTE arquivo, e o import cruzado criaria
+      // um ciclo. Sao tres valores — duplicar a lista custa menos que o ciclo.
+      depositGateway:         GATEWAYS_VALIDOS.has((row as any).depositGateway)
+                                ? (row as any).depositGateway
+                                : 'bspay',
       updatedAt:              row.updatedAt,
     }
   } catch (err) {

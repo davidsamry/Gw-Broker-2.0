@@ -19,14 +19,18 @@
 import { getSettings } from '../settings/service.js'
 import * as bspay   from './bspay.js'
 import * as versell from './versell.js'
+import * as skalapay from './skalapay.js'
 
-export type GatewayId = 'bspay' | 'versell'
+export type GatewayId = 'bspay' | 'versell' | 'skalapay'
 
-export const GATEWAY_IDS: GatewayId[] = ['bspay', 'versell']
+export const GATEWAY_IDS: GatewayId[] = ['bspay', 'versell', 'skalapay']
 
-/** Normaliza qualquer valor vindo do banco/env para um GatewayId válido. */
+/**
+ * Normaliza qualquer valor vindo do banco/env para um GatewayId válido.
+ * Default 'bspay': valor desconhecido nunca muda o gateway de produção.
+ */
 export function normalizeGatewayId(value: unknown): GatewayId {
-  return value === 'versell' ? 'versell' : 'bspay'
+  return value === 'versell' || value === 'skalapay' ? value : 'bspay'
 }
 
 /**
@@ -35,7 +39,7 @@ export function normalizeGatewayId(value: unknown): GatewayId {
  * com relatórios e conciliações existentes.
  */
 export function gatewayOfDeposit(paymentGateway: string | null | undefined): GatewayId {
-  return paymentGateway === 'versell' ? 'versell' : 'bspay'
+  return normalizeGatewayId(paymentGateway)
 }
 
 /** Gateway ativo para NOVAS cobranças (lido do cache de settings). */
@@ -52,6 +56,9 @@ export interface CreatePixChargeInput {
   amount:        string
   payerDocument?: string
   payerName?:    string
+  /** Exigidos pela SkalaPay em customer_data; ignorados pelos outros. */
+  payerEmail?:   string
+  payerPhone?:   string
   description?:  string
 }
 
@@ -125,9 +132,42 @@ const versellProvider: PaymentProvider = {
   },
 }
 
+// ── SkalaPay ───────────────────────────────────────────────────────────────
+//
+// Diferença estrutural: a API da SkalaPay NÃO tem campo pra referência
+// externa (a BSPay tem external_id, a Versell tem txid). Então não
+// conseguimos mandar o nosso Deposit.id — a reconciliação acontece ao
+// contrário, pelo id DELES, que guardamos em deposits.externalId assim que
+// a cobrança nasce. O webhook procura o depósito por esse campo.
+//
+// O Deposit.id vai no `description` só como rastro: se algo precisar ser
+// conciliado à mão no painel deles, dá pra achar pelo texto.
+
+const skalapayProvider: PaymentProvider = {
+  id: 'skalapay',
+  isConfigured: () => skalapay.isConfigured(),
+  async createPixCharge(input) {
+    const charge = await skalapay.createCashin({
+      amount:      input.amount,
+      description: `Deposito VX Global #${input.depositId}`,
+      customer: {
+        name:  input.payerName ?? 'Cliente VX Global',
+        // A SkalaPay pede email em customer_data. Quando não temos o do
+        // usuário, mandamos um placeholder do nosso domínio em vez de
+        // deixar vazio e tomar 422 na criação da cobrança.
+        email:    input.payerEmail ?? 'no-reply@vx-global.com',
+        document: input.payerDocument,
+        phone:    input.payerPhone,
+      },
+    })
+    return { qrcode: charge.qrcode, providerId: charge.transactionId, gateway: 'skalapay' }
+  },
+}
+
 const PROVIDERS: Record<GatewayId, PaymentProvider> = {
-  bspay:   bspayProvider,
-  versell: versellProvider,
+  bspay:    bspayProvider,
+  versell:  versellProvider,
+  skalapay: skalapayProvider,
 }
 
 export function getProvider(id: GatewayId): PaymentProvider {

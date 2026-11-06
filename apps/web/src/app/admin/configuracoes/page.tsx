@@ -28,7 +28,7 @@ interface PlatformSettings {
   autoLiquidityProfitPct: number
   autoLiquidityRolloverPct: number
   // Gateway ativo para NOVAS cobranças PIX. Não altera depósitos existentes.
-  depositGateway:         'bspay' | 'versell'
+  depositGateway:         GatewayId
 }
 
 interface Response { settings: PlatformSettings }
@@ -231,13 +231,16 @@ export default function AdminConfiguracoesPage() {
 // Gateway de Depósito — seleção exclusiva (radio) de qual provedor recebe
 // as NOVAS cobranças PIX. Depósitos já criados mantêm o gateway de origem e
 // os webhooks dos dois provedores seguem ativos.
+type GatewayId = 'bspay' | 'versell' | 'skalapay'
+
 function GatewayCard({ value, onChange }: {
-  value:    'bspay' | 'versell'
-  onChange: (v: 'bspay' | 'versell') => void
+  value:    GatewayId
+  onChange: (v: GatewayId) => void
 }) {
-  const OPTIONS: { id: 'bspay' | 'versell'; name: string; desc: string }[] = [
-    { id: 'bspay',   name: 'BSPay',   desc: 'Gateway atual em produção' },
-    { id: 'versell', name: 'Versell', desc: 'Pix via OAuth2 + mTLS' },
+  const OPTIONS: { id: GatewayId; name: string; desc: string }[] = [
+    { id: 'bspay',    name: 'BSPay',    desc: 'Gateway atual em produção' },
+    { id: 'versell',  name: 'Versell',  desc: 'Pix via OAuth2 + mTLS' },
+    { id: 'skalapay', name: 'SkalaPay', desc: 'Pix via header Client-Id/Secret' },
   ]
   return (
     <div className="rounded-xl bg-[#1a1f2e] border border-[#2a2e3b] p-5 flex flex-col gap-4">
@@ -252,7 +255,7 @@ function GatewayCard({ value, onChange }: {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {OPTIONS.map((o) => {
           const active = value === o.id
           return (

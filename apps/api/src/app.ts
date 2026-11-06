@@ -14,6 +14,7 @@ import { adminRoutes } from './admin/routes.js'
 import { depositRoutes } from './deposits/routes.js'
 import { bspayWebhookRoutes } from './webhooks/bspay.js'
 import { versellWebhookRoutes } from './webhooks/versell.js'
+import { skalapayWebhookRoutes } from './webhooks/skalapay.js'
 import { ticketRoutes } from './tickets/routes.js'
 import { otcV2Routes } from './otc/v2/routes.js'
 import { bonusRoutes } from './bonuses/routes.js'
@@ -205,6 +206,10 @@ export async function buildApp() {
   // distintos no Fastify, então o content-type parser do BSPay não interfere).
   // Ambos ficam sempre ativos, independentemente do gateway selecionado.
   await app.register(versellWebhookRoutes, { prefix: '/webhooks' })
+  // Webhook SkalaPay — também sempre ativo. Diferente dos outros dois, ele
+  // RECONSULTA a API antes de creditar, porque a SkalaPay não assina o
+  // webhook de forma nenhuma. Ver o cabeçalho de webhooks/skalapay.ts.
+  await app.register(skalapayWebhookRoutes, { prefix: '/webhooks' })
   await app.register(ticketRoutes,       { prefix: '/tickets'  })
   await app.register(otcV2Routes,        { prefix: '/otc/v2'   })
   await app.register(bonusRoutes,        { prefix: '/bonuses'  })

@@ -26,7 +26,7 @@ const updateSchema = z.object({
   autoLiquidityRolloverPct: z.number().int().min(0).max(100).optional(),
   // Gateway ativo para NOVAS cobranças PIX. Enum fechado — nada além
   // desses dois valores chega ao banco.
-  depositGateway:         z.enum(['bspay', 'versell']).optional(),
+  depositGateway:         z.enum(['bspay', 'versell', 'skalapay']).optional(),
 }).refine(
   (v) => Object.values(v).some((x) => x !== undefined),
   { message: 'Envie pelo menos um campo.' },
