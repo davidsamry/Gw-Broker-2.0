@@ -205,10 +205,10 @@ export async function toggleDepositFake(depositId: string, isFake: boolean) {
 // Status que podem ser excluídos: nenhum deles creditou saldo.
 const DELETAVEIS = new Set(['PENDING', 'CANCELLED', 'FAILED'])
 
-// Exclui um depósito que nunca virou dinheiro. Só PENDING ou CANCELLED —
-// um PAID creditou saldo e disparou webhook/Meta; apagar quebraria o
-// rastro contábil. Exclusão física mesmo: não há saldo envolvido e a
-// linha só polui a lista (QR code gerado e abandonado).
+// Exclui um depósito que nunca virou dinheiro — ver DELETAVEIS acima.
+// PAID é o único de fora: creditou saldo e disparou webhook/Meta, apagar
+// quebraria o rastro contábil. Exclusão física mesmo: não há saldo
+// envolvido e a linha só polui a lista (QR code gerado e abandonado).
 //
 // Bônus PENDING amarrado a este depósito ficaria órfão esperando um
 // pagamento que nunca vem — cancela junto. Grants ACTIVE/COMPLETED não
