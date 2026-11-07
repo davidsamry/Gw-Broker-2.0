@@ -20,6 +20,19 @@ export interface ApiOperation {
   closedAt:    string | null
 }
 
+// Operação de COPY TRADING. Mora em outra tabela (copy_trade_operations) e
+// não tem ativo, direção nem preço — é trader + resultado. Vem junto no
+// /auth/me e aparece no Histórico ao lado das ops REAL e DEMO.
+export interface ApiCopyOperation {
+  id:         string
+  traderId:   string
+  traderName: string
+  result:     'WIN' | 'LOSS'
+  amount:     number
+  pnl:        number
+  settledAt:  string
+}
+
 // ── Cache (localStorage) — same SWR pattern as the user cache ──────────────
 // Operations come from /auth/me on app init, which fans out 5 parallel
 // queries server-side. Even at p50 that's 200-500ms before the FECHADAS
@@ -28,28 +41,41 @@ export interface ApiOperation {
 //
 // Bump the v if the ApiOperation shape changes, so old clients don't
 // read a malformed cache.
-const OPS_CACHE_KEY = 'vx_operations_cache_v1'
+// v2: passou a guardar copyOperations junto. O v1 antigo fica orfao e
+// expira sozinho — cliente velho nao le' um cache com shape novo.
+const OPS_CACHE_KEY = 'vx_operations_cache_v2'
 const OPS_CACHE_TTL = 5 * 60 * 1000 // 5 min
 
-interface OpsCache { operations: ApiOperation[]; savedAt: number }
+interface OpsCache {
+  operations:     ApiOperation[]
+  copyOperations: ApiCopyOperation[]
+  savedAt:        number
+}
 
-function loadOpsCache(): ApiOperation[] | null {
+function loadOpsCache(): Pick<OpsCache, 'operations' | 'copyOperations'> | null {
   if (typeof window === 'undefined') return null
   try {
     const raw = localStorage.getItem(OPS_CACHE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as OpsCache
     if (Date.now() - parsed.savedAt > OPS_CACHE_TTL) return null
-    return Array.isArray(parsed.operations) ? parsed.operations : null
+    if (!Array.isArray(parsed.operations)) return null
+    return {
+      operations:     parsed.operations,
+      copyOperations: Array.isArray(parsed.copyOperations) ? parsed.copyOperations : [],
+    }
   } catch {
     return null
   }
 }
 
-function saveOpsCache(ops: ApiOperation[]) {
+function saveOpsCache(ops: ApiOperation[], copyOps: ApiCopyOperation[]) {
   if (typeof window === 'undefined') return
   try {
-    localStorage.setItem(OPS_CACHE_KEY, JSON.stringify({ operations: ops, savedAt: Date.now() }))
+    localStorage.setItem(
+      OPS_CACHE_KEY,
+      JSON.stringify({ operations: ops, copyOperations: copyOps, savedAt: Date.now() }),
+    )
   } catch { /* quota / private mode — ignore */ }
 }
 
@@ -59,11 +85,12 @@ function clearOpsCache() {
 }
 
 interface OperationsState {
-  operations: ApiOperation[]
-  loading:    boolean
-  hydrated:   boolean  // true once we've seen at least one fetch / hydrate / cache load
+  operations:     ApiOperation[]
+  copyOperations: ApiCopyOperation[]
+  loading:        boolean
+  hydrated:       boolean  // true once we've seen at least one fetch / hydrate / cache load
 
-  hydrate:        (ops: ApiOperation[]) => void
+  hydrate:        (ops: ApiOperation[], copyOps?: ApiCopyOperation[]) => void
   loadFromCache:  () => void
   refetch:        () => Promise<void>
   upsertOne:      (op: ApiOperation) => void
@@ -71,14 +98,18 @@ interface OperationsState {
 }
 
 export const useOperationsStore = create<OperationsState>((set, get) => ({
-  operations: [],
-  loading:    false,
-  hydrated:   false,
+  operations:     [],
+  copyOperations: [],
+  loading:        false,
+  hydrated:       false,
 
   // Server hydrate — saves to cache so the next reload paints instantly.
-  hydrate: (ops) => {
-    saveOpsCache(ops)
-    set({ operations: ops, hydrated: true, loading: false })
+  // copyOps omitido (chamada antiga) preserva o que ja' estava em memoria,
+  // em vez de zerar a lista de copy sem querer.
+  hydrate: (ops, copyOps) => {
+    const copy = copyOps ?? get().copyOperations
+    saveOpsCache(ops, copy)
+    set({ operations: ops, copyOperations: copy, hydrated: true, loading: false })
   },
 
   // Synchronous cache restore — call from init() before the /auth/me await
@@ -88,17 +119,27 @@ export const useOperationsStore = create<OperationsState>((set, get) => ({
   loadFromCache: () => {
     if (get().hydrated) return
     const cached = loadOpsCache()
-    if (cached) set({ operations: cached, hydrated: true })
+    if (cached) set({ operations: cached.operations, copyOperations: cached.copyOperations, hydrated: true })
   },
 
+  // As duas listas em paralelo. allSettled em vez de all: se /copy/operations
+  // falhar (copy desligado, 500), as ops normais continuam atualizando —
+  // o Historico nao pode parar de funcionar por causa do modulo de copy.
   refetch: async () => {
     if (get().loading) return
     set({ loading: true })
     try {
-      const { data } = await api.get('/operations')
-      const ops = data?.operations ?? []
-      saveOpsCache(ops)
-      set({ operations: ops, hydrated: true, loading: false })
+      const [rOps, rCopy] = await Promise.allSettled([
+        api.get('/operations'),
+        api.get('/copy/operations'),
+      ])
+      if (rOps.status === 'rejected') { set({ loading: false }); return }
+      const ops  = rOps.value.data?.operations ?? []
+      const copy = rCopy.status === 'fulfilled'
+        ? (rCopy.value.data?.operations ?? [])
+        : get().copyOperations
+      saveOpsCache(ops, copy)
+      set({ operations: ops, copyOperations: copy, hydrated: true, loading: false })
     } catch {
       set({ loading: false })
     }
@@ -111,12 +152,12 @@ export const useOperationsStore = create<OperationsState>((set, get) => ({
     const next = idx >= 0
       ? prev.map((o, i) => (i === idx ? op : o))
       : [op, ...prev].slice(0, 50)
-    saveOpsCache(next)
+    saveOpsCache(next, get().copyOperations)
     set({ operations: next })
   },
 
   reset: () => {
     clearOpsCache()
-    set({ operations: [], hydrated: false, loading: false })
+    set({ operations: [], copyOperations: [], hydrated: false, loading: false })
   },
 }))

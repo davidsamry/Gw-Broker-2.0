@@ -106,6 +106,52 @@ export interface CopyOpRow {
   settledAt: Date     // quando a op apareceu/liquidou
 }
 
+export interface CopyHistoryRow {
+  id:         string
+  traderId:   string
+  traderName: string
+  result:     string   // 'WIN' | 'LOSS'
+  amount:     number
+  pnl:        number
+  settledAt:  Date
+}
+
+// Ops de copy ja' liquidadas, pro Historico Trading do app mostrar REAL,
+// DEMO e COPY na mesma lista.
+//
+// NAO filtra por assinatura ativa de proposito. listMyTraders() so' olha
+// subs ACTIVE porque o card "Meus Traders" fala do vinculo atual; aqui e'
+// extrato. Op liquidada ja' mexeu no saldo REAL (COPY_RESULT no extrato),
+// entao cancelar a copia depois nao pode apagar o historico dela.
+//
+// Mesmo filtro do resto do modulo: SETTLED e pnl != 0. PENDING ainda nao
+// "aconteceu" pro usuario, e pnl 0 e' perda capada em saldo zerado — some
+// das duas telas junto, pra Copy e Historico nunca discordarem.
+export async function listCopyOperations(userId: string, take = 50): Promise<CopyHistoryRow[]> {
+  const ops = await prisma.copyTradeOperation.findMany({
+    where:   { userId, status: 'SETTLED', pnl: { not: 0 } },
+    orderBy: { settledAt: 'desc' },
+    take,
+  })
+  if (ops.length === 0) return []
+
+  const traders = await prisma.copyTrader.findMany({
+    where:  { id: { in: [...new Set(ops.map((o) => o.traderId))] } },
+    select: { id: true, name: true },
+  })
+  const nomes = new Map(traders.map((t) => [t.id, t.name]))
+
+  return ops.map((o) => ({
+    id:         o.id,
+    traderId:   o.traderId,
+    traderName: nomes.get(o.traderId) ?? 'Trader',
+    result:     o.result,
+    amount:     Number(o.amount),
+    pnl:        Number(o.pnl),
+    settledAt:  o.settledAt ?? o.createdAt,
+  }))
+}
+
 // "Meus Traders" — assinaturas ativas + resumo das ops geradas.
 export async function listMyTraders(userId: string): Promise<MyTraderRow[]> {
   const subs = await prisma.userCopyTrader.findMany({

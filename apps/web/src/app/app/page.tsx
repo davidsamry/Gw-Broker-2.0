@@ -474,10 +474,10 @@ export default function TradingPage() {
       // On mobile the user wants to scan their full history — chart on top
       // would steal vertical space. Show the panel full-screen, matching
       // the SUPORTE/CONTA pattern.
-      if (isMobile) return <HistoricoPanel onClose={() => setSidebarTab('TRADE')} isDemo={authStore.isDemo} />
+      if (isMobile) return <HistoricoPanel onClose={() => setSidebarTab('TRADE')} />
       return (
         <div className="flex flex-1 min-h-0 overflow-hidden">
-          <HistoricoPanel onClose={() => setSidebarTab('TRADE')} isDemo={authStore.isDemo} />
+          <HistoricoPanel onClose={() => setSidebarTab('TRADE')} />
           <TradingChart asset={selectedAsset} marketPrice={displayPrice} hasFreshTicker={hasFreshTicker} onInfoClick={() => setAssetInfoOpen(true)} theme={theme} autoScroll={tradeSettings.autoScroll} performanceMode={tradeSettings.performanceMode} activeTrades={activeTrades} chartTradeEvents={chartTradeEvents} />
         </div>
       )

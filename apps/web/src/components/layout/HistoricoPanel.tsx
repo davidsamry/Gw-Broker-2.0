@@ -5,32 +5,50 @@ import { X, ChevronDown, ArrowUp, ArrowDown, Package } from 'lucide-react'
 import { ASSETS } from '@/lib/mockData'
 import { cn } from '@/lib/utils'
 import { FlagPair } from '@/components/ui/FlagPair'
-import { useOperationsStore, type ApiOperation } from '@/store/operations'
+import { useOperationsStore, type ApiOperation, type ApiCopyOperation } from '@/store/operations'
+import { useAuthStore } from '@/store/auth'
 
 interface HistoricoPanelProps {
   onClose: () => void
-  isDemo: boolean
 }
 
 type Filter = 'FINALIZADAS' | 'PENDENTES' | 'TODAS'
 
+// De onde a linha veio. Antes o painel so' escrevia "CONTA REAL" no topo e
+// listava TUDO embaixo — ops da demo apareciam sob o rotulo de real, e as de
+// copy nao apareciam de jeito nenhum (moram em outra tabela). Agora cada
+// linha diz o que e'.
+export type OpKind = 'REAL' | 'DEMO' | 'COPY'
+
 interface Item {
   id:        string
+  kind:      OpKind
+  ts:        number  // epoch ms — ordena as 3 origens numa lista so'
   date:      string  // "22 Mai"
   time:      string  // "23:36"
   symbol:    string
   code1:     string
   code2:     string
-  direction: 'CALL' | 'PUT'
+  // Copy nao tem CALL/PUT: o usuario nao escolheu direcao, so' seguiu o
+  // trader. Sem direcao, a seta nao aparece.
+  direction?: 'CALL' | 'PUT'
   amount:    number
   status:    'OPEN' | 'WON' | 'LOST' | 'CANCELLED' | 'DRAW'
   profit:    number  // R$
   payout:    number  // %
+  // Resultado liquido ja' calculado. So' o copy usa: a perda dele pode vir
+  // capada no saldo disponivel (pnl -3 numa op de 7), entao derivar
+  // "-amount" mostraria um numero que nunca saiu da conta.
+  net?:      number
+  // Percentual da perda. Ausente = 100%, que e' a regra da opcao binaria:
+  // perdeu, perdeu a entrada inteira. So' o copy preenche, pelo mesmo
+  // motivo do `net` acima — perda capada nao e' perda de 100%.
+  lossPct?:  number
 }
 
 const MONTHS_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
-function toItem(op: ApiOperation): Item {
+function toItem(op: ApiOperation, kind: OpKind): Item {
   const dt = new Date(op.closedAt ?? op.expiresAt ?? op.openedAt)
   const time = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   const date = `${dt.getDate().toString().padStart(2, '0')} ${MONTHS_PT[dt.getMonth()]}`
@@ -40,6 +58,8 @@ function toItem(op: ApiOperation): Item {
   const parts = op.assetId.split('-')
   return {
     id:        op.id,
+    kind,
+    ts:        dt.getTime(),
     date,
     time,
     symbol:    asset?.symbol ?? op.assetSymbol,
@@ -53,16 +73,53 @@ function toItem(op: ApiOperation): Item {
   }
 }
 
-export function HistoricoPanel({ onClose, isDemo }: HistoricoPanelProps) {
+// Op de copy -> Item. Nao tem ativo nem direcao: o "simbolo" e' o nome do
+// trader. O percentual sai do pnl real sobre o valor da op, em vez de um
+// payout fixo — se a perda veio capada, o numero reflete isso.
+function copyToItem(op: ApiCopyOperation): Item {
+  const dt   = new Date(op.settledAt)
+  const time = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const date = `${dt.getDate().toString().padStart(2, '0')} ${MONTHS_PT[dt.getMonth()]}`
+  const amount = Number(op.amount) || 0
+  const pnl    = Number(op.pnl)    || 0
+  return {
+    id:      op.id,
+    kind:    'COPY',
+    ts:      dt.getTime(),
+    date,
+    time,
+    symbol:  op.traderName,
+    code1:   '',
+    code2:   '',
+    amount,
+    status:  op.result === 'WIN' ? 'WON' : 'LOST',
+    profit:  pnl,
+    payout:  amount > 0 ? Math.round(Math.abs(pnl) / amount * 100) : 0,
+    net:     pnl,
+    lossPct: amount > 0 ? Math.round(Math.abs(pnl) / amount * 100) : 100,
+  }
+}
+
+export function HistoricoPanel({ onClose }: HistoricoPanelProps) {
   const [filter, setFilter]       = useState<Filter>('FINALIZADAS')
   const [filterOpen, setFilterOpen] = useState(false)
 
   // Read from the shared operations cache (hydrated by /auth/me on mount).
   // No more duplicate /operations fetches — the cache is already populated.
-  const operations = useOperationsStore((s) => s.operations)
-  const hydrated   = useOperationsStore((s) => s.hydrated)
-  const refetch    = useOperationsStore((s) => s.refetch)
-  const loading    = !hydrated
+  const operations     = useOperationsStore((s) => s.operations)
+  const copyOperations = useOperationsStore((s) => s.copyOperations)
+  const hydrated       = useOperationsStore((s) => s.hydrated)
+  const refetch        = useOperationsStore((s) => s.refetch)
+  const loading        = !hydrated
+
+  // accountId -> REAL | DEMO. A op carrega accountId; quem sabe o tipo e' o
+  // /auth/me. Sem esse mapa nao da' pra dizer de qual conta a linha veio.
+  const accounts = useAuthStore((s) => s.user?.accounts)
+  const tipoPorConta = useMemo(() => {
+    const m = new Map<string, OpKind>()
+    for (const a of accounts ?? []) m.set(a.id, a.type === 'DEMO' ? 'DEMO' : 'REAL')
+    return m
+  }, [accounts])
 
   // Refresh every 5s while the panel is open so pending ops update + new
   // resolutions appear without forcing a full page reload.
@@ -71,10 +128,19 @@ export function HistoricoPanel({ onClose, isDemo }: HistoricoPanelProps) {
     return () => clearInterval(tick)
   }, [refetch])
 
-  const ops = useMemo(
-    () => operations.map((o) => toItem(o as ApiOperation)),
-    [operations],
-  )
+  // REAL + DEMO + COPY numa lista so', ordenada por horario. Cada uma
+  // mantem a etiqueta da origem.
+  //
+  // Fallback 'REAL' quando o accountId nao esta' no mapa: acontece na
+  // janela entre o cache de ops pintar e o /auth/me chegar com as contas.
+  // E' o mesmo que a tela mostrava antes, so' que agora por poucos ms.
+  const ops = useMemo(() => {
+    const normais = operations.map((o) =>
+      toItem(o as ApiOperation, tipoPorConta.get((o as ApiOperation).accountId ?? '') ?? 'REAL'),
+    )
+    const copy = copyOperations.map(copyToItem)
+    return [...normais, ...copy].sort((a, b) => b.ts - a.ts)
+  }, [operations, copyOperations, tipoPorConta])
 
   const filtered = ops.filter((o) => {
     if (filter === 'PENDENTES')   return o.status === 'OPEN'
@@ -126,13 +192,6 @@ export function HistoricoPanel({ onClose, isDemo }: HistoricoPanelProps) {
         )}
       </div>
 
-      {/* Account label */}
-      <div className="px-4 pb-2">
-        <span className="text-[10px] font-bold text-blue-400 tracking-widest">
-          {isDemo ? 'CONTA DE PRÁTICA' : 'CONTA REAL'}
-        </span>
-      </div>
-
       {/* List */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
@@ -152,16 +211,53 @@ export function HistoricoPanel({ onClose, isDemo }: HistoricoPanelProps) {
   )
 }
 
+// Etiqueta da origem, ao lado do nome do ativo. Verde = dinheiro de
+// verdade, ambar = conta de pratica, azul = copy trading.
+const KINDS: Record<OpKind, { label: string; cls: string; title: string }> = {
+  REAL: {
+    label: 'REAL',
+    cls:   'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
+    title: 'Operação na conta real — dinheiro de verdade',
+  },
+  DEMO: {
+    label: 'DEMO',
+    cls:   'bg-amber-500/15 text-amber-300 border-amber-500/40',
+    title: 'Operação na conta de prática — saldo fictício',
+  },
+  COPY: {
+    label: 'COPY',
+    cls:   'bg-blue-500/15 text-blue-300 border-blue-500/40',
+    title: 'Copy Trading — operação copiada de um trader, liquidada na conta real',
+  },
+}
+
+function KindBadge({ kind }: { kind: OpKind }) {
+  const k = KINDS[kind]
+  return (
+    <span
+      title={k.title}
+      className={cn(
+        'flex-shrink-0 px-1.5 py-px rounded border text-[9px] font-black tracking-wide leading-[14px]',
+        k.cls,
+      )}
+    >
+      {k.label}
+    </span>
+  )
+}
+
 function HistoricoItem({ item }: { item: Item }) {
   const won  = item.status === 'WON'
   const lost = item.status === 'LOST'
   // DRAW = empate: saída igual à entrada, valor apostado devolvido. Não é
   // ganho nem perda — mostra R$ 0,00 / 0% em cinza, como as pendentes.
   const draw = item.status === 'DRAW'
-  // Profit display: won -> +profit, lost -> -amount, draw/pending -> 0
-  const net = won ? item.profit : lost ? -item.amount : 0
+  // Profit display: won -> +profit, lost -> -amount, draw/pending -> 0.
+  // item.net (copy) tem prioridade: la' o valor debitado pode ser menor que
+  // o valor da op, e mostrar -amount seria mentira.
+  const net = item.net ?? (won ? item.profit : lost ? -item.amount : 0)
   // Percentage: won -> +payout%, lost -> -100%, draw -> 0% (devolvido)
-  const pct = won ? `+${item.payout}%` : lost ? '-100%' : '0%'
+  const pct = won ? `+${item.payout}%` : lost ? `-${item.lossPct ?? 100}%` : '0%'
   const sign = net > 0 ? '+' : net < 0 ? '' : ''
   const netColor = won ? 'text-green-400' : lost ? 'text-red-400' : 'text-[#8b8f9a]'
 
@@ -182,27 +278,35 @@ function HistoricoItem({ item }: { item: Item }) {
             <span className="text-[10px] text-[#8b8f9a] leading-tight">{item.date}</span>
           </div>
 
-          {/* Asset icon */}
+          {/* Asset icon — copy nao tem ativo, entao usa a inicial do trader
+              num circulo azul (mesma cor da etiqueta COPY). */}
           <div className="flex-shrink-0">
-            {hasFlags
-              ? <FlagPair code1={item.code1} code2={item.code2} size={18} />
-              : <div className="w-[26px] h-[26px] rounded-full bg-gradient-to-br from-[#f7931a] to-[#ffb84d] flex items-center justify-center text-white text-[11px] font-black">
-                  {item.symbol[0]}
-                </div>
-            }
+            {item.kind === 'COPY' ? (
+              <div className="w-[26px] h-[26px] rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-[11px] font-black">
+                {item.symbol[0]?.toUpperCase() ?? 'C'}
+              </div>
+            ) : hasFlags ? (
+              <FlagPair code1={item.code1} code2={item.code2} size={18} />
+            ) : (
+              <div className="w-[26px] h-[26px] rounded-full bg-gradient-to-br from-[#f7931a] to-[#ffb84d] flex items-center justify-center text-white text-[11px] font-black">
+                {item.symbol[0]}
+              </div>
+            )}
           </div>
 
-          {/* Symbol */}
-          <span className="flex-1 text-[12px] font-semibold text-white whitespace-nowrap">
-            {item.symbol}
-          </span>
+          {/* Symbol + etiqueta da origem */}
+          <div className="flex-1 min-w-0 flex items-center gap-1.5">
+            <span className="text-[12px] font-semibold text-white truncate">
+              {item.symbol}
+            </span>
+            <KindBadge kind={item.kind} />
+          </div>
 
           {/* Right block: direction + profit */}
           <div className="flex flex-col items-end flex-shrink-0">
             <div className="flex items-center gap-1">
-              {item.direction === 'CALL'
-                ? <ArrowUp size={10} strokeWidth={3} className="text-green-400" />
-                : <ArrowDown size={10} strokeWidth={3} className="text-red-400" />}
+              {item.direction === 'CALL' && <ArrowUp   size={10} strokeWidth={3} className="text-green-400" />}
+              {item.direction === 'PUT'  && <ArrowDown size={10} strokeWidth={3} className="text-red-400" />}
               <span className="text-[11px] font-bold text-white">R$ {item.amount.toFixed(2).replace('.', ',')}</span>
             </div>
             <span className={cn('text-[10px] font-bold mt-0.5', netColor)}>

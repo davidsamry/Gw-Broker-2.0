@@ -3,6 +3,7 @@ import { getSettings } from '../settings/service.js'
 import {
   listTraders,
   listMyTraders,
+  listCopyOperations,
   copyTrader,
   cancelCopy,
 } from './service.js'
@@ -30,6 +31,22 @@ export async function copyRoutes(app: FastifyInstance) {
     try {
       const traders = await listMyTraders(userId)
       return reply.send({ traders })
+    } catch (err) {
+      req.log.error(err)
+      return reply.status(500).send({ error: 'INTERNAL_ERROR' })
+    }
+  })
+
+  // Ops de copy liquidadas — alimenta o Historico Trading, que mostra
+  // REAL, DEMO e COPY juntos.
+  //
+  // SEM o gate de copyTradeEnabled de proposito: desligar o copy no admin
+  // para de gerar ops novas, nao apaga as que ja' mexeram no saldo. Ler o
+  // proprio extrato tem que continuar funcionando.
+  app.get('/operations', async (req, reply) => {
+    const userId = ((req as any).user.sub) as string
+    try {
+      return reply.send({ operations: await listCopyOperations(userId) })
     } catch (err) {
       req.log.error(err)
       return reply.status(500).send({ error: 'INTERNAL_ERROR' })

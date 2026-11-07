@@ -12,6 +12,7 @@ import {
 import { requestPasswordReset, resetPasswordWithToken } from './passwordReset.js'
 import { getSettings } from '../settings/service.js'
 import { listOperations } from '../operations/service.js'
+import { listCopyOperations } from '../copy/service.js'
 import { listWithdrawals } from '../withdrawals/service.js'
 import { listTransactions } from '../transactions/service.js'
 import { generateSecret, otpauthUrl, qrCodeDataUrl, verifyTotp } from './twoFactor.js'
@@ -338,9 +339,12 @@ export async function authRoutes(app: FastifyInstance) {
     try {
       // Fetch user + recent operations + withdrawals + transactions + KYC
       // submission in parallel — saves multiple RTTs on every page mount.
-      const [user, operations, withdrawals, transactions, kycSubmission] = await Promise.all([
+      // copyOperations vem junto pro Historico pintar REAL, DEMO e COPY
+      // de primeira, sem um segundo round-trip so' pras ops de copy.
+      const [user, operations, copyOperations, withdrawals, transactions, kycSubmission] = await Promise.all([
         getUserById(userId),
         listOperations(userId).catch(() => []),
+        listCopyOperations(userId).catch(() => []),
         listWithdrawals(userId).catch(() => []),
         listTransactions(userId).catch(() => []),
         getKycSubmission(userId).catch(() => null),
@@ -361,7 +365,7 @@ export async function authRoutes(app: FastifyInstance) {
         copyTradeEnabled:       s.copyTradeEnabled,
         safeModeEnabled:        s.safeModeEnabled,
       }
-      return reply.send({ user, operations, withdrawals, transactions, kycSubmission, settings })
+      return reply.send({ user, operations, copyOperations, withdrawals, transactions, kycSubmission, settings })
     } catch {
       return reply.status(404).send({ error: 'USER_NOT_FOUND' })
     }

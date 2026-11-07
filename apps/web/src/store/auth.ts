@@ -288,7 +288,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Hydrate operations + withdrawals caches from the same response —
       // eliminates the separate RTTs the panels used to fire on mount.
       if (Array.isArray(data.operations)) {
-        useOperationsStore.getState().hydrate(data.operations)
+        useOperationsStore.getState().hydrate(
+          data.operations,
+          Array.isArray(data.copyOperations) ? data.copyOperations : [],
+        )
       }
       if (Array.isArray(data.withdrawals)) {
         useWithdrawalsStore.getState().hydrate(data.withdrawals)
