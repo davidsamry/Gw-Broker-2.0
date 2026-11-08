@@ -221,7 +221,34 @@ function classificarFalha(err: any): { code: string; message: string } {
   if (code.endsWith('_NETWORK_ERROR') || code.endsWith('_MTLS_FAILED') || code.endsWith('_CERT_READ_FAILED')) {
     return { code: 'NETWORK_ERROR', message: `Falha de conexão com o gateway: ${code || msg}`.slice(0, 200) }
   }
-  return { code: 'ERROR', message: (code || msg || 'Erro desconhecido').slice(0, 200) }
+  // Inclui o HTTP recebido: sem ele o admin mostra so' um codigo opaco tipo
+  // SKALAPAY_REQUEST_FAILED e nao da' pra saber se foi 404, 422 ou 500.
+  const base = code || msg || 'Erro desconhecido'
+  return {
+    code: 'ERROR',
+    message: (Number.isFinite(http) ? `${base} (HTTP ${http})` : base).slice(0, 200),
+  }
+}
+
+/**
+ * O teste pede de proposito um recurso que nao existe. A pergunta nao e'
+ * "achou?", e' "o gateway aceitou minha credencial?".
+ *
+ * 401/403 = recusou. Timeout e falha de rede nem chegaram la' (sem
+ * httpStatus). QUALQUER outra resposta HTTP — 404, 400, 422, 500 — so'
+ * acontece depois do gateway autenticar o pedido, entao a credencial
+ * presta.
+ *
+ * Isso nasceu de um falso negativo em producao: o teste da SkalaPay exigia
+ * 404 pro id inexistente, a SkalaPay respondeu outro status, e o admin
+ * acusou SKALAPAY_REQUEST_FAILED num gateway que estava processando
+ * depositos reais naquele minuto. Credencial errada la' da' 401
+ * ("Credenciais de integracao invalidas"), que continua sendo pego.
+ */
+function credencialFoiAceita(err: any): boolean {
+  const http = Number(err?.httpStatus)
+  if (!Number.isFinite(http)) return false   // timeout / rede / erro interno
+  return http !== 401 && http !== 403
 }
 
 async function executarTeste(id: GatewayId): Promise<{ code: string; message: string }> {
@@ -235,8 +262,7 @@ async function executarTeste(id: GatewayId): Promise<{ code: string; message: st
         // txid de formato válido (32 chars) que nunca vai existir.
         await versell.getCharge('0'.repeat(32))
       } catch (err: any) {
-        // 404 = autenticou e não achou. É o resultado esperado.
-        if (err?.code !== 'VERSELL_NOT_FOUND') throw err
+        if (!credencialFoiAceita(err)) throw err
       }
       return { code: 'OK', message: 'Credenciais e mTLS aceitos pela Versell.' }
     }
@@ -244,7 +270,7 @@ async function executarTeste(id: GatewayId): Promise<{ code: string; message: st
       try {
         await skalapay.getCashinStatus('999999999')
       } catch (err: any) {
-        if (Number(err?.httpStatus) !== 404) throw err
+        if (!credencialFoiAceita(err)) throw err
       }
       return { code: 'OK', message: 'Credenciais aceitas pela SkalaPay.' }
     }
