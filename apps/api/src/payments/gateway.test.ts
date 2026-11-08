@@ -59,16 +59,43 @@ describe('testGatewayCredentials', () => {
     expect(r).toMatchObject({ ok: true, code: 'OK' })
   })
 
-  // O caso real de producao.
-  it('skalapay: status inesperado (500) nao e falha de credencial', async () => {
-    getCashinStatus.mockRejectedValue(erro('SKALAPAY_REQUEST_FAILED', 500))
-    const r = await testGatewayCredentials('skalapay')
-    expect(r).toMatchObject({ ok: true, code: 'OK' })
+  // 4xx fora de 401/403: o gateway autenticou e processou — o id e' que e'
+  // falso de proposito. Era aqui que a sonda amarrada ao 404 reprovava.
+  it('skalapay: 422 no id inexistente nao e falha de credencial', async () => {
+    getCashinStatus.mockRejectedValue(erro('SKALAPAY_REQUEST_FAILED', 422))
+    expect(await testGatewayCredentials('skalapay')).toMatchObject({ ok: true, code: 'OK' })
   })
 
-  it('skalapay: 422 tambem passa', async () => {
-    getCashinStatus.mockRejectedValue(erro('SKALAPAY_REQUEST_FAILED', 422))
+  it('skalapay: 400 tambem passa', async () => {
+    getCashinStatus.mockRejectedValue(erro('SKALAPAY_REQUEST_FAILED', 400))
     expect(await testGatewayCredentials('skalapay')).toMatchObject({ ok: true })
+  })
+
+  it('skalapay: 429 (limite) tambem prova que autenticou', async () => {
+    getCashinStatus.mockRejectedValue(erro('SKALAPAY_REQUEST_FAILED', 429))
+    expect(await testGatewayCredentials('skalapay')).toMatchObject({ ok: true })
+  })
+
+  // O caso real de 08/11/2026: Cloudflare 504 porque a origem da SkalaPay
+  // nao respondeu. NAO pode virar "credenciais aceitas" — nao testamos nada.
+  it('skalapay: 504 do CDN e gateway fora do ar, nao credencial ok', async () => {
+    getCashinStatus.mockRejectedValue(erro('SKALAPAY_REQUEST_FAILED', 504))
+    const r = await testGatewayCredentials('skalapay')
+    expect(r.ok).toBe(false)
+    expect(r.code).toBe('GATEWAY_DOWN')
+    expect(r.message).toContain('504')
+  })
+
+  it('skalapay: 500 e 503 tambem caem em GATEWAY_DOWN', async () => {
+    for (const http of [500, 503]) {
+      getCashinStatus.mockRejectedValue(erro('SKALAPAY_REQUEST_FAILED', http))
+      expect(await testGatewayCredentials('skalapay')).toMatchObject({ ok: false, code: 'GATEWAY_DOWN' })
+    }
+  })
+
+  it('versell: 502 tambem e gateway fora do ar', async () => {
+    getCharge.mockRejectedValue(erro('VERSELL_REQUEST_FAILED', 502))
+    expect(await testGatewayCredentials('versell')).toMatchObject({ ok: false, code: 'GATEWAY_DOWN' })
   })
 
   it('skalapay: 401 e credencial recusada', async () => {

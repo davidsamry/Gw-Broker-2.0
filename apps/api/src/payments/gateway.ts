@@ -223,6 +223,18 @@ function classificarFalha(err: any): { code: string; message: string } {
   }
   // Inclui o HTTP recebido: sem ele o admin mostra so' um codigo opaco tipo
   // SKALAPAY_REQUEST_FAILED e nao da' pra saber se foi 404, 422 ou 500.
+  // 5xx: ou o provedor quebrou, ou o CDN dele desistiu de esperar a origem.
+  // Em 08/11/2026 a SkalaPay devolveu 504 do Cloudflare ("Error 504: Gateway
+  // time-out") no POST /cash-in. Nao diz nada sobre a nossa credencial, e
+  // nao ha' nada pra corrigir do nosso lado — precisa aparecer como tal, em
+  // vez de um codigo generico que faz procurar erro onde nao tem.
+  if (http >= 500 && http < 600) {
+    return {
+      code: 'GATEWAY_DOWN',
+      message: `O provedor respondeu erro de servidor (HTTP ${http}). O problema e' do lado dele — as credenciais nao estao em questao.`,
+    }
+  }
+
   const detalhe = err?.detail ? String(err.detail).replace(/\s+/g, ' ').trim().slice(0, 160) : ''
   const partes = [
     code || msg || 'Erro desconhecido',
@@ -237,8 +249,12 @@ function classificarFalha(err: any): { code: string; message: string } {
  * "achou?", e' "o gateway aceitou minha credencial?".
  *
  * 401/403 = recusou. Timeout e falha de rede nem chegaram la' (sem
- * httpStatus). QUALQUER outra resposta HTTP — 404, 400, 422, 500 — so'
- * acontece depois do gateway autenticar o pedido, entao a credencial
+ * httpStatus). 5xx tambem nao conta: o provedor quebrou ou o CDN dele
+ * cortou antes da origem responder, entao nao aprendemos nada sobre a
+ * credencial — dizer "aceita" ali seria falso positivo.
+ *
+ * Sobram os 4xx fora de 401/403 — 400, 404, 422, 429. Esses so' acontecem
+ * depois do gateway autenticar e processar o pedido, entao a credencial
  * presta.
  *
  * Isso nasceu de um falso negativo em producao: o teste da SkalaPay exigia
@@ -249,8 +265,9 @@ function classificarFalha(err: any): { code: string; message: string } {
  */
 function credencialFoiAceita(err: any): boolean {
   const http = Number(err?.httpStatus)
-  if (!Number.isFinite(http)) return false   // timeout / rede / erro interno
-  return http !== 401 && http !== 403
+  if (!Number.isFinite(http)) return false            // timeout / rede
+  if (http === 401 || http === 403) return false      // recusa explicita
+  return http >= 400 && http < 500                    // autenticou e processou
 }
 
 async function executarTeste(id: GatewayId): Promise<{ code: string; message: string }> {
