@@ -174,9 +174,22 @@ export async function createPixDeposit(userId: string, input: CreatePixDepositIn
     // Grava o motivo na propria linha. Antes so existia no log do container,
     // e pra descobrir a causa das 71 falhas historicas foi preciso deduzir
     // pelo intervalo createdAt→updatedAt. Agora aparece direto no admin.
+    // O codigo sozinho nao basta. Em 08/11/2026 um deposito falhou com
+    // SKALAPAY_REQUEST_FAILED — que significa apenas "o gateway respondeu
+    // algo que nao e' 2xx nem 401/403". Sem o status HTTP e sem o corpo da
+    // resposta nao deu pra dizer se foi 400 de payload, 422 de validacao,
+    // 429 de limite ou 500 do provedor. Agora os tres vao pro notes, que o
+    // admin ja' mostra no tooltip do status.
+    //
+    // O corpo e' a resposta DELES (ja' cortada em 400 chars no cliente) —
+    // nunca carrega a nossa credencial, que so' viaja em header.
     const motivo = err?.name === 'TimeoutError' || err?.name === 'AbortError'
       ? `timeout na ${provider.id.toUpperCase()} ao gerar a cobranca`
-      : String(err?.code ?? err?.message ?? err).slice(0, 180)
+      : [
+          String(err?.code ?? err?.message ?? err),
+          Number.isFinite(Number(err?.httpStatus)) ? `HTTP ${err.httpStatus}` : null,
+          err?.detail ? `resposta: ${String(err.detail).replace(/\s+/g, ' ').trim().slice(0, 200)}` : null,
+        ].filter(Boolean).join(' · ').slice(0, 400)
     await prisma.$executeRaw`
       UPDATE deposits
       SET status = 'FAILED'::"DepositStatus", "updatedAt" = NOW(),

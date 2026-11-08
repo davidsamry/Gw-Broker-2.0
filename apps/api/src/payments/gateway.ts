@@ -223,11 +223,13 @@ function classificarFalha(err: any): { code: string; message: string } {
   }
   // Inclui o HTTP recebido: sem ele o admin mostra so' um codigo opaco tipo
   // SKALAPAY_REQUEST_FAILED e nao da' pra saber se foi 404, 422 ou 500.
-  const base = code || msg || 'Erro desconhecido'
-  return {
-    code: 'ERROR',
-    message: (Number.isFinite(http) ? `${base} (HTTP ${http})` : base).slice(0, 200),
-  }
+  const detalhe = err?.detail ? String(err.detail).replace(/\s+/g, ' ').trim().slice(0, 160) : ''
+  const partes = [
+    code || msg || 'Erro desconhecido',
+    Number.isFinite(http) ? `HTTP ${http}` : '',
+    detalhe && `resposta: ${detalhe}`,
+  ].filter(Boolean)
+  return { code: 'ERROR', message: partes.join(' · ').slice(0, 300) }
 }
 
 /**
