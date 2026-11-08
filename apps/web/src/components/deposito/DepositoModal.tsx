@@ -103,7 +103,7 @@ export function DepositoModal({ onClose, initialBonusCode, onSwitchToUsdt }: Dep
   // waiting sequentially for both fetches. If the bonus has a higher
   // minDeposit, the available-list handler below bumps it + re-validates.
   const [amount, setAmount]   = useState<string>(initialBonusCode ? '100' : '')
-  const [cpfDigits, setCpfDigits] = useState<string>(profileCpf ?? '')
+  const [cpfDigits, setCpfDigits] = useState<string>(unmaskCpf(profileCpf ?? ''))
   const [error, setError]     = useState('')
   const [loading, setLoading] = useState(false)
   const [deposit, setDeposit] = useState<CreatedDeposit | null>(null)
@@ -404,6 +404,11 @@ function FormStep({
   onApplyManual, onRemoveBonus,
   min, max,
 }: FormStepProps) {
+  // CPF valido no perfil = campo escondido. Avaliado so' pelo perfil, nao
+  // pelo que esta' digitado: se fosse por cpfDigits, o campo sumiria no
+  // meio da digitacao de quem nao tem CPF, ao completar o 11o digito.
+  const cpfDoCadastro = (profileCpf ?? '').replace(/\D/g, '').length === 11
+
   return (
     <div className="flex flex-col gap-4">
       {/* Valor do depósito */}
@@ -453,15 +458,19 @@ function FormStep({
         </div>
       </div>
 
-      {/* CPF */}
+      {/* Progresso da geracao. Fica aqui, logo abaixo do valor, e nao embaixo
+          do botao: no celular o fim do modal costuma estar fora da tela, e o
+          usuario clicava em "Gerar" sem ver que algo estava acontecendo. */}
+      {loading && <GerandoPix />}
+
+      {/* CPF — so' aparece quando o cadastro NAO tem CPF valido. Quem ja' tem
+          via um campo que nao pedia nada, so' repetia o que veio do perfil
+          (com o selo "cadastrado"). O valor continua indo no payload: o
+          cpfDigits nasce do profileCpf. */}
+      {!cpfDoCadastro && (
       <div>
         <div className="flex items-baseline justify-between mb-2">
           <label className="text-[11px] font-bold text-[#bdc1cf] uppercase tracking-wide">CPF do pagador</label>
-          {cpfDigits.length === 11 && profileCpf === cpfDigits && (
-            <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-              <Check size={10} /> cadastrado
-            </span>
-          )}
         </div>
         <input
           inputMode="numeric"
@@ -481,6 +490,7 @@ function FormStep({
           <p className="text-[10px] text-amber-400 mt-1.5">CPF deve ter 11 dígitos</p>
         )}
       </div>
+      )}
 
       {/* Bonus */}
       <div>
@@ -587,8 +597,6 @@ function FormStep({
           ? (<><Loader2 size={14} className="animate-spin" /> Gerando seu PIX…</>)
           : (<><QrCode size={15} /> Gerar QR Code PIX</>)}
       </button>
-
-      {loading && <GerandoPix />}
     </div>
   )
 }
