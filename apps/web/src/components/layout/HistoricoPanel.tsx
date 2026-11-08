@@ -48,10 +48,26 @@ interface Item {
 
 const MONTHS_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
+// Linha de baixo do horario: "Hoje" para operacoes de hoje, "07 Nov" para o
+// resto. Compara dia/mes/ano no fuso do navegador (o mesmo do horario
+// mostrado em cima), entao 23:59 de ontem nao vira "Hoje".
+//
+// O painel recalcula a lista a cada refetch (5s), entao quem deixar aberto
+// virando a meia-noite ve "Hoje" trocar pela data sozinho.
+function rotuloData(dt: Date): string {
+  const hoje = new Date()
+  const mesmoDia =
+    dt.getDate()     === hoje.getDate() &&
+    dt.getMonth()    === hoje.getMonth() &&
+    dt.getFullYear() === hoje.getFullYear()
+  if (mesmoDia) return 'Hoje'
+  return `${dt.getDate().toString().padStart(2, '0')} ${MONTHS_PT[dt.getMonth()]}`
+}
+
 function toItem(op: ApiOperation, kind: OpKind): Item {
   const dt = new Date(op.closedAt ?? op.expiresAt ?? op.openedAt)
   const time = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  const date = `${dt.getDate().toString().padStart(2, '0')} ${MONTHS_PT[dt.getMonth()]}`
+  const date = rotuloData(dt)
   // Look up asset in catalog to use the short symbol (e.g. "BTC/USDT") and
   // accurate flag codes — same name shown in the header asset tabs.
   const asset = ASSETS.find((a) => a.id === op.assetId)
@@ -79,7 +95,7 @@ function toItem(op: ApiOperation, kind: OpKind): Item {
 function copyToItem(op: ApiCopyOperation): Item {
   const dt   = new Date(op.settledAt)
   const time = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  const date = `${dt.getDate().toString().padStart(2, '0')} ${MONTHS_PT[dt.getMonth()]}`
+  const date = rotuloData(dt)
   const amount = Number(op.amount) || 0
   const pnl    = Number(op.pnl)    || 0
   return {
