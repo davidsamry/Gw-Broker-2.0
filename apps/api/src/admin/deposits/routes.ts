@@ -8,6 +8,7 @@ const listQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(5).max(100).optional(),
   search:   z.string().trim().min(1).optional(),
   status:   z.enum(['ALL', 'PENDING', 'PAID', 'FAILED', 'CANCELLED']).optional(),
+  period:   z.enum(['today', 'yesterday', 'month', 'all']).optional(),
 })
 
 const fakeBodySchema = z.object({
@@ -61,7 +62,13 @@ export async function depositsAdminRoutes(app: FastifyInstance) {
         resourceType: 'DEPOSIT',
         resourceId:   id,
         action:       'DELETE',
-        before:       { status: before.status, amount: before.amount },
+        // createdAt (ISO, UTC) deixa a taxa de conversao contar este PIX
+        // excluido no dia em que ele foi gerado.
+        before:       {
+          status:    before.status,
+          amount:    before.amount,
+          createdAt: new Date(before.createdAt).toISOString(),
+        },
         after:        null,
       })
       return reply.send({ ok: true })

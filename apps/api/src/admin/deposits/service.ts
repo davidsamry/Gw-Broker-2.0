@@ -29,11 +29,16 @@ export interface DepositRow {
   userCreatedAt: Date
 }
 
+export type DepositPeriod = 'today' | 'yesterday' | 'month' | 'all'
+
 export interface ListDepositsParams {
   page?:     number
   pageSize?: number
   search?:   string
   status?:   'ALL' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED'
+  /** Recorte por data de criacao, no horario de Brasilia. Default 'all'
+   *  aqui; quem escolhe 'today' como padrao e' a tela. */
+  period?:   DepositPeriod
 }
 
 export interface DepositCounts {
@@ -43,6 +48,14 @@ export interface DepositCounts {
   totalAmount:  string  // sum of all deposits
   paidAmount:   string  // sum of PAID
   ticketAvg:    string  // avg of PAID (the "ticket médio")
+  // Taxa de conversao = paid / (qrGenerated + deleted)
+  /** PIX cujo QR chegou ao usuario: tudo menos FAILED (erro do gateway,
+   *  o usuario nunca viu QR — nao e' desistencia dele). */
+  qrGenerated:  number
+  /** PIX excluidos pelo admin no periodo. Saem da tabela, mas eram PIX
+   *  gerados e nao pagos: sem eles a conversao fica inflada (em 11/11 a
+   *  tabela tinha 6 de 6 pagos; 14 tinham sido excluidos). */
+  deleted:      number
 }
 
 export interface ListDepositsResponse {
@@ -51,6 +64,27 @@ export interface ListDepositsResponse {
   page:     number
   pageSize: number
   counts:   DepositCounts
+}
+
+// Fuso do negocio. O banco grava createdAt em UTC ("timestamp without time
+// zone") e o container roda em UTC: sem converter, "hoje" comecaria as 21h
+// de ontem no horario de Brasilia.
+const TZ = 'America/Sao_Paulo'
+
+/** Coluna createdAt (UTC, sem fuso) convertida pro horario de Brasilia. */
+function localDe(col: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`((${col} AT TIME ZONE 'UTC') AT TIME ZONE ${TZ})`
+}
+
+/** Condicao SQL que limita uma data LOCAL ao periodo escolhido. */
+function noPeriodo(local: Prisma.Sql, period: DepositPeriod): Prisma.Sql {
+  const agora = Prisma.sql`(NOW() AT TIME ZONE ${TZ})`
+  switch (period) {
+    case 'today':     return Prisma.sql`(${local})::date = (${agora})::date`
+    case 'yesterday': return Prisma.sql`(${local})::date = (${agora})::date - 1`
+    case 'month':     return Prisma.sql`date_trunc('month', ${local}) = date_trunc('month', ${agora})`
+    default:          return Prisma.sql`TRUE`
+  }
 }
 
 function decimalToString(x: any): string {
@@ -65,7 +99,10 @@ export async function listAdminDeposits(params: ListDepositsParams): Promise<Lis
   const pageSize = Math.min(100, Math.max(5, params.pageSize ?? 25))
   const offset   = (page - 1) * pageSize
 
-  const where: Prisma.Sql[] = []
+  const period = params.period ?? 'all'
+  const filtroPeriodo = noPeriodo(localDe(Prisma.sql`d."createdAt"`), period)
+
+  const where: Prisma.Sql[] = [filtroPeriodo]
   if (params.search) {
     const q = `%${params.search.trim()}%`
     where.push(Prisma.sql`(u.email ILIKE ${q} OR u.name ILIKE ${q})`)
@@ -75,7 +112,7 @@ export async function listAdminDeposits(params: ListDepositsParams): Promise<Lis
   }
   const whereSql = where.length ? Prisma.sql`WHERE ${Prisma.join(where, ' AND ')}` : Prisma.empty
 
-  const [rows, countRows, kpiRows] = await Promise.all([
+  const [rows, countRows, kpiRows, deletedRows] = await Promise.all([
     prisma.$queryRaw<any[]>`
       SELECT
         d.id, d."accountId",
@@ -102,12 +139,13 @@ export async function listAdminDeposits(params: ListDepositsParams): Promise<Lis
       INNER JOIN users    u ON u.id = a."userId"
       ${whereSql}
     `,
-    // Global KPI block — not affected by current filter; matches the
-    // header cards on the reference UI (Depósitos Gerados / Pagos / Médio).
+    // KPIs dos cards. Seguem o PERIODO, mas nao a busca nem a aba de
+    // status — os cards descrevem o periodo inteiro.
     prisma.$queryRaw<Array<{
       total:        bigint
       paid:         bigint
       pending:      bigint
+      qrGenerated:  bigint
       totalAmount:  any
       paidAmount:   any
       ticketAvg:    any
@@ -116,10 +154,33 @@ export async function listAdminDeposits(params: ListDepositsParams): Promise<Lis
         COUNT(*)::bigint                                                                  AS total,
         COUNT(*) FILTER (WHERE status = 'PAID'::"DepositStatus")::bigint                  AS paid,
         COUNT(*) FILTER (WHERE status = 'PENDING'::"DepositStatus")::bigint               AS pending,
+        COUNT(*) FILTER (WHERE status <> 'FAILED'::"DepositStatus")::bigint               AS "qrGenerated",
         COALESCE(SUM(amount), 0)                                                          AS "totalAmount",
         COALESCE(SUM(amount) FILTER (WHERE status = 'PAID'::"DepositStatus"), 0)          AS "paidAmount",
         COALESCE(AVG(amount) FILTER (WHERE status = 'PAID'::"DepositStatus"), 0)          AS "ticketAvg"
-      FROM deposits
+      FROM deposits d
+      WHERE ${filtroPeriodo}
+    `,
+    // PIX excluidos no periodo, contados pelo log de auditoria (a linha em
+    // deposits nao existe mais). Nunca sao PAID — so' PENDING, CANCELLED e
+    // FAILED podem ser excluidos — entao so' entram no denominador.
+    //
+    // Data usada: a de criacao do PIX, gravada no log desde 12/11/2026.
+    // Exclusoes anteriores nao tem esse campo e caem na data da exclusao,
+    // que costuma ser o mesmo dia ou o seguinte.
+    //
+    // FAILED fica de fora pelo mesmo motivo do qrGenerated: o usuario nunca
+    // recebeu QR.
+    prisma.$queryRaw<Array<{ deleted: bigint }>>`
+      SELECT COUNT(*)::bigint AS deleted
+      FROM admin_audit_log l
+      WHERE l."resourceType" = 'DEPOSIT'
+        AND l.action = 'DELETE'
+        AND COALESCE(l.before->>'status', '') <> 'FAILED'
+        AND ${noPeriodo(
+          Prisma.sql`(COALESCE((l.before->>'createdAt')::timestamptz, l."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${TZ})`,
+          period,
+        )}
     `,
   ])
 
@@ -142,6 +203,8 @@ export async function listAdminDeposits(params: ListDepositsParams): Promise<Lis
       totalAmount: decimalToString(kpi?.totalAmount),
       paidAmount:  decimalToString(kpi?.paidAmount),
       ticketAvg:   decimalToString(kpi?.ticketAvg),
+      qrGenerated: Number(kpi?.qrGenerated ?? 0),
+      deleted:     Number(deletedRows[0]?.deleted ?? 0),
     },
   }
 }
@@ -219,10 +282,13 @@ const DELETAVEIS = new Set(['PENDING', 'CANCELLED', 'FAILED'])
 // pagamento que nunca vem — cancela junto. Grants ACTIVE/COMPLETED não
 // existem para depósito não pago, então não há risco de mexer em bônus
 // já creditado.
-export async function deleteDeposit(depositId: string): Promise<{ status: string; amount: string }> {
+export async function deleteDeposit(depositId: string): Promise<{ status: string; amount: string; createdAt: Date }> {
   return prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ status: string; amount: string }>>`
-      SELECT status::text AS status, amount::text AS amount
+    // createdAt vai pro log de auditoria: e' o que deixa a taxa de
+    // conversao contar este PIX no dia em que foi GERADO, depois que a
+    // linha some da tabela.
+    const rows = await tx.$queryRaw<Array<{ status: string; amount: string; createdAt: Date }>>`
+      SELECT status::text AS status, amount::text AS amount, "createdAt"
       FROM deposits WHERE id = ${depositId} LIMIT 1
     `
     const dep = rows[0]

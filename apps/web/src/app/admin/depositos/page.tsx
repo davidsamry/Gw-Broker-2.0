@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import {
-  ArrowDownToLine, DollarSign, CheckCircle2, Receipt, RefreshCw, Search, Trash2,
+  ArrowDownToLine, DollarSign, CheckCircle2, Receipt, RefreshCw, Search, Trash2, Percent,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -37,6 +37,10 @@ interface Counts {
   totalAmount:  string
   paidAmount:   string
   ticketAvg:    string
+  /** PIX com QR entregue ao usuario (tudo menos FAILED). */
+  qrGenerated:  number
+  /** PIX excluidos no admin no periodo — entram no denominador. */
+  deleted:      number
 }
 
 interface ListResponse {
@@ -48,6 +52,17 @@ interface ListResponse {
 }
 
 type StatusFilter = 'ALL' | 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED'
+
+// Periodo por data de criacao, no horario de Brasilia (o backend converte).
+// "Tudo" nao foi pedido, mas sem ele a busca por nome so' acharia depositos
+// de hoje — atendimento procurando o PIX de semana passada ficaria sem saida.
+type Period = 'today' | 'yesterday' | 'month' | 'all'
+const PERIODOS: { id: Period; label: string }[] = [
+  { id: 'today',     label: 'Hoje'     },
+  { id: 'yesterday', label: 'Ontem'    },
+  { id: 'month',     label: 'Este mês' },
+  { id: 'all',       label: 'Tudo'     },
+]
 // Status que o backend aceita excluir: nenhum deles creditou saldo.
 // Espelha DELETAVEIS em api/src/admin/deposits/service.ts.
 const DELETAVEIS = new Set<DepositRow['status']>(['PENDING', 'CANCELLED', 'FAILED'])
@@ -63,6 +78,7 @@ export default function AdminDepositsPage() {
   // 300ms debounce — input stays instant, API only fires after typing pause.
   const debouncedSearch     = useDebounce(search, 300)
   const [status, setStatus] = useState<StatusFilter>('ALL')
+  const [period, setPeriod] = useState<Period>('today')
   const [page, setPage]     = useState(1)
 
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -73,6 +89,7 @@ export default function AdminDepositsPage() {
       const params: any = { page, pageSize: PAGE_SIZE }
       if (debouncedSearch.trim()) params.search = debouncedSearch.trim()
       if (status !== 'ALL') params.status = status
+      params.period = period
       const res = await api.get<ListResponse>('/admin/deposits', { params })
       setData(res.data)
     } catch {
@@ -80,9 +97,9 @@ export default function AdminDepositsPage() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, status, page])
+  }, [debouncedSearch, status, period, page])
 
-  useEffect(() => { setPage(1) }, [debouncedSearch, status])
+  useEffect(() => { setPage(1) }, [debouncedSearch, status, period])
   useEffect(() => { load() }, [load])
 
   // Só PENDING/CANCELLED — o backend recusa PAID (creditou saldo). Serve
@@ -128,6 +145,22 @@ Ele some da lista. Nenhum saldo é alterado.`)) return
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1
   const counts = data?.counts
 
+  // Pagos ÷ PIX gerados. O denominador soma os excluidos: o admin apaga PIX
+  // abandonado da lista, e so' pela tabela a conversao de 11/11 daria 100%
+  // (6 de 6) quando foi 30% (6 de 20). O hint mostra a conta inteira pra
+  // ninguem estranhar a diferenca com o card "Depósitos Gerados".
+  const conversao = (() => {
+    const pagos = counts?.paid ?? 0
+    const den   = (counts?.qrGenerated ?? 0) + (counts?.deleted ?? 0)
+    if (!den) return { texto: '—', hint: 'nenhum PIX gerado no período' }
+    const pct = (pagos / den) * 100
+    const excl = counts?.deleted ? ` · ${counts.deleted} excluídos` : ''
+    return {
+      texto: `${pct.toFixed(1).replace('.', ',')}%`,
+      hint:  `${pagos} pagos de ${den} PIX gerados${excl}`,
+    }
+  })()
+
   return (
     <div className="px-6 py-6 max-w-[1400px] mx-auto">
       {/* Topbar */}
@@ -149,8 +182,26 @@ Ele some da lista. Nenhum saldo é alterado.`)) return
         </button>
       </div>
 
+      {/* Periodo — muda os cards, as abas e a lista juntos */}
+      <div className="flex items-center gap-1 mb-4 p-1 rounded-lg bg-[#13161f] border border-[#1f232e] w-fit">
+        {PERIODOS.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => setPeriod(p.id)}
+            className={cn(
+              'px-3 py-1.5 rounded-md text-xs font-semibold transition-colors',
+              period === p.id
+                ? 'bg-emerald-500/15 text-emerald-300'
+                : 'text-[#8b8f9a] hover:text-white',
+            )}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
       {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         <KpiCard
           label="Depósitos Gerados"
           value={String(counts?.total ?? 0)}
@@ -173,6 +224,13 @@ Ele some da lista. Nenhum saldo é alterado.`)) return
           icon={<DollarSign size={14} />}
           tone="bg-yellow-500/15 text-yellow-400"
         />
+        <KpiCard
+          label="Taxa de Conversão"
+          value={conversao.texto}
+          hint={conversao.hint}
+          icon={<Percent size={14} />}
+          tone="bg-violet-500/15 text-violet-400"
+        />
       </div>
 
       {/* Tabs */}
@@ -193,6 +251,16 @@ Ele some da lista. Nenhum saldo é alterado.`)) return
             className="w-full h-9 bg-[#1a1e2a] border border-[#1f232e] rounded-lg pl-8 pr-3 text-xs text-white placeholder-[#8b8f9a] outline-none focus:border-emerald-500/50"
           />
         </div>
+        {/* A busca respeita o periodo. Quem procura um nome geralmente quer
+            o historico todo — um clique tira o recorte. */}
+        {search.trim() && period !== 'all' && (
+          <button
+            onClick={() => setPeriod('all')}
+            className="mt-1.5 text-[11px] text-[#8b8f9a] hover:text-emerald-300 transition-colors"
+          >
+            Buscando só em “{PERIODOS.find((p) => p.id === period)?.label}”. Buscar em todo o período →
+          </button>
+        )}
       </div>
 
       {error && (
@@ -222,7 +290,7 @@ Ele some da lista. Nenhum saldo é alterado.`)) return
                 <tr><td colSpan={8} className="py-12 text-center text-sm text-[#8b8f9a]">Carregando…</td></tr>
               ) : data && data.deposits.length === 0 ? (
                 <tr><td colSpan={8} className="py-12 text-center text-sm text-[#8b8f9a]">
-                  Nenhum depósito encontrado.
+                  Nenhum depósito {period === 'all' ? 'encontrado' : `em “${PERIODOS.find((p) => p.id === period)?.label}”`}.
                 </td></tr>
               ) : (
                 data?.deposits.map((d) => (
